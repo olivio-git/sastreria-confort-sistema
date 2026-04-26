@@ -1,0 +1,11 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Eliminar Cliente{% endblock %}
+{% block contenido %}
+<h1>Eliminar Cliente</h1>
+<p>¿Estás seguro de que deseas eliminar al cliente <strong>{{ cliente }}</strong>?</p>
+<form method="post">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-danger">Eliminar</button>
+    <a href="{% url 'lista_clientes' %}" class="btn btn-secondary">Cancelar</a>
+</form>
+{% endblock %}

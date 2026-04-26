@@ -1,0 +1,86 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Lista de Inventario{% endblock %}
+{% block contenido %}
+<div class="container py-4" style="background-color: #f1f5f9;">
+    <h2 class="mb-4">Lista de Inventario</h2>
+    
+    {% if messages %}
+        <div class="alert alert-info">
+            {% for message in messages %}
+                {{ message }}
+            {% endfor %}
+        </div>
+    {% endif %}
+    
+    <div class="mb-3">
+        <form method="get" class="row g-3">
+            <div class="col-md-3">
+                <input type="text" name="codigo" value="{{ codigo }}" class="form-control" placeholder="Código (ej. INV-001)">
+            </div>
+            <div class="col-md-3">
+                <input type="text" name="articulo" value="{{ articulo }}" class="form-control" placeholder="Artículo">
+            </div>
+            <div class="col-md-3">
+                <select name="estado" class="form-control">
+                    <option value="ACT" {% if estado == 'ACT' %}selected{% endif %}>Activo</option>
+                    <option value="BAJ" {% if estado == 'BAJ' %}selected{% endif %}>Baja</option>
+                    <option value="" {% if not estado %}selected{% endif %}>Todos</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <button type="submit" class="btn btn-primary">Buscar</button>
+                <a href="{% url 'lista_inventario' %}" class="btn btn-secondary">Limpiar</a>
+            </div>
+        </form>
+    </div>
+    
+    <div class="mb-3">
+        <a href="{% url 'crear_inventario' %}" class="btn btn-success">Crear Artículo de Inventario</a>
+    </div>
+    
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Código</th>
+                <th>Artículo</th>
+                <th>Cantidad</th>
+                <th>Costo</th>
+                <th>Precio</th>
+                <th>Fecha de Ingreso</th>
+                <th>Categoría</th>
+                <th>Estado</th>
+                <th>Última Modificación</th>
+                <th>Acciones</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for inventario in page_obj %}
+            <tr>
+                <td>{{ inventario.codigo }}</td>
+                <td>{{ inventario.articulo }}</td>
+                <td>{{ inventario.cantidad }}</td>
+                <td>{{ inventario.costo|floatformat:2|default:"-" }}</td>
+                <td>{{ inventario.precio|floatformat:2 }}</td>
+                <td>{{ inventario.fecha_ingreso|date:"d/m/Y" }}</td>
+                <td>{{ inventario.categoria|default:"Sin categoría" }}</td>
+                <td>{{ inventario.get_estado_display }}</td>
+                <td>{{ inventario.ultima_modificacion|date:"d/m/Y H:i" }}</td>
+                <td>
+                    <a href="{% url 'editar_inventario' inventario.id %}" class="btn btn-sm btn-primary"><i class="bi bi-pencil"></i> Editar</a>
+                    <a href="{% url 'eliminar_inventario' inventario.id %}" class="btn btn-sm btn-danger"><i class="bi bi-trash"></i> Eliminar</a>
+                    {% if inventario.estado == 'ACT' %}
+                        <a href="{% url 'dar_baja_inventario' inventario.id %}" class="btn btn-sm btn-warning"><i class="bi bi-arrow-down-circle"></i> Dar de Baja</a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="10" class="text-center">No hay artículos en inventario. Usa los filtros para buscar.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    
+    {% include 'misastreria/paginacion.html' with search_params=search_params %}
+</div>
+{% endblock %}

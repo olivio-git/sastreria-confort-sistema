@@ -1,0 +1,71 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}{{ titulo }}{% endblock %}
+{% block contenido %}
+<div class="container py-4">
+    <h2 class="mb-4">{{ titulo }}</h2>
+    {% if messages %}
+        <div class="alert {% if 'error' in message.tags %}alert-danger{% else %}alert-info{% endif %}">
+            {% for message in messages %}
+                {{ message }}
+            {% endfor %}
+        </div>
+    {% endif %}
+    <form method="post" id="ventaForm">
+        {% csrf_token %}
+        <div class="row g-3">
+            {% for field in form %}
+                <div class="col-md-6">
+                    <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.errors %}
+                        <div class="alert alert-danger mt-1 py-1">{{ field.errors }}</div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+            <div class="col-md-6">
+                <label for="precio_total_display" class="form-label">Precio Total</label>
+                <input type="text" id="precio_total_display" class="form-control" readonly value="{% if form.instance.pk %}{{ form.instance.precio_total|floatformat:2 }}{% else %}0.00{% endif %}">
+            </div>
+        </div>
+        <div class="mt-4">
+            <button type="submit" class="btn btn-primary">Guardar</button>
+            <a href="{% url 'lista_ventas' %}" class="btn btn-secondary">Cancelar</a>
+        </div>
+    </form>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script>
+$(document).ready(function() {
+    function updatePrecioTotal() {
+        var articuloId = $('#id_articulo').val();
+        var cantidad = parseInt($('#id_cantidad').val()) || 0;
+        
+        if (articuloId && cantidad > 0) {
+            $.ajax({
+                url: '{% url 'get_precio_articulo' %}',
+                data: { articulo_id: articuloId },
+                success: function(data) {
+                    if (data.precio) {
+                        var precioTotal = (data.precio * cantidad).toFixed(2);
+                        $('#precio_total_display').val(precioTotal);
+                    } else {
+                        $('#precio_total_display').val('0.00');
+                    }
+                },
+                error: function() {
+                    $('#precio_total_display').val('0.00');
+                }
+            });
+        } else {
+            $('#precio_total_display').val('0.00');
+        }
+    }
+
+    $('#id_articulo, #id_cantidad').on('change keyup', updatePrecioTotal);
+    
+    // Ejecutar al cargar la página si hay datos iniciales
+    updatePrecioTotal();
+});
+</script>
+{% endblock %}

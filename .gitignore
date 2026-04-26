@@ -1,0 +1,40 @@
+# Archivos de base de datos
+*.sqlite3
+*.db
+
+# Archivos compilados de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Archivos estáticos generados por collectstatic (solo raíz)
+staticfiles/
+/static/
+
+# Entorno virtual
+venv/
+env/
+
+# Archivos de configuración sensible
+.env
+
+# Archivos de sistema
+*.log
+
+# Directorio temporal del dev anterior (código duplicado)
+temp_upload/
+
+# Archivos binarios y dumps locales
+manage.zip
+*.sql
+
+# Settings local (solo para desarrollo)
+sastreria/settings_local.py
+
+# Archivos de cPanel/Passenger (solo producción)
+passenger_wsgi.py
+.htaccess
+Procfile
+stderr.log
+tmp/

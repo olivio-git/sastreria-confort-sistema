@@ -1,0 +1,57 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Reporte de Días Trabajados{% endblock %}
+{% block contenido %}
+<div class="container py-4" style="background-color: #f1f5f9;">
+    <h2 class="mb-4">Reporte de Días Trabajados - {{ month }}/{{ year }}</h2>
+    <form method="get" class="mb-4">
+        <div class="row">
+            <div class="col-md-3">
+                <label for="month" class="form-label">Mes</label>
+                <select name="month" id="month" class="form-control">
+                    {% for mes in meses %}
+                    <option value="{{ mes.valor }}" {% if mes.valor == month %}selected{% endif %}>{{ mes.nombre }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label for="year" class="form-label">Año</label>
+                <select name="year" id="year" class="form-control">
+                    {% for ano in anos %}
+                    <option value="{{ ano }}" {% if ano == year %}selected{% endif %}>{{ ano }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3 align-self-end">
+                <button type="submit" class="btn btn-primary" style="background-color: #2563eb; border-color: #2563eb;">Filtrar</button>
+            </div>
+        </div>
+    </form>
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Empleado</th>
+                <th>Permisos</th>
+                <th>Faltas</th>
+                <th>Días Laborables</th>
+                <th>Días Trabajados</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for reporte in reportes %}
+            <tr>
+                <td>{{ reporte.empleado }}</td>
+                <td>{{ reporte.permisos }}</td>
+                <td>{{ reporte.faltas }}</td>
+                <td>{{ reporte.dias_laborables }}</td>
+                <td>{{ reporte.dias_trabajados }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="5">No hay empleados activos registrados.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <a href="{% url 'lista_empleados' %}" class="btn btn-secondary mt-3">Volver a Lista de Empleados</a>
+</div>
+{% endblock %}

@@ -1,0 +1,45 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Reporte de Ingresos{% endblock %}
+{% block contenido %}
+<h1>Reporte de Ingresos</h1>
+<form method="get" class="mb-3">
+    <div class="row">
+        <div class="col-md-4">
+            <label>Fecha Inicio</label>
+            <input type="date" name="fecha_inicio" class="form-control" value="{{ request.GET.fecha_inicio }}">
+        </div>
+        <div class="col-md-4">
+            <label>Fecha Fin</label>
+            <input type="date" name="fecha_fin" class="form-control" value="{{ request.GET.fecha_fin }}">
+        </div>
+        <div class="col-md-4 align-self-end">
+            <button type="submit" class="btn btn-primary">Filtrar</button>
+        </div>
+    </div>
+</form>
+<h4>Total de Ingresos: ${{ total_ingresos }}</h4>
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>Código</th>
+            <th>Tipo</th>
+            <th>Cliente</th>
+            <th>Fecha</th>
+            <th>Precio</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for transaccion in transacciones %}
+        <tr>
+            <td>{{ transaccion.codigo }}</td>
+            <td>{{ transaccion.get_tipo_transaccion_display }}</td>
+            <td>{{ transaccion.cliente }}</td>
+            <td>{{ transaccion.fecha|date:"d/m/Y" }}</td>
+            <td>{{ transaccion.precio }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5">No hay transacciones que coincidan con los filtros.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

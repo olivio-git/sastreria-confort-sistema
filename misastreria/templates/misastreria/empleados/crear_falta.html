@@ -1,0 +1,20 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Añadir Falta{% endblock %}
+{% block contenido %}
+<div class="container py-4" style="background-color: #f1f5f9;">
+    <h2 class="mb-4">Añadir Falta para {{ empleado }}</h2>
+    <form method="post">
+        {% csrf_token %}
+        <div class="mb-3">
+            <label for="id_fecha_falta" class="form-label">Fecha de Falta</label>
+            {{ form.fecha_falta }}
+        </div>
+        <div class="mb-3">
+            <label for="id_motivo" class="form-label">Motivo</label>
+            {{ form.motivo }}
+        </div>
+        <button type="submit" class="btn btn-primary" style="background-color: #2563eb; border-color: #2563eb;">Guardar</button>
+        <a href="{% url 'lista_empleados' %}" class="btn btn-secondary">Cancelar</a>
+    </form>
+</div>
+{% endblock %}

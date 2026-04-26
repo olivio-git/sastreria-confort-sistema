@@ -1,0 +1,35 @@
+{% extends 'misastreria/base.html' %}
+{% load static %}
+{% block titulo %}Crear Reparación{% endblock %}
+{% block contenido %}
+<div class="container py-4">
+    <h2 class="mb-4">Crear Reparación</h2>
+    {% if messages %}
+        <div class="alert {% if 'error' in message.tags %}alert-danger{% else %}alert-info{% endif %}">
+            {% for message in messages %}
+                {{ message }}
+            {% endfor %}
+        </div>
+    {% endif %}
+    {% if form.errors %}
+        <div class="alert alert-danger">
+            <p>Por favor, corrige los errores en el formulario:</p>
+            <ul>
+                {% for field, errors in form.errors.items %}
+                    {% for error in errors %}
+                        <li>{{ field }}: {{ error }}</li>
+                    {% endfor %}
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+    <form method="post" class="row g-3">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <div class="col-12">
+            <button type="submit" class="btn btn-primary">Guardar</button>
+            <a href="{% url 'lista_reparaciones' %}" class="btn btn-secondary">Cancelar</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

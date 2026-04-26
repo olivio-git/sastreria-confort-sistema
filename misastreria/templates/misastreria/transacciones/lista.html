@@ -1,0 +1,111 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Lista de Transacciones{% endblock %}
+{% block contenido %}
+<div class="container py-4" style="background-color: #f1f5f9;">
+    <h2 class="mb-4">Lista de Transacciones</h2>
+    
+    {% if messages %}
+        <div class="alert {% if 'error' in message.tags %}alert-danger{% else %}alert-info{% endif %}">
+            {% for message in messages %}
+                {{ message }}
+            {% endfor %}
+        </div>
+    {% endif %}
+    
+    <form method="get" class="row g-3 mb-4">
+        <div class="col-md-3">
+            <label for="codigo" class="form-label">Código</label>
+            <input type="text" name="codigo" id="codigo" value="{{ codigo }}" class="form-control" placeholder="Ej: TXN-001">
+        </div>
+        <div class="col-md-3">
+            <label for="tipo_transaccion" class="form-label">Tipo de Transacción</label>
+            <select name="tipo_transaccion" id="tipo_transaccion" class="form-control">
+                <option value="">Todos</option>
+                {% for value, label in tipo_transaccion_choices %}
+                    <option value="{{ value }}" {% if value == tipo_transaccion %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label for="descripcion" class="form-label">Descripción</label>
+            <input type="text" name="descripcion" id="descripcion" value="{{ descripcion }}" class="form-control" placeholder="Descripción">
+        </div>
+        <div class="col-md-3">
+            <label for="fecha" class="form-label">Fecha</label>
+            <input type="date" name="fecha" id="fecha" value="{{ fecha }}" class="form-control">
+        </div>
+        <div class="col-md-12 d-flex align-items-end">
+            <button type="submit" class="btn btn-primary me-2">Buscar</button>
+            <a href="{% url 'lista_transacciones' %}" class="btn btn-secondary">Limpiar</a>
+        </div>
+    </form>
+    
+    <div class="mb-3">
+        <a href="{% url 'crear_transaccion' %}" class="btn btn-success">Crear Transacción</a>
+    </div>
+    
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Código</th>
+                <th>Tipo</th>
+                <th>Descripción</th>
+                <th>Servicio</th>
+                <th>Fecha</th>
+                <th>Cantidad</th>
+                <th>Monto</th>
+                <th>Acciones</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for transaccion in page_obj %}
+            <tr>
+                <td>{{ transaccion.codigo }}</td>
+                <td>{{ transaccion.get_tipo_transaccion_display }}</td>
+                <td>{{ transaccion.descripcion|truncatechars:50 }}</td>
+                <td>{{ transaccion.get_tipo_servicio_display }}</td>
+                <td>{{ transaccion.fecha|date:"d/m/Y" }}</td>
+                <td>{{ transaccion.cantidad }}</td>
+                <td>${{ transaccion.monto|floatformat:2 }}</td>
+                <td>
+                    <a href="{% url 'editar_transaccion' transaccion.id %}" class="btn btn-sm btn-primary"><i class="bi bi-pencil"></i> Editar</a>
+                    <a href="{% url 'eliminar_transaccion' transaccion.id %}" class="btn btn-sm btn-danger"><i class="bi bi-trash"></i> Eliminar</a>
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="8" class="text-center">
+                    {% if codigo or tipo_transaccion or descripcion or fecha %}
+                        No se encontraron transacciones para los filtros aplicados.
+                    {% else %}
+                        Ingrese al menos un filtro para ver las transacciones.
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    
+    {% if page_obj.has_other_pages %}
+        <nav aria-label="Paginación">
+            <ul class="pagination">
+                {% if page_obj.has_previous %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% for key, value in search_params.items %}&{{ key }}={{ value|urlencode }}{% endfor %}">« Anterior</a>
+                    </li>
+                {% endif %}
+                {% for num in page_obj.paginator.page_range %}
+                    <li class="page-item {% if page_obj.number == num %}active{% endif %}">
+                        <a class="page-link" href="?page={{ num }}{% for key, value in search_params.items %}&{{ key }}={{ value|urlencode }}{% endfor %}">{{ num }}</a>
+                    </li>
+                {% endfor %}
+                {% if page_obj.has_next %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ page_obj.next_page_number }}{% for key, value in search_params.items %}&{{ key }}={{ value|urlencode }}{% endfor %}">Siguiente »</a>
+                    </li>
+                {% endif %}
+            </ul>
+        </nav>
+    {% endif %}
+</div>
+{% endblock %}

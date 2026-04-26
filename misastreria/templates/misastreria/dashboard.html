@@ -1,0 +1,128 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Dashboard - Sistema Financiero{% endblock %}
+{% block contenido %}
+<div class="container py-4" style="background-color: #f1f5f9;">
+    <div class="card text-white mb-4" style="background-color: #1e3a8a;">
+        <div class="card-body text-center">
+            <h2 class="card-title">Sistema Financiero</h2>
+            <p class="card-text">Bienvenido, {{ user.username }}. Gestiona todas las operaciones de la sastrería desde aquí.</p>
+        </div>
+    </div>
+    <div class="row row-cols-1 row-cols-md-3 g-4">
+        <div class="col">
+            <div class="card h-100 shadow-sm" style="background-color: #f8fafc;">
+                <div class="card-body text-center">
+                    <i class="bi bi-people-fill" style="font-size: 2rem; color: #2563eb;"></i>
+                    <h5 class="card-title mt-2">Empleados</h5>
+                    <p class="card-text">Gestiona la información de los empleados.</p>
+                    <a href="{% url 'lista_empleados' %}" class="btn btn-primary" style="background-color: #2563eb; border-color: #2563eb;">Ir a Empleados</a>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card h-100 shadow-sm" style="background-color: #f8fafc;">
+                <div class="card-body text-center">
+                    <i class="bi bi-person-lines-fill" style="font-size: 2rem; color: #2563eb;"></i>
+                    <h5 class="card-title mt-2">Clientes</h5>
+                    <p class="card-text">Administra los datos de los clientes.</p>
+                    <a href="{% url 'lista_clientes' %}" class="btn btn-primary" style="background-color: #2563eb; border-color: #2563eb;">Ir a Clientes</a>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card h-100 shadow-sm" style="background-color: #f8fafc;">
+                <div class="card-body text-center">
+                    <i class="bi bi-tools" style="font-size: 2rem; color: #2563eb;"></i>
+                    <h5 class="card-title mt-2">Reparaciones</h5>
+                    <p class="card-text">Registra y gestiona reparaciones de prendas.</p>
+                    <a href="{% url 'lista_reparaciones' %}" class="btn btn-primary" style="background-color: #2563eb; border-color: #2563eb;">Ir a Reparaciones</a>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card h-100 shadow-sm" style="background-color: #f8fafc;">
+                <div class="card-body text-center">
+                    <i class="bi bi-cart-fill" style="font-size: 2rem; color: #2563eb;"></i>
+                    <h5 class="card-title mt-2">Ventas</h5>
+                    <p class="card-text">Registra las ventas realizadas.</p>
+                    <a href="{% url 'lista_ventas' %}" class="btn btn-primary" style="background-color: #2563eb; border-color: #2563eb;">Ir a Ventas</a>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card h-100 shadow-sm" style="background-color: #f8fafc;">
+                <div class="card-body text-center">
+                    <i class="bi bi-scissors" style="font-size: 2rem; color: #2563eb;"></i>
+                    <h5 class="card-title mt-2">Confecciones</h5>
+                    <p class="card-text">Gestiona las confecciones de prendas.</p>
+                    <a href="{% url 'lista_confecciones' %}" class="btn btn-primary" style="background-color: #2563eb; border-color: #2563eb;">Ir a Confecciones</a>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card h-100 shadow-sm" style="background-color: #f8fafc;">
+                <div class="card-body text-center">
+                    <i class="bi bi-bag-fill" style="font-size: 2rem; color: #2563eb;"></i>
+                    <h5 class="card-title mt-2">Alquileres</h5>
+                    <p class="card-text">Administra los alquileres de prendas.</p>
+                    <a href="{% url 'lista_alquileres' %}" class="btn btn-primary" style="background-color: #2563eb; border-color: #2563eb;">Ir a Alquileres</a>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card h-100 shadow-sm" style="background-color: #f8fafc;">
+                <div class="card-body text-center">
+                    <i class="bi bi-currency-dollar" style="font-size: 2rem; color: #2563eb;"></i>
+                    <h5 class="card-title mt-2">Transacciones</h5>
+                    <p class="card-text">Registra las transacciones del negocio.</p>
+                    <a href="{% url 'lista_transacciones' %}" class="btn btn-primary" style="background-color: #2563eb; border-color: #2563eb;">Ir a Transacciones</a>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card h-100 shadow-sm" style="background-color: #f8fafc;">
+                <div class="card-body text-center">
+                    <i class="bi bi-box-seam" style="font-size: 2rem; color: #2563eb;"></i>
+                    <h5 class="card-title mt-2">Inventario</h5>
+                    <p class="card-text">Controla el inventario de artículos.</p>
+                    <a href="{% url 'lista_inventario' %}" class="btn btn-primary" style="background-color: #2563eb; border-color: #2563eb;">Ir a Inventario</a>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card h-100 shadow-sm" style="background-color: #f8fafc;">
+                <div class="card-body text-center">
+                    <i class="bi bi-bar-chart-fill" style="font-size: 2rem; color: #2563eb;"></i>
+                    <h5 class="card-title mt-2">Reportes</h5>
+                    <p class="card-text">Consulta reportes de empleados, clientes, artículos, stock e ingresos.</p>
+                    <div class="dropdown">
+                        <button class="btn btn-primary dropdown-toggle" type="button" id="reportesMenu" data-bs-toggle="dropdown" aria-expanded="false" style="background-color: #2563eb; border-color: #2563eb;">
+                            Ver Reportes
+                        </button>
+                        <ul class="dropdown-menu" aria-labelledby="reportesMenu">
+                            <li><a class="dropdown-item" href="{% url 'reporte_empleados' %}">Empleados</a></li>
+                            <li><a class="dropdown-item" href="{% url 'reporte_clientes' %}">Clientes</a></li>
+                            <li><a class="dropdown-item" href="{% url 'reporte_articulos' %}">Artículos</a></li>
+                            <li><a class="dropdown-item" href="{% url 'reporte_stock' %}">Stock</a></li>
+                            <li><a class="dropdown-item" href="{% url 'reporte_ingresos' %}">Ingresos</a></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<style>
+    .card {
+        transition: transform 0.2s;
+    }
+    .card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+    }
+    .btn-primary:hover {
+        background-color: #1e40af;
+        border-color: #1e40af;
+    }
+</style>
+{% endblock %}

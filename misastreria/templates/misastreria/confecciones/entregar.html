@@ -1,0 +1,22 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Confirmar Entrega: {{ confeccion.codigo }}{% endblock %}
+{% block contenido %}
+<div class="container py-4">
+    <h2 class="mb-4">Confirmar Entrega de Confección</h2>
+    {% if messages %}
+        <div class="alert {% if 'error' in messages.tags %}alert-danger{% else %}alert-info{% endif %}">
+            {% for message in messages %}
+                {{ message }}
+            {% endfor %}
+        </div>
+    {% endif %}
+    <p>¿Estás seguro de que deseas marcar la confección <strong>{{ confeccion.codigo }} - {{ confeccion.get_tipo_prenda_display }}</strong> como entregada? Esta acción establecerá el saldo a 0.</p>
+    <form method="post">
+        {% csrf_token %}
+        <div class="mt-4">
+            <button type="submit" class="btn btn-success">Confirmar Entrega</button>
+            <a href="{% url 'lista_confecciones' %}" class="btn btn-secondary">Cancelar</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

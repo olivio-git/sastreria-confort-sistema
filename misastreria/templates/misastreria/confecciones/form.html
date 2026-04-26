@@ -1,0 +1,172 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}{{ titulo }}{% endblock %}
+{% block contenido %}
+<h1>{{ titulo }}</h1>
+<form method="post">
+    {% csrf_token %}
+    <div class="card mb-3">
+        <div class="card-header">Información General</div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-4 mb-3">{{ form.codigo.label_tag }} {{ form.codigo }}</div>
+                <div class="col-md-4 mb-3">{{ form.fecha_inicio.label_tag }} {{ form.fecha_inicio }}</div>
+                <div class="col-md-4 mb-3">{{ form.tipo_prenda.label_tag }} {{ form.tipo_prenda }}</div>
+            </div>
+            <div class="row">
+                <div class="col-md-4 mb-3">{{ form.color.label_tag }} {{ form.color }}</div>
+                <div class="col-md-4 mb-3">{{ form.modelo.label_tag }} {{ form.modelo }}</div>
+                <div class="col-md-4 mb-3">{{ form.cliente.label_tag }} {{ form.cliente }}</div>
+            </div>
+            <div class="row">
+                <div class="col-md-4 mb-3">{{ form.empleado.label_tag }} {{ form.empleado }}</div>
+                <div class="col-md-8 mb-3">{{ form.observaciones.label_tag }} {{ form.observaciones }}</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Medidas -->
+    <div class="card mb-3">
+        <div class="card-header">Medidas</div>
+        <div class="card-body">
+            <!-- Pantalón -->
+            <div class="medidas-section" id="medidas-pantalon" style="display: none;">
+                <h5>Pantalón</h5>
+                <div class="row">
+                    <div class="col-md-4 mb-3">{{ form.pantalon_largo_total.label_tag }} {{ form.pantalon_largo_total }}</div>
+                    <div class="col-md-4 mb-3">{{ form.pantalon_contorno_cintura.label_tag }} {{ form.pantalon_contorno_cintura }}</div>
+                    <div class="col-md-4 mb-3">{{ form.pantalon_contorno_cadera.label_tag }} {{ form.pantalon_contorno_cadera }}</div>
+                </div>
+                <div class="row">
+                    <div class="col-md-4 mb-3">{{ form.pantalon_largo_entrepierna.label_tag }} {{ form.pantalon_largo_entrepierna }}</div>
+                    <div class="col-md-4 mb-3">{{ form.pantalon_contorno_pierna.label_tag }} {{ form.pantalon_contorno_pierna }}</div>
+                    <div class="col-md-4 mb-3">{{ form.pantalon_contorno_rodilla.label_tag }} {{ form.pantalon_contorno_rodilla }}</div>
+                </div>
+                <div class="row">
+                    <div class="col-md-4 mb-3">{{ form.pantalon_contorno_bota.label_tag }} {{ form.pantalon_contorno_bota }}</div>
+                    <div class="col-md-4 mb-3">{{ form.pantalon_tiro_delantero.label_tag }} {{ form.pantalon_tiro_delantero }}</div>
+                    <div class="col-md-4 mb-3">{{ form.pantalon_tiro_trasero.label_tag }} {{ form.pantalon_tiro_trasero }}</div>
+                </div>
+            </div>
+            <!-- Chaleco -->
+            <div class="medidas-section" id="medidas-chaleco" style="display: none;">
+                <h5>Chaleco</h5>
+                <div class="row">
+                    <div class="col-md-4 mb-3">{{ form.chaleco_contorno_busto.label_tag }} {{ form.chaleco_contorno_busto }}</div>
+                    <div class="col-md-4 mb-3">{{ form.chaleco_contorno_cintura.label_tag }} {{ form.chaleco_contorno_cintura }}</div>
+                    <div class="col-md-4 mb-3">{{ form.chaleco_contorno_cadera.label_tag }} {{ form.chaleco_contorno_cadera }}</div>
+                </div>
+                <div class="row">
+                    <div class="col-md-4 mb-3">{{ form.chaleco_largo_talle.label_tag }} {{ form.chaleco_largo_talle }}</div>
+                    <div class="col-md-4 mb-3">{{ form.chaleco_largo_total.label_tag }} {{ form.chaleco_largo_total }}</div>
+                    <div class="col-md-4 mb-3">{{ form.chaleco_altura_botones.label_tag }} {{ form.chaleco_altura_botones }}</div>
+                </div>
+            </div>
+            <!-- Saco -->
+            <div class="medidas-section" id="medidas-saco" style="display: none;">
+                <h5>Saco</h5>
+                <div class="row">
+                    <div class="col-md-4 mb-3">{{ form.saco_contorno_busto.label_tag }} {{ form.saco_contorno_busto }}</div>
+                    <div class="col-md-4 mb-3">{{ form.saco_contorno_cintura.label_tag }} {{ form.saco_contorno_cintura }}</div>
+                    <div class="col-md-4 mb-3">{{ form.saco_contorno_cadera.label_tag }} {{ form.saco_contorno_cadera }}</div>
+                </div>
+                <div class="row">
+                    <div class="col-md-4 mb-3">{{ form.saco_largo_talle.label_tag }} {{ form.saco_largo_talle }}</div>
+                    <div class="col-md-4 mb-3">{{ form.saco_largo_total.label_tag }} {{ form.saco_largo_total }}</div>
+                    <div class="col-md-4 mb-3">{{ form.saco_ancho_hombros.label_tag }} {{ form.saco_ancho_hombros }}</div>
+                </div>
+                <div class="row">
+                    <div class="col-md-4 mb-3">{{ form.saco_ancho_espalda.label_tag }} {{ form.saco_ancho_espalda }}</div>
+                    <div class="col-md-4 mb-3">{{ form.saco_contorno_brazo.label_tag }} {{ form.saco_contorno_brazo }}</div>
+                    <div class="col-md-4 mb-3">{{ form.saco_largo_manga.label_tag }} {{ form.saco_largo_manga }}</div>
+                </div>
+                <div class="row">
+                    <div class="col-md-4 mb-3">{{ form.saco_contorno_puno.label_tag }} {{ form.saco_contorno_puno }}</div>
+                </div>
+            </div>
+            <!-- Saco – Mujer -->
+            <div class="medidas-section" id="medidas-saco_mujer" style="display: none;">
+                <h5>Saco – Mujer</h5>
+                <div class="row">
+                    <div class="col-md-4 mb-3">{{ form.saco_mujer_contorno_busto.label_tag }} {{ form.saco_mujer_contorno_busto }}</div>
+                    <div class="col-md-4 mb-3">{{ form.saco_mujer_contorno_cintura.label_tag }} {{ form.saco_mujer_contorno_cintura }}</div>
+                    <div class="col-md-4 mb-3">{{ form.saco_mujer_contorno_cadera.label_tag }} {{ form.saco_mujer_contorno_cadera }}</div>
+                </div>
+                <div class="row">
+                    <div class="col-md-4 mb-3">{{ form.saco_mujer_ancho_hombros.label_tag }} {{ form.saco_mujer_ancho_hombros }}</div>
+                    <div class="col-md-4 mb-3">{{ form.saco_mujer_ancho_espalda.label_tag }} {{ form.saco_mujer_ancho_espalda }}</div>
+                    <div class="col-md-4 mb-3">{{ form.saco_mujer_largo_talle.label_tag }} {{ form.saco_mujer_largo_talle }}</div>
+                </div>
+                <div class="row">
+                    <div class="col-md-4 mb-3">{{ form.saco_mujer_largo_total.label_tag }} {{ form.saco_mujer_largo_total }}</div>
+                    <div class="col-md-4 mb-3">{{ form.saco_mujer_altura_busto.label_tag }} {{ form.saco_mujer_altura_busto }}</div>
+                    <div class="col-md-4 mb-3">{{ form.saco_mujer_separacion_busto.label_tag }} {{ form.saco_mujer_separacion_busto }}</div>
+                </div>
+                <div class="row">
+                    <div class="col-md-4 mb-3">{{ form.saco_mujer_dif_talle.label_tag }} {{ form.saco_mujer_dif_talle }}</div>
+                </div>
+            </div>
+            <!-- Chaleco – Mujer -->
+            <div class="medidas-section" id="medidas-chaleco_mujer" style="display: none;">
+                <h5>Chaleco – Mujer</h5>
+                <div class="row">
+                    <div class="col-md-4 mb-3">{{ form.chaleco_mujer_contorno_busto.label_tag }} {{ form.chaleco_mujer_contorno_busto }}</div>
+                    <div class="col-md-4 mb-3">{{ form.chaleco_mujer_contorno_cintura.label_tag }} {{ form.chaleco_mujer_contorno_cintura }}</div>
+                    <div class="col-md-4 mb-3">{{ form.chaleco_mujer_contorno_cadera.label_tag }} {{ form.chaleco_mujer_contorno_cadera }}</div>
+                </div>
+                <div class="row">
+                    <div class="col-md-4 mb-3">{{ form.chaleco_mujer_largo_talle.label_tag }} {{ form.chaleco_mujer_largo_talle }}</div>
+                    <div class="col-md-4 mb-3">{{ form.chaleco_mujer_largo_total.label_tag }} {{ form.chaleco_mujer_largo_total }}</div>
+                    <div class="col-md-4 mb-3">{{ form.chaleco_mujer_altura_busto.label_tag }} {{ form.chaleco_mujer_altura_busto }}</div>
+                </div>
+                <div class="row">
+                    <div class="col-md-4 mb-3">{{ form.chaleco_mujer_separacion_busto.label_tag }} {{ form.chaleco_mujer_separacion_busto }}</div>
+                    <div class="col-md-4 mb-3">{{ form.chaleco_mujer_largo_delantero.label_tag }} {{ form.chaleco_mujer_largo_delantero }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pagos y Fechas -->
+    <div class="card mb-3">
+        <div class="card-header">Pagos y Fechas</div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-4 mb-3">{{ form.precio.label_tag }} {{ form.precio }}</div>
+                <div class="col-md-4 mb-3">{{ form.adelanto.label_tag }} {{ form.adelanto }}</div>
+                <div class="col-md-4 mb-3">{{ form.saldo.label_tag }} {{ form.saldo }}</div>
+            </div>
+            <div class="row">
+                <div class="col-md-4 mb-3">{{ form.fecha_prueba.label_tag }} {{ form.fecha_prueba }}</div>
+                <div class="col-md-4 mb-3">{{ form.fecha_entrega.label_tag }} {{ form.fecha_entrega }}</div>
+                <div class="col-md-4 mb-3">{{ form.estado.label_tag }} {{ form.estado }}</div>
+            </div>
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Guardar</button>
+    <a href="{% url 'lista_confecciones' %}" class="btn btn-secondary">Cancelar</a>
+</form>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const tipoPrendaSelect = document.getElementById('id_tipo_prenda');
+    const medidasSections = document.querySelectorAll('.medidas-section');
+
+    function toggleMedidas() {
+        const tipoPrenda = tipoPrendaSelect.value;
+        medidasSections.forEach(section => {
+            section.style.display = section.id === `medidas-${tipoPrenda}` ? 'block' : 'none';
+            // Limpiar campos de medidas no visibles
+            if (section.style.display === 'none') {
+                section.querySelectorAll('input').forEach(input => {
+                    input.value = '';
+                });
+            }
+        });
+    }
+
+    tipoPrendaSelect.addEventListener('change', toggleMedidas);
+    toggleMedidas(); // Inicializar al cargar
+});
+</script>
+{% endblock %}

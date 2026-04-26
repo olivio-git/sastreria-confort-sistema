@@ -1,0 +1,81 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Lista de Alquileres{% endblock %}
+{% block contenido %}
+<div class="container py-4" style="background-color: #f1f5f9;">
+    <h2 class="mb-4">Lista de Alquileres</h2>
+    
+    {% if messages %}
+        <div class="alert alert-info">
+            {% for message in messages %}
+                {{ message }}
+            {% endfor %}
+        </div>
+    {% endif %}
+    
+    <div class="mb-3">
+        <form method="get" class="row g-3">
+            <div class="col-md-3">
+                <input type="text" name="codigo" value="{{ codigo }}" class="form-control" placeholder="Código (ej. ALQ-001)">
+            </div>
+            <div class="col-md-3">
+                <input type="text" name="articulo" value="{{ articulo }}" class="form-control" placeholder="Artículo">
+            </div>
+            <div class="col-md-3">
+                <input type="date" name="fecha" value="{{ fecha }}" class="form-control" placeholder="Fecha de Alquiler">
+            </div>
+            <div class="col-md-3">
+                <button type="submit" class="btn btn-primary">Buscar</button>
+                <a href="{% url 'lista_alquileres' %}" class="btn btn-secondary">Limpiar</a>
+            </div>
+        </form>
+    </div>
+    
+    <div class="mb-3">
+        <a href="{% url 'crear_alquiler' %}" class="btn btn-success">Crear Alquiler</a>
+    </div>
+    
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Código</th>
+                <th>Fecha de Alquiler</th>
+                <th>Artículo</th>
+                <th>Cantidad</th>
+                <th>Costo</th>
+                <th>Fecha de Devolución</th>
+                <th>Estado</th>
+                <th>Cliente</th>
+                <th>Acciones</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for alquiler in page_obj %}
+            <tr>
+                <td>{{ alquiler.codigo }}</td>
+                <td>{{ alquiler.fecha_alquiler|date:"d/m/Y" }}</td>
+                <td>{{ alquiler.articulo }}</td>
+                <td>{{ alquiler.cantidad }}</td>
+                <td>${{ alquiler.costo_alquiler|floatformat:2 }}</td>
+                <td>{{ alquiler.fecha_devolucion|date:"d/m/Y" }}</td>
+                <td>{{ alquiler.get_estado_display }}</td>
+                <td>{{ alquiler.cliente|default:"-" }}</td>
+                <td>
+                    <a href="{% url 'editar_alquiler' alquiler.id %}" class="btn btn-sm btn-primary"><i class="bi bi-pencil"></i> Editar</a>
+                    <a href="{% url 'eliminar_alquiler' alquiler.id %}" class="btn btn-sm btn-danger"><i class="bi bi-trash"></i> Eliminar</a>
+                    <a href="{% url 'exportar_comprobante_alquiler_pdf' alquiler.id %}" class="btn btn-sm btn-info"><i class="bi bi-file-pdf"></i> Comprobante</a>
+                    {% if alquiler.estado == 'alquilado' %}
+                    <a href="{% url 'devolver_alquiler' alquiler.id %}" class="btn btn-sm btn-success"><i class="bi bi-arrow-return-left"></i> Devolver</a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="9" class="text-center">No hay alquileres. Usa los filtros para buscar.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    
+    {% include 'misastreria/paginacion.html' with search_params=search_params %}
+</div>
+{% endblock %}

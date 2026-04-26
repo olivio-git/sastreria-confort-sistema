@@ -1,0 +1,11 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Eliminar Confección{% endblock %}
+{% block contenido %}
+<h1>Eliminar Confección</h1>
+<p>¿Estás seguro de que deseas eliminar la confección <strong>{{ confeccion.codigo }} - {{ confeccion.get_tipo_prenda_display }}</strong> para el cliente <strong>{{ confeccion.cliente }}</strong>?</p>
+<form method="post">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-danger">Eliminar</button>
+    <a href="{% url 'lista_confecciones' %}" class="btn btn-secondary">Cancelar</a>
+</form>
+{% endblock %}

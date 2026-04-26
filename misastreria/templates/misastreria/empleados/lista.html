@@ -1,0 +1,72 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Lista de Empleados{% endblock %}
+{% block contenido %}
+<div class="container py-4" style="background-color: #f1f5f9;">
+    <h2 class="mb-4">Lista de Empleados</h2>
+    <a href="{% url 'crear_empleado' %}" class="btn btn-primary mb-3" style="background-color: #2563eb; border-color: #2563eb;">Nuevo Empleado</a>
+    <a href="{% url 'reporte_dias_trabajados' %}" class="btn btn-success mb-3" style="background-color: #10b981; border-color: #10b981;">Reporte de Días Trabajados</a>
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Código</th>
+                <th>Nombre Completo</th>
+                <th>Celular</th>
+                <th>Email</th>
+                <th>Tipo de Contrato</th>
+                <th>Activo</th>
+                <th>Permisos</th>
+                <th>Faltas</th>
+                <th>Acciones</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for empleado in page_obj %}
+            <tr>
+                <td>{{ empleado.codigo }}</td>
+                <td>{{ empleado.nombres }} {{ empleado.apellido_paterno }} {{ empleado.apellido_materno }}</td>
+                <td>{{ empleado.celular }}</td>
+                <td>{{ empleado.email|default:"-" }}</td>
+                <td>{{ empleado.get_tipo_contrato_display }}</td>
+                <td>{{ empleado.activo|yesno:"Sí,No" }}</td>
+                <td>{{ empleado.permisos.count }}</td>
+                <td>{{ empleado.faltas.count }}</td>
+                <td>
+                    <a href="{% url 'editar_empleado' empleado.id %}" class="btn btn-sm btn-warning">Editar</a>
+                    <a href="{% url 'eliminar_empleado' empleado.id %}" class="btn btn-sm btn-danger">Eliminar</a>
+                    <a href="{% url 'crear_permiso' empleado.id %}" class="btn btn-sm btn-info">Añadir Permiso</a>
+                    <a href="{% url 'crear_falta' empleado.id %}" class="btn btn-sm btn-secondary">Añadir Falta</a>
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="9">No hay empleados registrados.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div class="pagination">
+        <span class="step-links">
+            {% if page_obj.has_previous %}
+                <a href="?page=1" class="btn btn-outline-primary">« Primera</a>
+                <a href="?page={{ page_obj.previous_page_number }}" class="btn btn-outline-primary">Anterior</a>
+            {% endif %}
+            <span class="current">
+                Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}.
+            </span>
+            {% if page_obj.has_next %}
+                <a href="?page={{ page_obj.next_page_number }}" class="btn btn-outline-primary">Siguiente</a>
+                <a href="?page={{ page_obj.paginator.num_pages }}" class="btn btn-outline-primary">Última »</a>
+            {% endif %}
+        </span>
+    </div>
+</div>
+<style>
+    .table th, .table td {
+        vertical-align: middle;
+    }
+    .btn:hover {
+        background-color: #1e40af;
+        border-color: #1e40af;
+    }
+</style>
+{% endblock %}

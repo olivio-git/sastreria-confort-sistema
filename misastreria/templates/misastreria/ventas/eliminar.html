@@ -1,0 +1,20 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Eliminar Venta{% endblock %}
+{% block contenido %}
+<div class="container py-4">
+    <h2 class="mb-4">Eliminar Venta: {{ venta.codigo }}</h2>
+    {% if messages %}
+        <div class="alert alert-info">
+            {% for message in messages %}
+                {{ message }}
+            {% endfor %}
+        </div>
+    {% endif %}
+    <p>¿Estás seguro de que deseas eliminar la venta <strong>{{ venta.codigo }}</strong> del artículo <strong>{{ venta.articulo }}</strong> para el cliente <strong>{{ venta.cliente|default:"sin cliente" }}</strong> del <strong>{{ venta.fecha_venta|date:"d/m/Y" }}</strong>?</p>
+    <form method="post">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-danger">Eliminar</button>
+        <a href="{% url 'lista_ventas' %}" class="btn btn-secondary">Cancelar</a>
+    </form>
+</div>
+{% endblock %}

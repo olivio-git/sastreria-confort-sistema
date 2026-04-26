@@ -1,0 +1,20 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Eliminar Reparación{% endblock %}
+{% block contenido %}
+<div class="container py-4">
+    <h2 class="mb-4">Eliminar Reparación: {{ reparacion.codigo }}</h2>
+    {% if messages %}
+        <div class="alert alert-info">
+            {% for message in messages %}
+                {{ message }}
+            {% endfor %}
+        </div>
+    {% endif %}
+    <p>¿Estás seguro de que deseas eliminar la reparación para el cliente {{ reparacion.cliente|default:"sin cliente" }}?</p>
+    <form method="post">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-danger">Eliminar</button>
+        <a href="{% url 'lista_reparaciones' %}" class="btn btn-secondary">Cancelar</a>
+    </form>
+</div>
+{% endblock %}

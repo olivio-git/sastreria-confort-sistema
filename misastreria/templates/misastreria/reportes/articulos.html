@@ -1,0 +1,42 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Reporte de Artículos{% endblock %}
+{% block contenido %}
+<h1>Reporte de Artículos</h1>
+<form method="get" class="mb-3">
+    <div class="row">
+        <div class="col-md-4">
+            <label>Fecha Inicio</label>
+            <input type="date" name="fecha_inicio" class="form-control" value="{{ request.GET.fecha_inicio }}">
+        </div>
+        <div class="col-md-4">
+            <label>Fecha Fin</label>
+            <input type="date" name="fecha_fin" class="form-control" value="{{ request.GET.fecha_fin }}">
+        </div>
+        <div class="col-md-4 align-self-end">
+            <button type="submit" class="btn btn-primary">Filtrar</button>
+        </div>
+    </div>
+</form>
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>Código</th>
+            <th>Artículo</th>
+            <th>Cantidad</th>
+            <th>Fecha de Ingreso</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for inventario in inventarios %}
+        <tr>
+            <td>{{ inventario.codigo }}</td>
+            <td>{{ inventario.articulo }}</td>
+            <td>{{ inventario.cantidad }}</td>
+            <td>{{ inventario.fecha_ingreso|date:"d/m/Y" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4">No hay artículos que coincidan con los filtros.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

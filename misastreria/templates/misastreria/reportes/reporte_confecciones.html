@@ -1,0 +1,151 @@
+{% extends 'misastreria/base.html' %}
+{% load static %}
+
+{% block titulo %}Reporte de Confecciones{% endblock %}
+
+{% block contenido %}
+<div class="container-fluid py-4">
+    <div class="row mb-4">
+        <div class="col-12 text-center">
+            <h1 class="display-6 fw-bold text-primary mb-1">SISTEMA DE GESTION SASTRERIA CONFORT Y MAS</h1>
+            <h2 class="h3 text-secondary">REPORTE DE CONFECCIONES</h2>
+        </div>
+    </div>
+
+    <div class="card shadow mb-4">
+        <div class="card-header py-3 bg-gradient-primary text-white">
+            <h6 class="m-0 font-weight-bold">Filtros de Reporte</h6>
+        </div>
+        <div class="card-body">
+            <form method="GET" action="{% url 'reporte_confecciones' %}" id="filter-form">
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-3">
+                        <label for="fecha_desde" class="form-label">Fecha Desde:</label>
+                        <input type="date" class="form-control" id="fecha_desde" name="fecha_desde" value="{{ selected_fecha_desde }}">
+                    </div>
+                    <div class="col-md-3">
+                        <label for="fecha_hasta" class="form-label">Fecha Hasta:</label>
+                        <input type="date" class="form-control" id="fecha_hasta" name="fecha_hasta" value="{{ selected_fecha_hasta }}">
+                    </div>
+                    <div class="col-md-3">
+                        <label for="cliente" class="form-label">Cliente:</label>
+                        <select class="form-select" id="cliente" name="cliente">
+                            <option value="">-- Seleccione Cliente --</option>
+                            {% for cliente in clientes %}
+                                <option value="{{ cliente.id }}" {% if selected_cliente|stringformat:"s" == cliente.id|stringformat:"s" %}selected{% endif %}>{{ cliente.nombres }} {{ cliente.apellido_paterno }} {{ cliente.apellido_materno }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="empleado" class="form-label">Encargado:</label>
+                        <select class="form-select" id="empleado" name="empleado">
+                            <option value="">-- Seleccione Encargado --</option>
+                            {% for empleado in empleados %}
+                                <option value="{{ empleado.id }}" {% if selected_empleado|stringformat:"s" == empleado.id|stringformat:"s" %}selected{% endif %}>{{ empleado.nombres }} {{ empleado.apellido_paterno }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="tipo_prenda" class="form-label">Tipo de Prenda:</label> {# Cambiado a tipo_prenda #}
+                        <select class="form-select" id="tipo_prenda" name="tipo_prenda"> {# Cambiado a tipo_prenda #}
+                            <option value="" {% if not selected_tipo_prenda %}selected{% endif %}>Todas las Prendas</option> {# Cambiado a tipo_prenda #}
+                            {% for key, value in tipo_prenda_choices %} {# Iterar sobre las opciones pasadas desde el contexto #}
+                                <option value="{{ key }}" {% if selected_tipo_prenda|stringformat:"s" == key|stringformat:"s" %}selected{% endif %}>{{ value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="estado" class="form-label">Estado:</label> {# Nuevo filtro de estado #}
+                        <select class="form-select" id="estado" name="estado">
+                            <option value="" {% if not selected_estado %}selected{% endif %}>Todos los Estados</option>
+                            {% for key, value in estado_choices %} {# Iterar sobre las opciones de estado #}
+                                <option value="{{ key }}" {% if selected_estado|stringformat:"s" == key|stringformat:"s" %}selected{% endif %}>{{ value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-6 text-end"> {# Ajustado el tamaño de la columna #}
+                        <button type="submit" class="btn btn-primary me-2"><i class="bi bi-filter me-1"></i> Aplicar Filtros</button>
+                        <a href="{% url 'reporte_confecciones' %}" class="btn btn-secondary"><i class="bi bi-x-circle me-1"></i> Limpiar Filtros</a>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card shadow mb-4">
+        <div class="card-header py-3 d-flex justify-content-between align-items-center bg-gradient-primary text-white">
+            <h6 class="m-0 font-weight-bold">Resultados del Reporte</h6>
+            <div>
+                <button type="button" class="btn btn-success me-2" onclick="exportReport('excel')"><i class="bi bi-file-earmark-excel me-1"></i> Exportar a Excel</button>
+                <button type="button" class="btn btn-danger" onclick="exportReport('pdf')"><i class="bi bi-file-earmark-pdf me-1"></i> Exportar a PDF</button>
+            </div>
+        </div>
+        <div class="card-body">
+            {% if confecciones %}
+            <div class="table-responsive">
+                <table class="table table-bordered table-striped" width="100%" cellspacing="0">
+                    <thead class="bg-light">
+                        <tr>
+                            <th>Código Conf.</th>
+                            <th>Fecha Inicio</th> {# Cambiado a Fecha Inicio #}
+                            <th>Cliente</th>
+                            <th>Encargado</th>
+                            <th>Tipo de Prenda</th> {# Cambiado a Tipo de Prenda #}
+                            <th>Estado</th> {# Nueva columna #}
+                            <th>Total (Bs.)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for confeccion in confecciones %}
+                        <tr>
+                            <td>{{ confeccion.codigo }}</td>
+                            <td>{{ confeccion.fecha_inicio|date:"d/m/Y" }}</td> {# Usar fecha_inicio #}
+                            <td>{{ confeccion.cliente.nombres }} {{ confeccion.cliente.apellido_paterno }} {{ confeccion.cliente.apellido_materno }}</td>
+                            <td>
+                                {% if confeccion.empleado %}
+                                    {{ confeccion.empleado.nombres }} {{ confeccion.empleado.apellido_paterno }}
+                                {% else %}
+                                    N/A
+                                {% endif %}
+                            </td>
+                            <td>{{ confeccion.get_tipo_prenda_display }}</td> {# Usar get_tipo_prenda_display #}
+                            <td>{{ confeccion.get_estado_display }}</td> {# Usar get_estado_display #}
+                            <td>{{ confeccion.precio|floatformat:2 }}</td> {# Usar precio #}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <th colspan="6" class="text-end text-primary">Total General:</th> {# Ajustado el colspan a 6 para 7 columnas en total #}
+                            <th class="text-success">Bs. {{ total_confecciones|floatformat:2 }}</th>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-center text-muted">No se encontraron confecciones para los filtros aplicados.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script>
+    function exportReport(format) {
+        const form = document.getElementById('filter-form');
+        const originalAction = form.action;
+        const originalMethod = form.method;
+
+        const exportInput = document.createElement('input');
+        exportInput.type = 'hidden';
+        exportInput.name = 'export_format';
+        exportInput.value = format;
+        form.appendChild(exportInput);
+
+        form.submit();
+
+        form.removeChild(exportInput);
+        form.action = originalAction;
+        form.method = originalMethod;
+    }
+</script>
+{% endblock %}

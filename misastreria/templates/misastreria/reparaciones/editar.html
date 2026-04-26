@@ -1,0 +1,40 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Editar Reparación: {{ reparacion.codigo }}{% endblock %}
+{% block contenido %}
+<div class="container py-4">
+    <h2 class="mb-4">Editar Reparación: {{ reparacion.codigo }}</h2>
+    {% if messages %}
+        <div class="alert {% if 'error' in messages.tags %}alert-danger{% else %}alert-info{% endif %}">
+            {% for message in messages %}
+                {{ message }}
+            {% endfor %}
+        </div>
+    {% endif %}
+    <form method="post">
+        {% csrf_token %}
+        <div class="row g-3">
+            {% for field in form %}
+                {% if field.name == 'otro_prenda' %}
+                    <div class="col-md-6" id="otro_prenda_container" style="display: {% if form.tipo_prenda.value == 'otro' %}block{% else %}none{% endif %};">
+                {% elif field.name == 'otro_reparacion' %}
+                    <div class="col-md-6" id="otro_reparacion_container" style="display: {% if form.tipo_reparacion.value == 'otro' %}block{% else %}none{% endif %};">
+                {% else %}
+                    <div class="col-md-6">
+                {% endif %}
+                    <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.errors %}
+                        <div class="alert alert-danger mt-1 py-1">{{ field.errors }}</div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+        <div class="mt-4">
+            <button type="submit" class="btn btn-primary">Guardar</button>
+            <a href="{% url 'lista_reparaciones' %}" class="btn btn-secondary">Cancelar</a>
+        </div>
+    </form>
+</div>
+{% block extra_js %}
+    <script src="{% static 'static/js/reparaciones.js' %}"></script>
+{% endblock %}

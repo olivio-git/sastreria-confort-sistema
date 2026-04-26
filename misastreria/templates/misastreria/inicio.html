@@ -1,0 +1,12 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Inicio{% endblock %}
+{% block contenido %}
+<h1>Bienvenido al Sistema de Sastrería</h1>
+<p>Gestiona empleados, clientes, servicios, transacciones, inventario y reportes.</p>
+<div class="row">
+    <div class="col-md-3"><a href="{% url 'lista_empleados' %}" class="btn btn-primary w-100 mb-2">Empleados</a></div>
+    <div class="col-md-3"><a href="{% url 'lista_clientes' %}" class="btn btn-primary w-100 mb-2">Clientes</a></div>
+    <div class="col-md-3"><a href="{% url 'lista_transacciones' %}" class="btn btn-primary w-100 mb-2">Transacciones</a></div>
+    <div class="col-md-3"><a href="{% url 'lista_inventario' %}" class="btn btn-primary w-100 mb-2">Inventario</a></div>
+</div>
+{% endblock %}
