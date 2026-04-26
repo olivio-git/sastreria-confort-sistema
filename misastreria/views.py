@@ -195,7 +195,6 @@ def reporte_dias_trabajados(request):
     })
 
 @login_required
-@login_required
 def lista_clientes(request):
     q = request.GET.get('q', '').strip()
     desde = request.GET.get('desde', '')
@@ -254,79 +253,77 @@ def eliminar_cliente(request, id):
         return redirect('lista_clientes')
     return render(request, 'misastreria/clientes/eliminar.html', {'cliente': cliente})
 
+def buscar_clientes(request):
+    q = request.GET.get('q', '').strip()
+    clientes = Cliente.objects.filter(
+        Q(nombres__icontains=q) | Q(apellido_paterno__icontains=q) |
+        Q(apellido_materno__icontains=q) | Q(ci__icontains=q)
+    ).order_by('nombres', 'apellido_paterno')[:10]
+    data = [{'id': c.id, 'ci': c.ci or '', 'nombre': str(c)} for c in clientes]
+    return JsonResponse(data, safe=False)
+
+@login_required
+def historial_cliente(request, id):
+    cliente = get_object_or_404(Cliente, id=id)
+    reparaciones = cliente.reparaciones.order_by('-creado')
+    confecciones = cliente.confeccion_set.order_by('-fecha_inicio')
+    alquileres = cliente.alquileres.order_by('-fecha_alquiler')
+    ventas = cliente.ventas.order_by('-fecha_venta')
+    return render(request, 'misastreria/clientes/historial.html', {
+        'cliente': cliente,
+        'reparaciones': reparaciones,
+        'confecciones': confecciones,
+        'alquileres': alquileres,
+        'ventas': ventas,
+    })
+
 @login_required
 def lista_reparaciones(request):
-    print("Accediendo a lista_reparaciones")  # Debug
-    codigo = request.GET.get('codigo', '').strip()
-    cliente = request.GET.get('cliente', '').strip()
-    tipo_prenda = request.GET.get('tipo_prenda', '').strip()
-    otro_prenda = request.GET.get('otro_prenda', '').strip()
-    fecha_entrega = request.GET.get('fecha_entrega', '').strip()
-    empleado = request.GET.get('empleado', '').strip()
+    q = request.GET.get('q', '').strip()
     estado = request.GET.get('estado', '').strip()
-    reparaciones = Reparacion.objects.none()  # Lista vacía por defecto
-    
-    if codigo or cliente or tipo_prenda or otro_prenda or fecha_entrega or empleado or estado:
-        reparaciones = Reparacion.objects.all()
-        if codigo:
-            reparaciones = reparaciones.filter(codigo__icontains=codigo)
-        if cliente:
-            reparaciones = reparaciones.filter(
-                Q(cliente__nombres__icontains=cliente) |
-                Q(cliente__apellido_paterno__icontains=cliente) |
-                Q(cliente__apellido_materno__icontains=cliente)
-            )
-        if tipo_prenda:
-            reparaciones = reparaciones.filter(tipo_prenda=tipo_prenda)
-        if otro_prenda:
-            reparaciones = reparaciones.filter(otro_prenda__icontains=otro_prenda, otro_prenda__isnull=False)
-        if fecha_entrega:
-            reparaciones = reparaciones.filter(fecha_entrega=fecha_entrega)
-        if empleado:
-            reparaciones = reparaciones.filter(
-                Q(empleado__nombres__icontains=empleado) |
-                Q(empleado__apellido_paterno__icontains=empleado) |
-                Q(empleado__apellido_materno__icontains=empleado)
-            )
-        if estado:
-            reparaciones = reparaciones.filter(estado=estado)
-    
-    paginator = Paginator(reparaciones, 10)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
-    
-    search_params = {}
-    if codigo:
-        search_params['codigo'] = codigo
-    if cliente:
-        search_params['cliente'] = cliente
-    if tipo_prenda:
-        search_params['tipo_prenda'] = tipo_prenda
-    if otro_prenda:
-        search_params['otro_prenda'] = otro_prenda
-    if fecha_entrega:
-        search_params['fecha_entrega'] = fecha_entrega
-    if empleado:
-        search_params['empleado'] = empleado
+    tipo_prenda = request.GET.get('tipo_prenda', '').strip()
+    desde = request.GET.get('desde', '')
+    hasta = request.GET.get('hasta', '')
+    periodo = request.GET.get('periodo', '')
+
+    hoy = date.today()
+    if periodo == 'semana':
+        desde = (hoy - timedelta(days=7)).isoformat()
+        hasta = hoy.isoformat()
+    elif periodo == 'mes':
+        desde = (hoy - timedelta(days=30)).isoformat()
+        hasta = hoy.isoformat()
+    elif periodo == '3meses' or (not desde and not hasta and not q and not estado and not tipo_prenda):
+        desde = (hoy - timedelta(days=90)).isoformat()
+        hasta = hoy.isoformat()
+
+    reparaciones = Reparacion.objects.order_by('-creado')
+
+    if q:
+        reparaciones = reparaciones.filter(
+            Q(codigo__icontains=q) |
+            Q(cliente__nombres__icontains=q) | Q(cliente__apellido_paterno__icontains=q) |
+            Q(cliente__ci__icontains=q)
+        )
     if estado:
-        search_params['estado'] = estado
-    
-    # Pasar choices al template
-    tipo_prenda_choices = Reparacion.TIPO_PRENDA_CHOICES
-    estado_choices = Reparacion.ESTADO_CHOICES
-    
+        reparaciones = reparaciones.filter(estado=estado)
+    if tipo_prenda:
+        reparaciones = reparaciones.filter(tipo_prenda=tipo_prenda)
+    if desde:
+        reparaciones = reparaciones.filter(creado__date__gte=desde)
+    if hasta:
+        reparaciones = reparaciones.filter(creado__date__lte=hasta)
+
+    paginator = Paginator(reparaciones, 15)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
     return render(request, 'misastreria/reparaciones/lista.html', {
         'page_obj': page_obj,
-        'codigo': codigo,
-        'cliente': cliente,
-        'tipo_prenda': tipo_prenda,
-        'otro_prenda': otro_prenda,
-        'fecha_entrega': fecha_entrega,
-        'empleado': empleado,
-        'estado': estado,
-        'search_params': search_params,
-        'tipo_prenda_choices': tipo_prenda_choices,
-        'estado_choices': estado_choices
+        'q': q, 'estado': estado, 'tipo_prenda': tipo_prenda,
+        'desde': desde, 'hasta': hasta, 'periodo': periodo,
+        'total': reparaciones.count(),
+        'tipo_prenda_choices': Reparacion.TIPO_PRENDA_CHOICES,
+        'estado_choices': Reparacion.ESTADO_CHOICES,
     })
 
 @login_required

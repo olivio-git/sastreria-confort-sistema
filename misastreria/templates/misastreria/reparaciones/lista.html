@@ -1,125 +1,126 @@
 {% extends 'misastreria/base.html' %}
-{% block titulo %}Lista de Reparaciones{% endblock %}
+{% block titulo %}Reparaciones{% endblock %}
 {% block contenido %}
-<div class="container py-4">
-    <h2 class="mb-4">Reparaciones</h2>
-    {% if messages %}
-        <div class="alert {% if 'error' in message.tags %}alert-danger{% else %}alert-info{% endif %}">
-            {% for message in messages %}
-                {{ message }}
-            {% endfor %}
-        </div>
-    {% endif %}
-    <form class="mb-4" method="get">
-        <div class="row g-3">
-            <div class="col-md-2">
-                <label for="codigo" class="form-label">Código</label>
-                <input type="text" name="codigo" id="codigo" class="form-control" value="{{ codigo }}" placeholder="Ej: REP-001">
-            </div>
-            <div class="col-md-2">
-                <label for="cliente" class="form-label">Cliente</label>
-                <input type="text" name="cliente" id="cliente" class="form-control" value="{{ cliente }}" placeholder="Nombre del cliente">
-            </div>
-            <div class="col-md-2">
-                <label for="tipo_prenda" class="form-label">Tipo de Prenda</label>
-                <select name="tipo_prenda" id="tipo_prenda" class="form-control">
-                    <option value="">Todos</option>
-                    {% for value, label in tipo_prenda_choices %}
-                        <option value="{{ value }}" {% if value == tipo_prenda %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md-2">
-                <label for="otro_prenda" class="form-label">Otra Prenda</label>
-                <input type="text" name="otro_prenda" id="otro_prenda" class="form-control" value="{{ otro_prenda }}" placeholder="Ej: Blusa">
-            </div>
-            <div class="col-md-2">
-                <label for="fecha_entrega" class="form-label">Fecha de Entrega</label>
-                <input type="date" name="fecha_entrega" id="fecha_entrega" class="form-control" value="{{ fecha_entrega }}">
-            </div>
-            <div class="col-md-2">
-                <label for="empleado" class="form-label">Empleado</label>
-                <input type="text" name="empleado" id="empleado" class="form-control" value="{{ empleado }}" placeholder="Nombre del empleado">
-            </div>
-            <div class="col-md-4">
-                <label for="estado" class="form-label">Estado</label>
-                <select name="estado" id="estado" class="form-control">
-                    <option value="">Todos</option>
-                    {% for value, label in estado_choices %}
-                        <option value="{{ value }}" {% if value == estado %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md-12 d-flex align-items-end">
-                <button type="submit" class="btn btn-primary me-2">Buscar</button>
-                <a href="{% url 'lista_reparaciones' %}" class="btn btn-secondary">Limpiar</a>
-            </div>
-        </div>
-    </form>
-    <table class="table table-striped">
-        <thead>
-            <tr>
-                <th>Código</th>
-                <th>Cliente</th>
-                <th>Tipo de Prenda</th>
-                <th>Tipo de Reparación</th>
-                <th>Costo</th>
-                <th>Fecha de Entrega</th>
-                <th>Empleado</th>
-                <th>Estado</th>
-                <th>Acciones</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for reparacion in page_obj %}
-                <tr>
-                    <td>{{ reparacion.codigo }}</td>
-                    <td>{{ reparacion.cliente|default:'-' }}</td>
-                    <td>{{ reparacion.get_tipo_prenda_display }}{% if reparacion.otro_prenda %} ({{ reparacion.otro_prenda }}){% endif %}</td>
-                    <td>{{ reparacion.get_tipo_reparacion_display }}{% if reparacion.otro_reparacion %} ({{ reparacion.otro_reparacion }}){% endif %}</td>
-                    <td>{{ reparacion.costo|floatformat:2|default:'-' }}</td>
-                    <td>{{ reparacion.fecha_entrega }}</td>
-                    <td>{{ reparacion.empleado|default:'-' }}</td>
-                    <td>{{ reparacion.get_estado_display }}</td>
-                    <td>
-                        <a href="{% url 'editar_reparacion' reparacion.id %}" class="btn btn-sm btn-primary">Editar</a>
-                        <a href="{% url 'eliminar_reparacion' reparacion.id %}" class="btn btn-sm btn-danger">Eliminar</a>
-                    </td>
-                </tr>
-            {% empty %}
-                <tr>
-                    <td colspan="9" class="text-center">
-                        {% if codigo or cliente or tipo_prenda or otro_prenda or fecha_entrega or empleado or estado %}
-                            No se encontraron reparaciones para los filtros aplicados.
-                        {% else %}
-                            Ingrese al menos un filtro para ver las reparaciones.
-                        {% endif %}
-                    </td>
-                </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% if page_obj.has_other_pages %}
-        <nav aria-label="Paginación">
-            <ul class="pagination">
-                {% if page_obj.has_previous %}
-                    <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% for key, value in search_params.items %}&{{ key }}={{ value|urlencode }}{% endfor %}">« Anterior</a>
-                    </li>
-                {% endif %}
-                {% for num in page_obj.paginator.page_range %}
-                    <li class="page-item {% if page_obj.number == num %}active{% endif %}">
-                        <a class="page-link" href="?page={{ num }}{% for key, value in search_params.items %}&{{ key }}={{ value|urlencode }}{% endfor %}">{{ num }}</a>
-                    </li>
-                {% endfor %}
-                {% if page_obj.has_next %}
-                    <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.next_page_number }}{% for key, value in search_params.items %}&{{ key }}={{ value|urlencode }}{% endfor %}">Siguiente »</a>
-                    </li>
-                {% endif %}
-            </ul>
-        </nav>
-    {% endif %}
-    <a href="{% url 'crear_reparacion' %}" class="btn btn-primary">Nueva Reparación</a>
+<div class="page-header">
+  <h1 class="page-title"><i class="bi bi-tools me-2"></i>Reparaciones</h1>
+  <a href="{% url 'crear_reparacion' %}" class="btn btn-success btn-sm">
+    <i class="bi bi-plus-lg me-1"></i>Nueva Reparación
+  </a>
+</div>
+
+<form method="get" class="filter-bar" id="filterForm">
+  <div class="filter-group" style="flex:1;min-width:180px">
+    <label>Buscar</label>
+    <input type="text" name="q" class="form-control" placeholder="Código, cliente, CI…"
+           value="{{ q }}" data-debounce="400">
+  </div>
+  <div class="filter-group">
+    <label>Prenda</label>
+    <select name="tipo_prenda" class="form-select" data-debounce="0">
+      <option value="">Todas</option>
+      {% for val, lbl in tipo_prenda_choices %}
+      <option value="{{ val }}" {% if val == tipo_prenda %}selected{% endif %}>{{ lbl }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>Estado</label>
+    <select name="estado" class="form-select" data-debounce="0">
+      <option value="">Todos</option>
+      {% for val, lbl in estado_choices %}
+      <option value="{{ val }}" {% if val == estado %}selected{% endif %}>{{ lbl }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>Desde</label>
+    <input type="date" name="desde" class="form-control" value="{{ desde }}">
+  </div>
+  <div class="filter-group">
+    <label>Hasta</label>
+    <input type="date" name="hasta" class="form-control" value="{{ hasta }}">
+  </div>
+  <div class="filter-group justify-content-end">
+    <label class="invisible">.</label>
+    <div class="d-flex gap-2 flex-wrap">
+      <div class="date-shortcuts">
+        <a href="?periodo=semana" class="btn btn-outline-secondary {% if periodo == 'semana' %}active{% endif %}">Semana</a>
+        <a href="?periodo=mes" class="btn btn-outline-secondary {% if periodo == 'mes' %}active{% endif %}">Mes</a>
+        <a href="?periodo=3meses" class="btn btn-outline-secondary {% if periodo == '3meses' or not periodo %}active{% endif %}">3 meses</a>
+      </div>
+      <a href="{% url 'lista_reparaciones' %}" class="btn btn-outline-secondary">Limpiar</a>
+    </div>
+  </div>
+</form>
+
+<div class="table-wrapper">
+  <table class="table table-hover" id="tablaReparaciones">
+    <thead>
+      <tr>
+        <th>Código</th>
+        <th>Cliente</th>
+        <th>Prenda</th>
+        <th>Tipo Reparación</th>
+        <th>Costo</th>
+        <th>Entrega</th>
+        <th>Empleado</th>
+        <th>Estado</th>
+        <th data-no-toggle>Acciones</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in page_obj %}
+      <tr>
+        <td class="fw-semibold">{{ r.codigo }}</td>
+        <td>
+          {% if r.cliente %}
+            <a href="{% url 'historial_cliente' r.cliente.id %}" class="text-decoration-none">
+              {{ r.cliente }}
+            </a>
+          {% else %}—{% endif %}
+        </td>
+        <td>{{ r.get_tipo_prenda_display }}{% if r.otro_prenda %} ({{ r.otro_prenda }}){% endif %}</td>
+        <td>{{ r.get_tipo_reparacion_display }}{% if r.otro_reparacion %} ({{ r.otro_reparacion }}){% endif %}</td>
+        <td>{{ r.costo|floatformat:2|default:"—" }}</td>
+        <td>{{ r.fecha_entrega|date:"d/m/Y" }}</td>
+        <td>{{ r.empleado|default:"—" }}</td>
+        <td><span class="badge-estado badge-{{ r.estado }}">{{ r.get_estado_display }}</span></td>
+        <td>
+          <div class="btn-actions">
+            <a href="{% url 'editar_reparacion' r.id %}" class="btn btn-sm btn-outline-primary" title="Editar"><i class="bi bi-pencil"></i></a>
+            <a href="{% url 'exportar_recibo_reparacion_pdf' r.id %}" class="btn btn-sm btn-outline-secondary" title="PDF"><i class="bi bi-file-pdf"></i></a>
+            <a href="{% url 'eliminar_reparacion' r.id %}" class="btn btn-sm btn-outline-danger" title="Eliminar"><i class="bi bi-trash"></i></a>
+          </div>
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="9">
+          <div class="empty-state">
+            <i class="bi bi-tools d-block"></i>
+            No hay reparaciones en el período seleccionado.
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="pagination-bar">
+    <span>{{ total }} reparación{{ total|pluralize:"es" }}</span>
+    <nav>
+      <ul class="pagination pagination-sm mb-0">
+        {% if page_obj.has_previous %}
+          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&estado={{ estado }}&tipo_prenda={{ tipo_prenda }}&desde={{ desde }}&hasta={{ hasta }}">«</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&estado={{ estado }}&tipo_prenda={{ tipo_prenda }}&desde={{ desde }}&hasta={{ hasta }}">‹</a></li>
+        {% endif %}
+        <li class="page-item active"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
+        {% if page_obj.has_next %}
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&estado={{ estado }}&tipo_prenda={{ tipo_prenda }}&desde={{ desde }}&hasta={{ hasta }}">›</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&estado={{ estado }}&tipo_prenda={{ tipo_prenda }}&desde={{ desde }}&hasta={{ hasta }}">»</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+  </div>
 </div>
 {% endblock %}
+{% block extra_js %}<script src="{% load static %}{% static 'js/sistema.js' %}"></script>{% endblock %}

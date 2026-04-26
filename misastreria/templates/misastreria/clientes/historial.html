@@ -1,0 +1,117 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Historial — {{ cliente }}{% endblock %}
+{% block contenido %}
+<div class="page-header">
+  <div>
+    <a href="{% url 'lista_clientes' %}" class="text-muted text-decoration-none" style="font-size:.82rem">
+      <i class="bi bi-arrow-left me-1"></i>Clientes
+    </a>
+    <h1 class="page-title mt-1"><i class="bi bi-clock-history me-2"></i>{{ cliente }}</h1>
+    {% if cliente.ci %}<span class="text-muted" style="font-size:.85rem">CI: {{ cliente.ci }}</span>{% endif %}
+  </div>
+  <a href="{% url 'editar_cliente' cliente.id %}" class="btn btn-outline-primary btn-sm">
+    <i class="bi bi-pencil me-1"></i>Editar cliente
+  </a>
+</div>
+
+<!-- Reparaciones -->
+<h6 class="text-uppercase text-muted fw-bold mb-2" style="font-size:.75rem;letter-spacing:.05em">
+  <i class="bi bi-tools me-1"></i>Reparaciones ({{ reparaciones.count }})
+</h6>
+<div class="table-wrapper mb-4">
+  <table class="table table-hover">
+    <thead><tr><th>Código</th><th>Prenda</th><th>Tipo</th><th>Costo</th><th>Entrega</th><th>Estado</th><th></th></tr></thead>
+    <tbody>
+      {% for r in reparaciones %}
+      <tr>
+        <td class="fw-semibold">{{ r.codigo }}</td>
+        <td>{{ r.get_tipo_prenda_display }}{% if r.otro_prenda %} ({{ r.otro_prenda }}){% endif %}</td>
+        <td>{{ r.get_tipo_reparacion_display }}</td>
+        <td>{{ r.costo|floatformat:2|default:"—" }}</td>
+        <td>{{ r.fecha_entrega|date:"d/m/Y" }}</td>
+        <td><span class="badge-estado badge-{{ r.estado }}">{{ r.get_estado_display }}</span></td>
+        <td><a href="{% url 'editar_reparacion' r.id %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i></a></td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="7" class="text-center text-muted py-3">Sin reparaciones.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Confecciones -->
+<h6 class="text-uppercase text-muted fw-bold mb-2" style="font-size:.75rem;letter-spacing:.05em">
+  <i class="bi bi-scissors me-1"></i>Confecciones ({{ confecciones.count }})
+</h6>
+<div class="table-wrapper mb-4">
+  <table class="table table-hover">
+    <thead><tr><th>Código</th><th>Prenda</th><th>Color</th><th>Precio</th><th>Saldo</th><th>Entrega</th><th>Estado</th><th></th></tr></thead>
+    <tbody>
+      {% for c in confecciones %}
+      <tr>
+        <td class="fw-semibold">{{ c.codigo }}</td>
+        <td>{{ c.get_tipo_prenda_display }}</td>
+        <td>{{ c.color }}</td>
+        <td>{{ c.precio|floatformat:2 }}</td>
+        <td>{{ c.saldo|floatformat:2 }}</td>
+        <td>{{ c.fecha_entrega|date:"d/m/Y"|default:"—" }}</td>
+        <td><span class="badge-estado badge-{{ c.estado }}">{{ c.get_estado_display }}</span></td>
+        <td><a href="{% url 'editar_confeccion' c.id %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i></a></td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="8" class="text-center text-muted py-3">Sin confecciones.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Alquileres -->
+<h6 class="text-uppercase text-muted fw-bold mb-2" style="font-size:.75rem;letter-spacing:.05em">
+  <i class="bi bi-bag me-1"></i>Alquileres ({{ alquileres.count }})
+</h6>
+<div class="table-wrapper mb-4">
+  <table class="table table-hover">
+    <thead><tr><th>Código</th><th>Artículo</th><th>Cant.</th><th>Costo</th><th>Alquiler</th><th>Devolución</th><th>Estado</th><th></th></tr></thead>
+    <tbody>
+      {% for a in alquileres %}
+      <tr>
+        <td class="fw-semibold">{{ a.codigo }}</td>
+        <td>{{ a.articulo }}</td>
+        <td>{{ a.cantidad }}</td>
+        <td>{{ a.costo_alquiler|floatformat:2 }}</td>
+        <td>{{ a.fecha_alquiler|date:"d/m/Y" }}</td>
+        <td>{{ a.fecha_devolucion|date:"d/m/Y" }}</td>
+        <td><span class="badge-estado badge-{{ a.estado }}">{{ a.get_estado_display }}</span></td>
+        <td><a href="{% url 'editar_alquiler' a.id %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i></a></td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="8" class="text-center text-muted py-3">Sin alquileres.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Ventas -->
+<h6 class="text-uppercase text-muted fw-bold mb-2" style="font-size:.75rem;letter-spacing:.05em">
+  <i class="bi bi-cart me-1"></i>Ventas ({{ ventas.count }})
+</h6>
+<div class="table-wrapper mb-4">
+  <table class="table table-hover">
+    <thead><tr><th>Código</th><th>Artículo</th><th>Cant.</th><th>Total</th><th>Fecha</th><th></th></tr></thead>
+    <tbody>
+      {% for v in ventas %}
+      <tr>
+        <td class="fw-semibold">{{ v.codigo }}</td>
+        <td>{{ v.articulo }}</td>
+        <td>{{ v.cantidad }}</td>
+        <td>{{ v.precio_total|floatformat:2 }}</td>
+        <td>{{ v.fecha_venta|date:"d/m/Y" }}</td>
+        <td><a href="{% url 'editar_venta' v.id %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i></a></td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="text-center text-muted py-3">Sin ventas.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

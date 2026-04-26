@@ -11,7 +11,7 @@
 <form method="get" class="filter-bar">
   <div class="filter-group" style="flex:1;min-width:200px">
     <label>Buscar</label>
-    <input type="text" name="q" class="form-control" placeholder="Nombre, CI, celular…" value="{{ q }}">
+    <input type="text" name="q" class="form-control" placeholder="Nombre, CI, celular…" value="{{ q }}" data-debounce="400">
   </div>
   <div class="filter-group">
     <label>Desde</label>
@@ -54,6 +54,9 @@
         </td>
         <td>
           <div class="btn-actions">
+            <a href="{% url 'historial_cliente' cliente.id %}" class="btn btn-sm btn-outline-info" title="Ver historial">
+              <i class="bi bi-clock-history"></i>
+            </a>
             <a href="{% url 'editar_cliente' cliente.id %}" class="btn btn-sm btn-outline-primary" title="Editar">
               <i class="bi bi-pencil"></i>
             </a>

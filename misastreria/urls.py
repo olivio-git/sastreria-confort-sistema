@@ -22,9 +22,11 @@ urlpatterns = [
     path('empleados/reporte/dias_trabajados/', views.reporte_dias_trabajados, name='reporte_dias_trabajados'),
     # Clientes
     path('clientes/', views.lista_clientes, name='lista_clientes'),
+    path('clientes/buscar/', views.buscar_clientes, name='buscar_clientes'),
     path('clientes/crear/', views.crear_cliente, name='crear_cliente'),
     path('clientes/editar/<int:id>/', views.editar_cliente, name='editar_cliente'),
     path('clientes/eliminar/<int:id>/', views.eliminar_cliente, name='eliminar_cliente'),
+    path('clientes/<int:id>/historial/', views.historial_cliente, name='historial_cliente'),
     # Reparaciones
     path('reparaciones/', views.lista_reparaciones, name='lista_reparaciones'),
     path('reparaciones/crear/', views.crear_reparacion, name='crear_reparacion'),
