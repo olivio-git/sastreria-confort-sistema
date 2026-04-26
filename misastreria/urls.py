@@ -46,20 +46,15 @@ urlpatterns = [
     path('confecciones/crear/', views.crear_confeccion, name='crear_confeccion'),
     path('confecciones/editar/<int:id>/', views.editar_confeccion, name='editar_confeccion'),
     path('confecciones/eliminar/<int:id>/', views.eliminar_confeccion, name='eliminar_confeccion'),
-     # Alquileres
+    path('confecciones/entregar/<int:id>/', views.entregar_confeccion, name='entregar_confeccion'),
+    path('confecciones/recibo/<int:id>/', views.exportar_recibo_confeccion_pdf, name='exportar_recibo_confeccion_pdf'),
+    # Alquileres
     path('alquileres/', views.lista_alquileres, name='lista_alquileres'),
     path('alquileres/crear/', views.crear_alquiler, name='crear_alquiler'),
     path('alquileres/editar/<int:id>/', views.editar_alquiler, name='editar_alquiler'),
     path('alquileres/eliminar/<int:id>/', views.eliminar_alquiler, name='eliminar_alquiler'),
     path('alquileres/devolver/<int:id>/', views.devolver_alquiler, name='devolver_alquiler'),
     path('alquileres/comprobante/pdf/<int:id>/', views.exportar_comprobante_alquiler_pdf, name='exportar_comprobante_alquiler_pdf'),
-    # Confecciones
-    path('confecciones/', views.lista_confecciones, name='lista_confecciones'),
-    path('confecciones/crear/', views.crear_confeccion, name='crear_confeccion'),
-    path('confecciones/editar/<int:id>/', views.editar_confeccion, name='editar_confeccion'),
-    path('confecciones/eliminar/<int:id>/', views.eliminar_confeccion, name='eliminar_confeccion'),
-    path('confecciones/entregar/<int:id>/', views.entregar_confeccion, name='entregar_confeccion'),
-    path('confecciones/recibo/<int:id>/', views.exportar_recibo_confeccion_pdf, name='exportar_recibo_confeccion_pdf'),
     # Inventario
     path('inventario/', views.lista_inventario, name='lista_inventario'),
     path('inventario/crear/', views.crear_inventario, name='crear_inventario'),

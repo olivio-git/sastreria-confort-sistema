@@ -1,98 +1,103 @@
 {% extends 'misastreria/base.html' %}
-{% block titulo %}Lista de Ventas{% endblock %}
+{% block titulo %}Ventas{% endblock %}
 {% block contenido %}
-<div class="container py-4">
-    <h2 class="mb-4">Ventas</h2>
-    {% if messages %}
-        <div class="alert {% if 'error' in message.tags %}alert-danger{% else %}alert-info{% endif %}">
-            {% for message in messages %}
-                {{ message }}
-            {% endfor %}
-        </div>
-    {% endif %}
-    <form class="mb-4" method="get">
-        <div class="row g-3">
-            <div class="col-md-3">
-                <label for="codigo" class="form-label">Código</label>
-                <input type="text" name="codigo" id="codigo" class="form-control" value="{{ codigo }}" placeholder="Ej: VEN-001">
-            </div>
-            <div class="col-md-3">
-                <label for="articulo" class="form-label">Artículo</label>
-                <input type="text" name="articulo" id="articulo" class="form-control" value="{{ articulo }}" placeholder="Nombre del artículo">
-            </div>
-            <div class="col-md-3">
-                <label for="fecha" class="form-label">Fecha de Venta</label>
-                <input type="date" name="fecha" id="fecha" class="form-control" value="{{ fecha }}">
-            </div>
-            <div class="col-md-3 d-flex align-items-end">
-                <button type="submit" class="btn btn-primary me-2">Buscar</button>
-                <a href="{% url 'lista_ventas' %}" class="btn btn-secondary">Limpiar</a>
-            </div>
-        </div>
-    </form>
-    <table class="table table-striped">
-        <thead>
-            <tr>
-                <th>Código</th>
-                <th>Cliente</th>
-                <th>Artículo</th>
-                <th>Cantidad</th>
-                <th>Precio Unitario</th>
-                <th>Precio Total</th>
-                <th>Fecha de Venta</th>
-                <th>Acciones</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for venta in page_obj %}
-                <tr>
-                    <td>{{ venta.codigo }}</td>
-                    <td>{{ venta.cliente|default:'-' }}</td>
-                    <td>{{ venta.articulo }}</td>
-                    <td>{{ venta.cantidad }}</td>
-                    <td>{{ venta.precio_unitario|floatformat:2 }}</td>
-                    <td>{{ venta.precio_total|floatformat:2 }}</td>
-                    <td>{{ venta.fecha_venta }}</td>
-                    <td>
-                        <a href="{% url 'editar_venta' venta.id %}" class="btn btn-sm btn-primary">Editar</a>
-                        <a href="{% url 'eliminar_venta' venta.id %}" class="btn btn-sm btn-danger">Eliminar</a>
-                        <a href="{% url 'exportar_recibo_pdf' venta.id %}" class="btn btn-sm btn-info">PDF</a>
-                    </td>
-                </tr>
-            {% empty %}
-                <tr>
-                    <td colspan="8" class="text-center">
-                        {% if codigo or articulo or fecha %}
-                            No se encontraron ventas para los filtros aplicados.
-                        {% else %}
-                            Ingrese al menos un filtro para ver las ventas.
-                        {% endif %}
-                    </td>
-                </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% if page_obj.has_other_pages %}
-        <nav aria-label="Paginación">
-            <ul class="pagination">
-                {% if page_obj.has_previous %}
-                    <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% for key, value in search_params.items %}&{{ key }}={{ value|urlencode }}{% endfor %}">« Anterior</a>
-                    </li>
-                {% endif %}
-                {% for num in page_obj.paginator.page_range %}
-                    <li class="page-item {% if page_obj.number == num %}active{% endif %}">
-                        <a class="page-link" href="?page={{ num }}{% for key, value in search_params.items %}&{{ key }}={{ value|urlencode }}{% endfor %}">{{ num }}</a>
-                    </li>
-                {% endfor %}
-                {% if page_obj.has_next %}
-                    <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.next_page_number }}{% for key, value in search_params.items %}&{{ key }}={{ value|urlencode }}{% endfor %}">Siguiente »</a>
-                    </li>
-                {% endif %}
-            </ul>
-        </nav>
-    {% endif %}
-    <a href="{% url 'crear_venta' %}" class="btn btn-primary">Nueva Venta</a>
+<div class="page-header">
+  <h1 class="page-title"><i class="bi bi-cart me-2"></i>Ventas</h1>
+  <a href="{% url 'crear_venta' %}" class="btn btn-success btn-sm">
+    <i class="bi bi-plus-lg me-1"></i>Nueva Venta
+  </a>
+</div>
+
+<form method="get" class="filter-bar" id="filterForm">
+  <div class="filter-group" style="flex:1;min-width:180px">
+    <label>Buscar</label>
+    <input type="text" name="q" class="form-control" placeholder="Código, cliente, artículo…"
+           value="{{ q }}" data-debounce="400">
+  </div>
+  <div class="filter-group">
+    <label>Desde</label>
+    <input type="date" name="desde" class="form-control" value="{{ desde }}">
+  </div>
+  <div class="filter-group">
+    <label>Hasta</label>
+    <input type="date" name="hasta" class="form-control" value="{{ hasta }}">
+  </div>
+  <div class="filter-group justify-content-end">
+    <label class="invisible">.</label>
+    <div class="d-flex gap-2 flex-wrap">
+      <div class="date-shortcuts">
+        <a href="?periodo=semana" class="btn btn-outline-secondary {% if periodo == 'semana' %}active{% endif %}">Semana</a>
+        <a href="?periodo=mes" class="btn btn-outline-secondary {% if periodo == 'mes' %}active{% endif %}">Mes</a>
+        <a href="?periodo=3meses" class="btn btn-outline-secondary {% if periodo == '3meses' or not periodo %}active{% endif %}">3 meses</a>
+      </div>
+      <a href="{% url 'lista_ventas' %}" class="btn btn-outline-secondary">Limpiar</a>
+    </div>
+  </div>
+</form>
+
+<div class="table-wrapper">
+  <table class="table table-hover">
+    <thead>
+      <tr>
+        <th>Código</th>
+        <th>Cliente</th>
+        <th>Artículo</th>
+        <th>Cant.</th>
+        <th>P. Unit.</th>
+        <th>Total</th>
+        <th>Fecha</th>
+        <th>Acciones</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for v in page_obj %}
+      <tr>
+        <td class="fw-semibold">{{ v.codigo }}</td>
+        <td>
+          {% if v.cliente %}
+            <a href="{% url 'historial_cliente' v.cliente.id %}" class="text-decoration-none">{{ v.cliente }}</a>
+          {% else %}—{% endif %}
+        </td>
+        <td>{{ v.articulo }}</td>
+        <td>{{ v.cantidad }}</td>
+        <td>{{ v.precio_unitario|floatformat:2 }}</td>
+        <td>{{ v.precio_total|floatformat:2 }}</td>
+        <td>{{ v.fecha_venta|date:"d/m/Y" }}</td>
+        <td>
+          <div class="btn-actions">
+            <a href="{% url 'editar_venta' v.id %}" class="btn btn-sm btn-outline-primary" title="Editar"><i class="bi bi-pencil"></i></a>
+            <a href="{% url 'exportar_recibo_pdf' v.id %}" class="btn btn-sm btn-outline-secondary" title="PDF"><i class="bi bi-file-pdf"></i></a>
+            <a href="{% url 'eliminar_venta' v.id %}" class="btn btn-sm btn-outline-danger" title="Eliminar"><i class="bi bi-trash"></i></a>
+          </div>
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="8">
+          <div class="empty-state">
+            <i class="bi bi-cart-x d-block"></i>
+            No hay ventas en el período seleccionado.
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="pagination-bar">
+    <span>{{ total }} venta{{ total|pluralize }}</span>
+    <nav>
+      <ul class="pagination pagination-sm mb-0">
+        {% if page_obj.has_previous %}
+          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}">«</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}">‹</a></li>
+        {% endif %}
+        <li class="page-item active"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
+        {% if page_obj.has_next %}
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}">›</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}">»</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+  </div>
 </div>
 {% endblock %}

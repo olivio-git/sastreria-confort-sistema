@@ -330,13 +330,11 @@ def lista_reparaciones(request):
 def crear_reparacion(request):
     if request.method == 'POST':
         form = ReparacionForm(request.POST)
-        print("Datos del formulario:", request.POST)  # Debug
         if form.is_valid():
             form.save()
             messages.success(request, "Reparación creada con éxito.")
             return redirect('lista_reparaciones')
         else:
-            print("Errores del formulario:", form.errors.as_json())  # Debug
             messages.error(request, "Por favor corrige los errores en el formulario.")
     else:
         form = ReparacionForm()
@@ -345,16 +343,13 @@ def crear_reparacion(request):
 @login_required
 def editar_reparacion(request, id):
     reparacion = get_object_or_404(Reparacion, id=id)
-    print(f"Editando reparación ID: {id}, tipo_prenda: {reparacion.tipo_prenda}, tipo_reparacion: {reparacion.tipo_reparacion}")  # Debug
     if request.method == 'POST':
         form = ReparacionForm(request.POST, instance=reparacion)
-        print("Datos del formulario:", request.POST)  # Debug
         if form.is_valid():
             form.save()
             messages.success(request, "Reparación actualizada con éxito.")
             return redirect('lista_reparaciones')
         else:
-            print("Errores del formulario:", form.errors.as_json())  # Debug
             messages.error(request, "Por favor corrige los errores en el formulario.")
     else:
         form = ReparacionForm(instance=reparacion)
@@ -384,7 +379,6 @@ def marcar_entregado(request, id):
 
 @login_required
 def exportar_recibo_reparacion_pdf(request, id):
-    print(f"Generando PDF para reparación ID: {id}")  # Debug
     reparacion = get_object_or_404(Reparacion, id=id)
     
     missing_fields = []
@@ -447,53 +441,60 @@ def exportar_recibo_reparacion_pdf(request, id):
 
 @login_required
 def lista_ventas(request):
-    print("Accediendo a lista_ventas")  # Debug
-    codigo = request.GET.get('codigo', '').strip()
-    articulo = request.GET.get('articulo', '').strip()
-    fecha = request.GET.get('fecha', '').strip()
-    ventas = Venta.objects.none()  # Lista vacía por defecto
-    
-    if codigo or articulo or fecha:  # Cargar datos solo si hay un filtro
-        ventas = Venta.objects.all()
-        if codigo:
-            ventas = ventas.filter(codigo__icontains=codigo)
-        if articulo:
-            ventas = ventas.filter(articulo__articulo__icontains=articulo)  # Corregido: usar campo 'articulo'
-        if fecha:
-            ventas = ventas.filter(fecha_venta=fecha)
-    
-    paginator = Paginator(ventas, 10)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
-    
-    search_params = {}
-    if codigo:
-        search_params['codigo'] = codigo
-    if articulo:
-        search_params['articulo'] = articulo
-    if fecha:
-        search_params['fecha'] = fecha
-    
+    q = request.GET.get('q', '').strip()
+    desde = request.GET.get('desde', '').strip()
+    hasta = request.GET.get('hasta', '').strip()
+    periodo = request.GET.get('periodo', '').strip()
+
+    hoy = date.today()
+    if periodo == 'semana':
+        desde = (hoy - timedelta(days=7)).isoformat()
+        hasta = ''
+    elif periodo == 'mes':
+        desde = hoy.replace(day=1).isoformat()
+        hasta = ''
+    elif not desde and not hasta:
+        periodo = periodo or '3meses'
+        desde = (hoy - timedelta(days=90)).isoformat()
+
+    ventas = Venta.objects.all().order_by('-fecha_venta')
+    if q:
+        ventas = ventas.filter(
+            Q(codigo__icontains=q) |
+            Q(articulo__articulo__icontains=q) |
+            Q(cliente__nombres__icontains=q) |
+            Q(cliente__apellido_paterno__icontains=q) |
+            Q(cliente__ci__icontains=q)
+        )
+    if desde:
+        ventas = ventas.filter(fecha_venta__gte=desde)
+    if hasta:
+        ventas = ventas.filter(fecha_venta__lte=hasta)
+
+    total = ventas.count()
+    paginator = Paginator(ventas, 15)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
     return render(request, 'misastreria/ventas/lista.html', {
         'page_obj': page_obj,
-        'codigo': codigo,
-        'articulo': articulo,
-        'fecha': fecha,
-        'search_params': search_params
+        'total': total,
+        'q': q,
+        'desde': desde,
+        'hasta': hasta,
+        'periodo': periodo,
     })
+
 
 @login_required
 def crear_venta(request):
     if request.method == 'POST':
         form = VentaForm(request.POST)
-        print("Datos del formulario:", request.POST)  # Debug
         if form.is_valid():
             venta = form.save(commit=False)
             venta.save()  # El modelo calcula precio_unitario y precio_total
             messages.success(request, 'Venta creada exitosamente.')
             return redirect('lista_ventas')
         else:
-            print("Errores del formulario:", form.errors.as_json())  # Debug
             messages.error(request, f"Por favor corrige los errores: {form.errors.as_text()}")
     else:
         form = VentaForm()
@@ -505,17 +506,14 @@ def crear_venta(request):
 @login_required
 def editar_venta(request, id):
     venta = get_object_or_404(Venta, id=id)
-    print(f"Editando venta ID: {id}, codigo: {venta.codigo}, articulo: {venta.articulo}")  # Debug
     if request.method == 'POST':
         form = VentaForm(request.POST, instance=venta)
-        print("Datos del formulario:", request.POST)  # Debug
         if form.is_valid():
             venta = form.save(commit=False)
             venta.save()  # El modelo calcula precio_unitario y precio_total
             messages.success(request, 'Venta actualizada exitosamente.')
             return redirect('lista_ventas')
         else:
-            print("Errores del formulario:", form.errors.as_json())  # Debug
             messages.error(request, f"Por favor corrige los errores: {form.errors.as_text()}")
     else:
         form = VentaForm(instance=venta)
@@ -538,7 +536,6 @@ def eliminar_venta(request, id):
 
 @login_required
 def exportar_recibo_pdf(request, id):
-    print(f"Generando PDF para venta ID: {id}")  # Debug
     venta = get_object_or_404(Venta, id=id)
     response = HttpResponse(content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="recibo_venta_{venta.codigo}.pdf"'
@@ -590,53 +587,58 @@ def get_precio_articulo(request):
 
 @login_required
 def lista_confecciones(request):
-    codigo = request.GET.get('codigo', '')
-    tipo_prenda = request.GET.get('tipo_prenda', '')
-    fecha = request.GET.get('fecha', '')
-    cliente = request.GET.get('cliente', '')
-    confecciones = Confeccion.objects.none()
-    
-    if codigo or tipo_prenda or fecha or cliente:
-        confecciones = Confeccion.objects.all()
-        if codigo:
-            confecciones = confecciones.filter(codigo__icontains=codigo)
-        if tipo_prenda:
-            confecciones = confecciones.filter(tipo_prenda=tipo_prenda)
-        if fecha:
-            confecciones = confecciones.filter(fecha_inicio=fecha)
-        if cliente:
-            confecciones = confecciones.filter(
-                Q(cliente__nombres__icontains=cliente) |
-                Q(cliente__apellido_paterno__icontains=cliente) |
-                Q(cliente__apellido_materno__icontains=cliente)
-            )
-    
-    paginator = Paginator(confecciones, 10)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
-    
-    search_params = {}
-    if codigo:
-        search_params['codigo'] = codigo
+    q = request.GET.get('q', '').strip()
+    tipo_prenda = request.GET.get('tipo_prenda', '').strip()
+    estado = request.GET.get('estado', '').strip()
+    desde = request.GET.get('desde', '').strip()
+    hasta = request.GET.get('hasta', '').strip()
+    periodo = request.GET.get('periodo', '').strip()
+
+    hoy = date.today()
+    if periodo == 'semana':
+        desde = (hoy - timedelta(days=7)).isoformat()
+        hasta = ''
+    elif periodo == 'mes':
+        desde = hoy.replace(day=1).isoformat()
+        hasta = ''
+    elif not desde and not hasta:
+        periodo = periodo or '3meses'
+        desde = (hoy - timedelta(days=90)).isoformat()
+
+    confecciones = Confeccion.objects.all().order_by('-fecha_inicio')
+    if q:
+        confecciones = confecciones.filter(
+            Q(codigo__icontains=q) |
+            Q(cliente__nombres__icontains=q) |
+            Q(cliente__apellido_paterno__icontains=q) |
+            Q(cliente__ci__icontains=q)
+        )
     if tipo_prenda:
-        search_params['tipo_prenda'] = tipo_prenda
-    if fecha:
-        search_params['fecha'] = fecha
-    if cliente:
-        search_params['cliente'] = cliente
-    
-    # Pasar choices de tipo_prenda al template
-    tipo_prenda_choices = Confeccion.TIPO_PRENDA_CHOICES
-    
+        confecciones = confecciones.filter(tipo_prenda=tipo_prenda)
+    if estado:
+        confecciones = confecciones.filter(estado=estado)
+    if desde:
+        confecciones = confecciones.filter(fecha_inicio__gte=desde)
+    if hasta:
+        confecciones = confecciones.filter(fecha_inicio__lte=hasta)
+
+    total = confecciones.count()
+    paginator = Paginator(confecciones, 15)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
     return render(request, 'misastreria/confecciones/lista.html', {
         'page_obj': page_obj,
-        'codigo': codigo,
+        'total': total,
+        'q': q,
         'tipo_prenda': tipo_prenda,
-        'fecha': fecha,
-        'cliente': cliente,
-        'search_params': search_params,
-        'tipo_prenda_choices': tipo_prenda_choices
+        'estado': estado,
+        'desde': desde,
+        'hasta': hasta,
+        'periodo': periodo,
+        'tipo_prenda_choices': Confeccion.TIPO_PRENDA_CHOICES,
+        'estado_choices': Confeccion.ESTADO_CHOICES,
     })
+
 
 @login_required
 def crear_confeccion(request):
@@ -750,39 +752,54 @@ def exportar_recibo_confeccion_pdf(request, id):
 
 @login_required
 def lista_alquileres(request):
-    codigo = request.GET.get('codigo', '')
-    articulo = request.GET.get('articulo', '')
-    fecha = request.GET.get('fecha', '')
-    alquileres = Alquiler.objects.none()
-    
-    if codigo or articulo or fecha:
-        alquileres = Alquiler.objects.all()
-        if codigo:
-            alquileres = alquileres.filter(codigo__icontains=codigo)
-        if articulo:
-            alquileres = alquileres.filter(articulo__articulo__icontains=articulo)
-        if fecha:
-            alquileres = alquileres.filter(fecha_alquiler=fecha)
-    
-    paginator = Paginator(alquileres, 10)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
-    
-    search_params = {}
-    if codigo:
-        search_params['codigo'] = codigo
-    if articulo:
-        search_params['articulo'] = articulo
-    if fecha:
-        search_params['fecha'] = fecha
-    
+    q = request.GET.get('q', '').strip()
+    estado = request.GET.get('estado', '').strip()
+    desde = request.GET.get('desde', '').strip()
+    hasta = request.GET.get('hasta', '').strip()
+    periodo = request.GET.get('periodo', '').strip()
+
+    hoy = date.today()
+    if periodo == 'semana':
+        desde = (hoy - timedelta(days=7)).isoformat()
+        hasta = ''
+    elif periodo == 'mes':
+        desde = hoy.replace(day=1).isoformat()
+        hasta = ''
+    elif not desde and not hasta:
+        periodo = periodo or '3meses'
+        desde = (hoy - timedelta(days=90)).isoformat()
+
+    alquileres = Alquiler.objects.all().order_by('-fecha_alquiler')
+    if q:
+        alquileres = alquileres.filter(
+            Q(codigo__icontains=q) |
+            Q(articulo__articulo__icontains=q) |
+            Q(cliente__nombres__icontains=q) |
+            Q(cliente__apellido_paterno__icontains=q) |
+            Q(cliente__ci__icontains=q)
+        )
+    if estado:
+        alquileres = alquileres.filter(estado=estado)
+    if desde:
+        alquileres = alquileres.filter(fecha_alquiler__gte=desde)
+    if hasta:
+        alquileres = alquileres.filter(fecha_alquiler__lte=hasta)
+
+    total = alquileres.count()
+    paginator = Paginator(alquileres, 15)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
     return render(request, 'misastreria/alquileres/lista.html', {
         'page_obj': page_obj,
-        'codigo': codigo,
-        'articulo': articulo,
-        'fecha': fecha,
-        'search_params': search_params
+        'total': total,
+        'q': q,
+        'estado': estado,
+        'desde': desde,
+        'hasta': hasta,
+        'periodo': periodo,
+        'estado_choices': Alquiler.ESTADO_OPCIONES,
     })
+
 
 @login_required
 def crear_alquiler(request):
@@ -889,62 +906,61 @@ def exportar_comprobante_alquiler_pdf(request, id):
 
 @login_required
 def lista_transacciones(request):
-    print("Accediendo a lista_transacciones")  # Debug
-    codigo = request.GET.get('codigo', '').strip()
+    q = request.GET.get('q', '').strip()
     tipo_transaccion = request.GET.get('tipo_transaccion', '').strip()
-    descripcion = request.GET.get('descripcion', '').strip()
-    fecha = request.GET.get('fecha', '').strip()
-    transacciones = Transaccion.objects.none()  # Lista vacía por defecto
-    
-    if codigo or tipo_transaccion or descripcion or fecha:
-        transacciones = Transaccion.objects.all()
-        if codigo:
-            transacciones = transacciones.filter(codigo__icontains=codigo)
-        if tipo_transaccion:
-            transacciones = transacciones.filter(tipo_transaccion=tipo_transaccion)
-        if descripcion:
-            transacciones = transacciones.filter(descripcion__icontains=descripcion)
-        if fecha:
-            transacciones = transacciones.filter(fecha=fecha)
-    
-    paginator = Paginator(transacciones, 10)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
-    
-    search_params = {}
-    if codigo:
-        search_params['codigo'] = codigo
+    desde = request.GET.get('desde', '').strip()
+    hasta = request.GET.get('hasta', '').strip()
+    periodo = request.GET.get('periodo', '').strip()
+
+    hoy = date.today()
+    if periodo == 'semana':
+        desde = (hoy - timedelta(days=7)).isoformat()
+        hasta = ''
+    elif periodo == 'mes':
+        desde = hoy.replace(day=1).isoformat()
+        hasta = ''
+    elif not desde and not hasta:
+        periodo = periodo or '3meses'
+        desde = (hoy - timedelta(days=90)).isoformat()
+
+    transacciones = Transaccion.objects.all().order_by('-fecha')
+    if q:
+        transacciones = transacciones.filter(
+            Q(codigo__icontains=q) |
+            Q(descripcion__icontains=q)
+        )
     if tipo_transaccion:
-        search_params['tipo_transaccion'] = tipo_transaccion
-    if descripcion:
-        search_params['descripcion'] = descripcion
-    if fecha:
-        search_params['fecha'] = fecha
-    
-    # Pasar choices al template
-    tipo_transaccion_choices = Transaccion.TIPO_TRANSACCION_CHOICES
-    
+        transacciones = transacciones.filter(tipo_transaccion=tipo_transaccion)
+    if desde:
+        transacciones = transacciones.filter(fecha__gte=desde)
+    if hasta:
+        transacciones = transacciones.filter(fecha__lte=hasta)
+
+    total = transacciones.count()
+    paginator = Paginator(transacciones, 15)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
     return render(request, 'misastreria/transacciones/lista.html', {
         'page_obj': page_obj,
-        'codigo': codigo,
+        'total': total,
+        'q': q,
         'tipo_transaccion': tipo_transaccion,
-        'descripcion': descripcion,
-        'fecha': fecha,
-        'search_params': search_params,
-        'tipo_transaccion_choices': tipo_transaccion_choices
+        'desde': desde,
+        'hasta': hasta,
+        'periodo': periodo,
+        'tipo_transaccion_choices': Transaccion.TIPO_TRANSACCION_CHOICES,
     })
+
 
 @login_required
 def crear_transaccion(request):
     if request.method == 'POST':
         form = TransaccionForm(request.POST)
-        print("Datos del formulario:", request.POST)  # Debug
         if form.is_valid():
             form.save()
             messages.success(request, 'Transacción creada exitosamente.')
             return redirect('lista_transacciones')
         else:
-            print("Errores del formulario:", form.errors.as_json())  # Debug
             messages.error(request, f"Por favor corrige los errores: {form.errors.as_text()}")
     else:
         form = TransaccionForm()
@@ -958,13 +974,11 @@ def editar_transaccion(request, id):
     transaccion = get_object_or_404(Transaccion, id=id)
     if request.method == 'POST':
         form = TransaccionForm(request.POST, instance=transaccion)
-        print("Datos del formulario:", request.POST)  # Debug
         if form.is_valid():
             form.save()
             messages.success(request, 'Transacción actualizada exitosamente.')
             return redirect('lista_transacciones')
         else:
-            print("Errores del formulario:", form.errors.as_json())  # Debug
             messages.error(request, f"Por favor corrige los errores: {form.errors.as_text()}")
     else:
         form = TransaccionForm(instance=transaccion)
@@ -985,39 +999,30 @@ def eliminar_transaccion(request, id):
 
 @login_required
 def lista_inventario(request):
-    codigo = request.GET.get('codigo', '')
-    articulo = request.GET.get('articulo', '')
-    estado = request.GET.get('estado', 'ACT')  # Por defecto, mostrar activos
-    inventarios = Inventario.objects.none()  # Lista vacía por defecto
-    
-    if codigo or articulo or estado:
-        inventarios = Inventario.objects.all()
-        if codigo:
-            inventarios = inventarios.filter(codigo__icontains=codigo)
-        if articulo:
-            inventarios = inventarios.filter(articulo__icontains=articulo)
-        if estado:
-            inventarios = inventarios.filter(estado=estado)
-    
-    paginator = Paginator(inventarios, 10)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
-    
-    search_params = {}
-    if codigo:
-        search_params['codigo'] = codigo
-    if articulo:
-        search_params['articulo'] = articulo
+    q = request.GET.get('q', '').strip()
+    estado = request.GET.get('estado', 'ACT').strip()
+
+    inventarios = Inventario.objects.all().order_by('-fecha_ingreso')
+    if q:
+        inventarios = inventarios.filter(
+            Q(codigo__icontains=q) |
+            Q(articulo__icontains=q)
+        )
     if estado:
-        search_params['estado'] = estado
-    
+        inventarios = inventarios.filter(estado=estado)
+
+    total = inventarios.count()
+    paginator = Paginator(inventarios, 15)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
     return render(request, 'misastreria/inventario/lista.html', {
         'page_obj': page_obj,
-        'codigo': codigo,
-        'articulo': articulo,
+        'total': total,
+        'q': q,
         'estado': estado,
-        'search_params': search_params
+        'estado_choices': Inventario.ESTADO_OPCIONES,
     })
+
 
 @login_required
 def crear_inventario(request):

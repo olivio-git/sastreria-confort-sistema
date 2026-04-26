@@ -1,81 +1,128 @@
 {% extends 'misastreria/base.html' %}
-{% block titulo %}Lista de Confecciones{% endblock %}
+{% block titulo %}Confecciones{% endblock %}
 {% block contenido %}
-<h1>Lista de Confecciones</h1>
-<a href="{% url 'crear_confeccion' %}" class="btn btn-success mb-3">Crear Confección</a>
-
-<!-- Formulario de búsqueda -->
-<div class="card mb-3">
-    <div class="card-header">Filtros de Búsqueda</div>
-    <div class="card-body">
-        <form method="get">
-            <div class="row">
-                <div class="col-md-3 mb-3">
-                    <label for="codigo" class="form-label">Código</label>
-                    <input type="text" name="codigo" id="codigo" class="form-control" value="{{ codigo }}">
-                </div>
-                <div class="col-md-3 mb-3">
-                    <label for="tipo_prenda" class="form-label">Tipo de Prenda</label>
-                    <select name="tipo_prenda" id="tipo_prenda" class="form-control">
-                        <option value="">-- Seleccionar --</option>
-                        {% for value, label in tipo_prenda_choices %}
-                            <option value="{{ value }}" {% if tipo_prenda == value %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="col-md-3 mb-3">
-                    <label for="fecha" class="form-label">Fecha Inicio</label>
-                    <input type="date" name="fecha" id="fecha" class="form-control" value="{{ fecha }}">
-                </div>
-                <div class="col-md-3 mb-3">
-                    <label for="cliente" class="form-label">Cliente</label>
-                    <input type="text" name="cliente" id="cliente" class="form-control" value="{{ cliente }}">
-                </div>
-            </div>
-            <button type="submit" class="btn btn-primary">Buscar</button>
-            <a href="{% url 'lista_confecciones' %}" class="btn btn-secondary">Limpiar</a>
-        </form>
-    </div>
+<div class="page-header">
+  <h1 class="page-title"><i class="bi bi-scissors me-2"></i>Confecciones</h1>
+  <a href="{% url 'crear_confeccion' %}" class="btn btn-success btn-sm">
+    <i class="bi bi-plus-lg me-1"></i>Nueva Confección
+  </a>
 </div>
 
-<!-- Tabla de resultados -->
-<table class="table table-striped">
+<form method="get" class="filter-bar" id="filterForm">
+  <div class="filter-group" style="flex:1;min-width:180px">
+    <label>Buscar</label>
+    <input type="text" name="q" class="form-control" placeholder="Código, cliente, CI…"
+           value="{{ q }}" data-debounce="400">
+  </div>
+  <div class="filter-group">
+    <label>Prenda</label>
+    <select name="tipo_prenda" class="form-select" data-debounce="0">
+      <option value="">Todas</option>
+      {% for val, lbl in tipo_prenda_choices %}
+      <option value="{{ val }}" {% if val == tipo_prenda %}selected{% endif %}>{{ lbl }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>Estado</label>
+    <select name="estado" class="form-select" data-debounce="0">
+      <option value="">Todos</option>
+      {% for val, lbl in estado_choices %}
+      <option value="{{ val }}" {% if val == estado %}selected{% endif %}>{{ lbl }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>Desde</label>
+    <input type="date" name="desde" class="form-control" value="{{ desde }}">
+  </div>
+  <div class="filter-group">
+    <label>Hasta</label>
+    <input type="date" name="hasta" class="form-control" value="{{ hasta }}">
+  </div>
+  <div class="filter-group justify-content-end">
+    <label class="invisible">.</label>
+    <div class="d-flex gap-2 flex-wrap">
+      <div class="date-shortcuts">
+        <a href="?periodo=semana" class="btn btn-outline-secondary {% if periodo == 'semana' %}active{% endif %}">Semana</a>
+        <a href="?periodo=mes" class="btn btn-outline-secondary {% if periodo == 'mes' %}active{% endif %}">Mes</a>
+        <a href="?periodo=3meses" class="btn btn-outline-secondary {% if periodo == '3meses' or not periodo %}active{% endif %}">3 meses</a>
+      </div>
+      <a href="{% url 'lista_confecciones' %}" class="btn btn-outline-secondary">Limpiar</a>
+    </div>
+  </div>
+</form>
+
+<div class="table-wrapper">
+  <table class="table table-hover">
     <thead>
-        <tr>
-            <th>Código</th>
-            <th>Fecha</th>
-            <th>Tipo de Prenda</th>
-            <th>Color</th>
-            <th>Modelo</th>
-            <th>Cliente</th>
-            <th>Estado</th>
-            <th>Acciones</th>
-        </tr>
+      <tr>
+        <th>Código</th>
+        <th>Cliente</th>
+        <th>Prenda</th>
+        <th>Color</th>
+        <th>Precio</th>
+        <th>Saldo</th>
+        <th>Entrega</th>
+        <th>Empleado</th>
+        <th>Estado</th>
+        <th>Acciones</th>
+      </tr>
     </thead>
     <tbody>
-        {% for confeccion in page_obj %}
-        <tr>
-            <td>{{ confeccion.codigo }}</td>
-            <td>{{ confeccion.fecha_inicio|date:"d/m/Y" }}</td>
-            <td>{{ confeccion.get_tipo_prenda_display }}</td>
-            <td>{{ confeccion.color }}</td>
-            <td>{{ confeccion.modelo }}</td>
-            <td>{{ confeccion.cliente }}</td>
-            <td>{{ confeccion.get_estado_display }}</td>
-            <td>
-                <a href="{% url 'editar_confeccion' confeccion.id %}" class="btn btn-primary btn-sm">Editar</a>
-                <a href="{% url 'eliminar_confeccion' confeccion.id %}" class="btn btn-danger btn-sm">Eliminar</a>
-                {% if confeccion.estado != 'entregado' %}
-                <a href="{% url 'entregar_confeccion' confeccion.id %}" class="btn btn-success btn-sm">Entregar</a>
-                {% endif %}
-                <a href="{% url 'exportar_recibo_confeccion_pdf' confeccion.id %}" class="btn btn-info btn-sm">Recibo PDF</a>
-            </td>
-        </tr>
-        {% empty %}
-        <tr><td colspan="8">No hay confecciones que coincidan con los filtros.</td></tr>
-        {% endfor %}
+      {% for c in page_obj %}
+      <tr>
+        <td class="fw-semibold">{{ c.codigo }}</td>
+        <td>
+          {% if c.cliente %}
+            <a href="{% url 'historial_cliente' c.cliente.id %}" class="text-decoration-none">{{ c.cliente }}</a>
+          {% else %}—{% endif %}
+        </td>
+        <td>{{ c.get_tipo_prenda_display }}</td>
+        <td>{{ c.color }}</td>
+        <td>{{ c.precio|floatformat:2 }}</td>
+        <td>{{ c.saldo|floatformat:2 }}</td>
+        <td>{{ c.fecha_entrega|date:"d/m/Y"|default:"—" }}</td>
+        <td>{{ c.empleado|default:"—" }}</td>
+        <td><span class="badge-estado badge-{{ c.estado }}">{{ c.get_estado_display }}</span></td>
+        <td>
+          <div class="btn-actions">
+            <a href="{% url 'editar_confeccion' c.id %}" class="btn btn-sm btn-outline-primary" title="Editar"><i class="bi bi-pencil"></i></a>
+            <a href="{% url 'exportar_recibo_confeccion_pdf' c.id %}" class="btn btn-sm btn-outline-secondary" title="PDF"><i class="bi bi-file-pdf"></i></a>
+            {% if c.estado != 'entregado' %}
+            <a href="{% url 'entregar_confeccion' c.id %}" class="btn btn-sm btn-outline-success" title="Entregar"><i class="bi bi-check-circle"></i></a>
+            {% endif %}
+            <a href="{% url 'eliminar_confeccion' c.id %}" class="btn btn-sm btn-outline-danger" title="Eliminar"><i class="bi bi-trash"></i></a>
+          </div>
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="10">
+          <div class="empty-state">
+            <i class="bi bi-scissors d-block"></i>
+            No hay confecciones en el período seleccionado.
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
     </tbody>
-</table>
-
-{% include 'misastreria/paginacion.html' %}
+  </table>
+  <div class="pagination-bar">
+    <span>{{ total }} confección{{ total|pluralize:"es" }}</span>
+    <nav>
+      <ul class="pagination pagination-sm mb-0">
+        {% if page_obj.has_previous %}
+          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&tipo_prenda={{ tipo_prenda }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}">«</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&tipo_prenda={{ tipo_prenda }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}">‹</a></li>
+        {% endif %}
+        <li class="page-item active"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
+        {% if page_obj.has_next %}
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&tipo_prenda={{ tipo_prenda }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}">›</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&tipo_prenda={{ tipo_prenda }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}">»</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+  </div>
+</div>
 {% endblock %}
