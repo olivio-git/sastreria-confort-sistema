@@ -5,15 +5,15 @@ import re
 class EmpleadoForm(forms.ModelForm):
     class Meta:
         model = Empleado
-        fields = ['codigo', 'nombres', 'apellido_paterno', 'apellido_materno', 'celular', 'email', 'tipo_contrato', 'fecha_ingreso', 'fecha_baja', 'activo']
+        fields = ['codigo', 'ci', 'nombres', 'apellido_paterno', 'apellido_materno', 'celular', 'tipo_contrato', 'fecha_ingreso', 'fecha_baja', 'activo']
         widgets = {
             'codigo': forms.TextInput(attrs={'class': 'form-control'}),
+            'ci': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Ej: 12345678'}),
             'nombres': forms.TextInput(attrs={'class': 'form-control'}),
             'apellido_paterno': forms.TextInput(attrs={'class': 'form-control'}),
             'apellido_materno': forms.TextInput(attrs={'class': 'form-control'}),
             'celular': forms.TextInput(attrs={'class': 'form-control'}),
-            'email': forms.EmailInput(attrs={'class': 'form-control'}),
-            'tipo_contrato': forms.Select(attrs={'class': 'form-control'}),
+            'tipo_contrato': forms.Select(attrs={'class': 'form-select'}),
             'fecha_ingreso': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
             'fecha_baja': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
             'activo': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
@@ -40,21 +40,22 @@ class FaltaForm(forms.ModelForm):
 class ClienteForm(forms.ModelForm):
     class Meta:
         model = Cliente
-        fields = ['codigo', 'nombres', 'apellido_paterno', 'apellido_materno', 'edad', 'celular', 'email', 'fecha_registro', 'notas']
+        fields = ['ci', 'nombres', 'apellido_paterno', 'apellido_materno', 'celular', 'notas']
         labels = {
-            'codigo': 'Código de Cliente',
+            'ci': 'CI (Cédula de Identidad)',
             'nombres': 'Nombres',
             'apellido_paterno': 'Apellido Paterno',
             'apellido_materno': 'Apellido Materno',
-            'edad': 'Edad',
             'celular': 'Celular',
-            'email': 'Correo Electrónico',
-            'fecha_registro': 'Fecha de Registro',
             'notas': 'Notas',
         }
         widgets = {
-            'fecha_registro': forms.DateInput(attrs={'type': 'date'}),
-            'notas': forms.Textarea(attrs={'rows': 3}),
+            'ci': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Ej: 12345678'}),
+            'nombres': forms.TextInput(attrs={'class': 'form-control'}),
+            'apellido_paterno': forms.TextInput(attrs={'class': 'form-control'}),
+            'apellido_materno': forms.TextInput(attrs={'class': 'form-control'}),
+            'celular': forms.TextInput(attrs={'class': 'form-control'}),
+            'notas': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
         }
 
 class ReparacionForm(forms.ModelForm):
@@ -104,12 +105,6 @@ class ReparacionForm(forms.ModelForm):
             self.add_error('cliente', "Debe seleccionar un cliente.")
 
         return cleaned_data
-
-
-class EmpleadoReporteForm(forms.Form):
-    fecha_inicio = forms.DateField(required=False, widget=forms.DateInput(attrs={'type': 'date'}))
-    fecha_fin = forms.DateField(required=False, widget=forms.DateInput(attrs={'type': 'date'}))
-    tipo_contrato = forms.ChoiceField(choices=[('', 'Todos')] + Empleado.TIPO_CONTRATO_CHOICES, required=False)
 
 
 class VentaForm(forms.ModelForm):

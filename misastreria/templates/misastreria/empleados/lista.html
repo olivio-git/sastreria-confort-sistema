@@ -1,72 +1,114 @@
 {% extends 'misastreria/base.html' %}
-{% block titulo %}Lista de Empleados{% endblock %}
+{% block titulo %}Empleados{% endblock %}
 {% block contenido %}
-<div class="container py-4" style="background-color: #f1f5f9;">
-    <h2 class="mb-4">Lista de Empleados</h2>
-    <a href="{% url 'crear_empleado' %}" class="btn btn-primary mb-3" style="background-color: #2563eb; border-color: #2563eb;">Nuevo Empleado</a>
-    <a href="{% url 'reporte_dias_trabajados' %}" class="btn btn-success mb-3" style="background-color: #10b981; border-color: #10b981;">Reporte de Días Trabajados</a>
-    <table class="table table-striped">
-        <thead>
-            <tr>
-                <th>Código</th>
-                <th>Nombre Completo</th>
-                <th>Celular</th>
-                <th>Email</th>
-                <th>Tipo de Contrato</th>
-                <th>Activo</th>
-                <th>Permisos</th>
-                <th>Faltas</th>
-                <th>Acciones</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for empleado in page_obj %}
-            <tr>
-                <td>{{ empleado.codigo }}</td>
-                <td>{{ empleado.nombres }} {{ empleado.apellido_paterno }} {{ empleado.apellido_materno }}</td>
-                <td>{{ empleado.celular }}</td>
-                <td>{{ empleado.email|default:"-" }}</td>
-                <td>{{ empleado.get_tipo_contrato_display }}</td>
-                <td>{{ empleado.activo|yesno:"Sí,No" }}</td>
-                <td>{{ empleado.permisos.count }}</td>
-                <td>{{ empleado.faltas.count }}</td>
-                <td>
-                    <a href="{% url 'editar_empleado' empleado.id %}" class="btn btn-sm btn-warning">Editar</a>
-                    <a href="{% url 'eliminar_empleado' empleado.id %}" class="btn btn-sm btn-danger">Eliminar</a>
-                    <a href="{% url 'crear_permiso' empleado.id %}" class="btn btn-sm btn-info">Añadir Permiso</a>
-                    <a href="{% url 'crear_falta' empleado.id %}" class="btn btn-sm btn-secondary">Añadir Falta</a>
-                </td>
-            </tr>
-            {% empty %}
-            <tr>
-                <td colspan="9">No hay empleados registrados.</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    <div class="pagination">
-        <span class="step-links">
-            {% if page_obj.has_previous %}
-                <a href="?page=1" class="btn btn-outline-primary">« Primera</a>
-                <a href="?page={{ page_obj.previous_page_number }}" class="btn btn-outline-primary">Anterior</a>
-            {% endif %}
-            <span class="current">
-                Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}.
-            </span>
-            {% if page_obj.has_next %}
-                <a href="?page={{ page_obj.next_page_number }}" class="btn btn-outline-primary">Siguiente</a>
-                <a href="?page={{ page_obj.paginator.num_pages }}" class="btn btn-outline-primary">Última »</a>
-            {% endif %}
-        </span>
-    </div>
+<div class="page-header">
+  <h1 class="page-title"><i class="bi bi-people me-2"></i>Empleados</h1>
+  <div class="d-flex gap-2">
+    <a href="{% url 'reporte_dias_trabajados' %}" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-calendar-check me-1"></i>Días Trabajados
+    </a>
+    <a href="{% url 'crear_empleado' %}" class="btn btn-success btn-sm">
+      <i class="bi bi-plus-lg me-1"></i>Nuevo Empleado
+    </a>
+  </div>
 </div>
-<style>
-    .table th, .table td {
-        vertical-align: middle;
-    }
-    .btn:hover {
-        background-color: #1e40af;
-        border-color: #1e40af;
-    }
-</style>
+
+<form method="get" class="filter-bar">
+  <div class="filter-group" style="flex:1;min-width:200px">
+    <label>Buscar</label>
+    <input type="text" name="q" class="form-control" placeholder="Nombre, CI, código…" value="{{ q }}">
+  </div>
+  <div class="filter-group">
+    <label>Estado</label>
+    <select name="activo" class="form-select">
+      <option value="">Todos</option>
+      <option value="1" {% if activo == "1" %}selected{% endif %}>Activos</option>
+      <option value="0" {% if activo == "0" %}selected{% endif %}>Inactivos</option>
+    </select>
+  </div>
+  <div class="filter-group justify-content-end">
+    <label class="invisible">.</label>
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-search me-1"></i>Filtrar</button>
+      <a href="{% url 'lista_empleados' %}" class="btn btn-outline-secondary btn-sm">Limpiar</a>
+    </div>
+  </div>
+</form>
+
+<div class="table-wrapper">
+  <table class="table table-hover">
+    <thead>
+      <tr>
+        <th>CI</th>
+        <th>Nombre</th>
+        <th>Celular</th>
+        <th>Contrato</th>
+        <th>Estado</th>
+        <th>Permisos</th>
+        <th>Faltas</th>
+        <th>Acciones</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for emp in page_obj %}
+      <tr>
+        <td><span class="fw-semibold">{{ emp.ci|default:"—" }}</span></td>
+        <td>{{ emp.nombres }} {{ emp.apellido_paterno }} {{ emp.apellido_materno }}</td>
+        <td>{{ emp.celular }}</td>
+        <td>{{ emp.get_tipo_contrato_display }}</td>
+        <td>
+          {% if emp.activo %}
+            <span class="badge-estado badge-activo">Activo</span>
+          {% else %}
+            <span class="badge-estado badge-inactivo">Inactivo</span>
+          {% endif %}
+        </td>
+        <td class="text-center">{{ emp.permisos.count }}</td>
+        <td class="text-center">{{ emp.faltas.count }}</td>
+        <td>
+          <div class="btn-actions">
+            <a href="{% url 'editar_empleado' emp.id %}" class="btn btn-sm btn-outline-primary" title="Editar">
+              <i class="bi bi-pencil"></i>
+            </a>
+            <a href="{% url 'crear_permiso' emp.id %}" class="btn btn-sm btn-outline-info" title="Añadir permiso">
+              <i class="bi bi-calendar-check"></i>
+            </a>
+            <a href="{% url 'crear_falta' emp.id %}" class="btn btn-sm btn-outline-warning" title="Añadir falta">
+              <i class="bi bi-calendar-x"></i>
+            </a>
+            <a href="{% url 'eliminar_empleado' emp.id %}" class="btn btn-sm btn-outline-danger" title="Eliminar">
+              <i class="bi bi-trash"></i>
+            </a>
+          </div>
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="8">
+          <div class="empty-state">
+            <i class="bi bi-people d-block"></i>
+            No hay empleados{% if q %} que coincidan con "{{ q }}"{% endif %}.
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="pagination-bar">
+    <span>{{ total }} empleado{{ total|pluralize }}</span>
+    <nav>
+      <ul class="pagination pagination-sm mb-0">
+        {% if page_obj.has_previous %}
+          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&activo={{ activo }}">«</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&activo={{ activo }}">‹</a></li>
+        {% endif %}
+        <li class="page-item active"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
+        {% if page_obj.has_next %}
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&activo={{ activo }}">›</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&activo={{ activo }}">»</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+  </div>
+</div>
 {% endblock %}

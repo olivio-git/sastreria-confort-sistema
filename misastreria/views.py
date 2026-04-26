@@ -57,11 +57,25 @@ def dashboard(request):
 
 @login_required
 def lista_empleados(request):
-    empleados = Empleado.objects.all()
-    paginator = Paginator(empleados, 10)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
-    return render(request, 'misastreria/empleados/lista.html', {'page_obj': page_obj})
+    q = request.GET.get('q', '').strip()
+    activo = request.GET.get('activo', '')
+
+    empleados = Empleado.objects.order_by('-creado')
+
+    if q:
+        empleados = empleados.filter(
+            Q(nombres__icontains=q) | Q(apellido_paterno__icontains=q) |
+            Q(apellido_materno__icontains=q) | Q(ci__icontains=q) | Q(codigo__icontains=q)
+        )
+    if activo in ('1', '0'):
+        empleados = empleados.filter(activo=(activo == '1'))
+
+    paginator = Paginator(empleados, 15)
+    page_obj = paginator.get_page(request.GET.get('page'))
+    return render(request, 'misastreria/empleados/lista.html', {
+        'page_obj': page_obj, 'q': q, 'activo': activo,
+        'total': empleados.count(),
+    })
 
 @login_required
 def crear_empleado(request):
@@ -181,12 +195,30 @@ def reporte_dias_trabajados(request):
     })
 
 @login_required
+@login_required
 def lista_clientes(request):
-    clientes = Cliente.objects.all()
-    paginator = Paginator(clientes, 10)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
-    return render(request, 'misastreria/clientes/lista.html', {'page_obj': page_obj})
+    q = request.GET.get('q', '').strip()
+    desde = request.GET.get('desde', '')
+    hasta = request.GET.get('hasta', '')
+
+    clientes = Cliente.objects.order_by('-id')
+
+    if q:
+        clientes = clientes.filter(
+            Q(nombres__icontains=q) | Q(apellido_paterno__icontains=q) |
+            Q(apellido_materno__icontains=q) | Q(ci__icontains=q) | Q(celular__icontains=q)
+        )
+    if desde:
+        clientes = clientes.filter(fecha_registro__gte=desde)
+    if hasta:
+        clientes = clientes.filter(fecha_registro__lte=hasta)
+
+    paginator = Paginator(clientes, 15)
+    page_obj = paginator.get_page(request.GET.get('page'))
+    return render(request, 'misastreria/clientes/lista.html', {
+        'page_obj': page_obj, 'q': q, 'desde': desde, 'hasta': hasta,
+        'total': clientes.count(),
+    })
 
 @login_required
 def crear_cliente(request):
@@ -221,28 +253,6 @@ def eliminar_cliente(request, id):
         messages.success(request, 'Cliente eliminado exitosamente.')
         return redirect('lista_clientes')
     return render(request, 'misastreria/clientes/eliminar.html', {'cliente': cliente})
-
-@login_required
-def lista_reparaciones(request):
-    print("Accediendo a lista_reparaciones")  # Debug
-    query = request.GET.get('q', '')
-    reparaciones = Reparacion.objects.all()
-    
-    if query:
-        reparaciones = reparaciones.filter(
-            Q(codigo__icontains=query) |
-            Q(cliente__nombre__icontains=query) |
-            Q(tipo_prenda__icontains=query) |
-            Q(tipo_reparacion__icontains=query) |
-            Q(otro_prenda__icontains=query, otro_prenda__isnull=False) |
-            Q(otro_reparacion__icontains=query, otro_reparacion__isnull=False) |
-            Q(detalles__icontains=query, detalles__isnull=False)
-        )
-    
-    return render(request, 'misastreria/reparaciones/lista.html', {
-        'reparaciones': reparaciones,
-        'query': query
-    })
 
 @login_required
 def lista_reparaciones(request):

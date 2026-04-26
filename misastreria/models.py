@@ -11,8 +11,9 @@ class Empleado(models.Model):
         ('contrato', 'Contrato'),
         ('porcentaje', 'Porcentaje'),
     ]
-    
+
     codigo = models.CharField(max_length=10, unique=True, verbose_name="Código")
+    ci = models.CharField(max_length=20, unique=True, null=True, blank=True, verbose_name="CI")
     nombres = models.CharField(max_length=100, verbose_name="Nombres")
     apellido_paterno = models.CharField(max_length=100, verbose_name="Apellido Paterno")
     apellido_materno = models.CharField(max_length=100, verbose_name="Apellido Materno")
@@ -59,14 +60,26 @@ class Falta(models.Model):
 
 class Cliente(models.Model):
     codigo = models.CharField(max_length=10, unique=True, verbose_name="Código de Cliente")
+    ci = models.CharField(max_length=20, unique=True, null=True, blank=True, verbose_name="CI")
     nombres = models.CharField(max_length=100, verbose_name="Nombres")
     apellido_paterno = models.CharField(max_length=100, verbose_name="Apellido Paterno")
-    apellido_materno = models.CharField(max_length=100, verbose_name="Apellido Materno")
-    edad = models.PositiveIntegerField(verbose_name="Edad")
+    apellido_materno = models.CharField(max_length=100, blank=True, verbose_name="Apellido Materno")
+    edad = models.PositiveIntegerField(null=True, blank=True, verbose_name="Edad")
     celular = models.CharField(max_length=15, validators=[RegexValidator(r'^\+?\d{9,15}$')], verbose_name="Celular")
     email = models.EmailField(null=True, blank=True, verbose_name="Correo Electrónico")
     fecha_registro = models.DateField(default=timezone.now, verbose_name="Fecha de Registro")
     notas = models.TextField(blank=True, verbose_name="Notas")
+
+    def save(self, *args, **kwargs):
+        if not self.codigo:
+            last = Cliente.objects.order_by('-id').first()
+            numero = (int(last.codigo.split('-')[1]) + 1) if last and '-' in last.codigo else 1
+            self.codigo = f"CLI-{numero:03d}"
+        self.nombres = ' '.join(w.capitalize() for w in self.nombres.split())
+        self.apellido_paterno = self.apellido_paterno.capitalize()
+        if self.apellido_materno:
+            self.apellido_materno = self.apellido_materno.capitalize()
+        super().save(*args, **kwargs)
 
     class Meta:
         verbose_name = "Cliente"

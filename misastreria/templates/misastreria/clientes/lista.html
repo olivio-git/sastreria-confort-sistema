@@ -1,38 +1,95 @@
 {% extends 'misastreria/base.html' %}
-{% block titulo %}Lista de Clientes{% endblock %}
+{% block titulo %}Clientes{% endblock %}
 {% block contenido %}
-<h1>Lista de Clientes</h1>
-<a href="{% url 'crear_cliente' %}" class="btn btn-success mb-3">Crear Cliente</a>
-<table class="table table-striped">
+<div class="page-header">
+  <h1 class="page-title"><i class="bi bi-person-lines-fill me-2"></i>Clientes</h1>
+  <a href="{% url 'crear_cliente' %}" class="btn btn-success btn-sm">
+    <i class="bi bi-plus-lg me-1"></i>Nuevo Cliente
+  </a>
+</div>
+
+<form method="get" class="filter-bar">
+  <div class="filter-group" style="flex:1;min-width:200px">
+    <label>Buscar</label>
+    <input type="text" name="q" class="form-control" placeholder="Nombre, CI, celular…" value="{{ q }}">
+  </div>
+  <div class="filter-group">
+    <label>Desde</label>
+    <input type="date" name="desde" class="form-control" value="{{ desde }}">
+  </div>
+  <div class="filter-group">
+    <label>Hasta</label>
+    <input type="date" name="hasta" class="form-control" value="{{ hasta }}">
+  </div>
+  <div class="filter-group justify-content-end">
+    <label class="invisible">.</label>
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-search me-1"></i>Filtrar</button>
+      <a href="{% url 'lista_clientes' %}" class="btn btn-outline-secondary btn-sm">Limpiar</a>
+    </div>
+  </div>
+</form>
+
+<div class="table-wrapper">
+  <table class="table table-hover">
     <thead>
-        <tr>
-            <th>Código</th>
-            <th>Nombres</th>
-            <th>Apellidos</th>
-            <th>Edad</th>
-            <th>Celular</th>
-            <th>Fecha de Registro</th>
-            <th>Acciones</th>
-        </tr>
+      <tr>
+        <th>CI</th>
+        <th>Nombre</th>
+        <th>Celular</th>
+        <th>Registro</th>
+        <th>Notas</th>
+        <th>Acciones</th>
+      </tr>
     </thead>
     <tbody>
-        {% for cliente in page_obj %}
-        <tr>
-            <td>{{ cliente.codigo }}</td>
-            <td>{{ cliente.nombres }}</td>
-            <td>{{ cliente.apellido_paterno }} {{ cliente.apellido_materno }}</td>
-            <td>{{ cliente.edad }}</td>
-            <td>{{ cliente.celular }}</td>
-            <td>{{ cliente.fecha_registro|date:"d/m/Y" }}</td>
-            <td>
-                <a href="{% url 'editar_cliente' cliente.id %}" class="btn btn-primary btn-sm">Editar</a>
-                <a href="{% url 'eliminar_cliente' cliente.id %}" class="btn btn-danger btn-sm">Eliminar</a>
-            </td>
-        </tr>
-        {% empty %}
-        <tr><td colspan="7">No hay clientes registrados.</td></tr>
-        {% endfor %}
+      {% for cliente in page_obj %}
+      <tr>
+        <td><span class="fw-semibold">{{ cliente.ci|default:"—" }}</span></td>
+        <td>{{ cliente.nombres }} {{ cliente.apellido_paterno }} {{ cliente.apellido_materno }}</td>
+        <td>{{ cliente.celular }}</td>
+        <td>{{ cliente.fecha_registro|date:"d/m/Y" }}</td>
+        <td class="text-muted" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          {{ cliente.notas|default:"—" }}
+        </td>
+        <td>
+          <div class="btn-actions">
+            <a href="{% url 'editar_cliente' cliente.id %}" class="btn btn-sm btn-outline-primary" title="Editar">
+              <i class="bi bi-pencil"></i>
+            </a>
+            <a href="{% url 'eliminar_cliente' cliente.id %}" class="btn btn-sm btn-outline-danger" title="Eliminar">
+              <i class="bi bi-trash"></i>
+            </a>
+          </div>
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="6">
+          <div class="empty-state">
+            <i class="bi bi-person-x d-block"></i>
+            No hay clientes{% if q %} que coincidan con "{{ q }}"{% endif %}.
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
     </tbody>
-</table>
-{% include 'misastreria/paginacion.html' %}
+  </table>
+  <div class="pagination-bar">
+    <span>{{ total }} cliente{{ total|pluralize }}</span>
+    <nav>
+      <ul class="pagination pagination-sm mb-0">
+        {% if page_obj.has_previous %}
+          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}">«</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}">‹</a></li>
+        {% endif %}
+        <li class="page-item active"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
+        {% if page_obj.has_next %}
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}">›</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}">»</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+  </div>
+</div>
 {% endblock %}
