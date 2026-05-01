@@ -1,0 +1,87 @@
+<div class="item-card">
+  <div class="d-flex align-items-center gap-2 mb-2">
+    <div style="min-width:200px;max-width:260px">{{ item_form.tipo_prenda }}</div>
+    {{ item_form.id }}
+    {{ item_form.DELETE }}
+    <button type="button" class="btn btn-sm btn-outline-danger ms-auto remove-item" title="Quitar prenda">
+      <i class="bi bi-x-lg"></i>
+    </button>
+  </div>
+
+  {% if item_form.errors %}
+  <div class="alert alert-danger py-1 mt-1 small">{{ item_form.errors.as_text }}</div>
+  {% endif %}
+
+  <!-- Pantalón -->
+  <div class="medidas-block" data-tipo="pantalon" style="display:none">
+    <div class="d-flex flex-wrap gap-1 align-items-end">
+      <div class="medida-cell"><label title="Largo Total" data-bs-toggle="tooltip" data-bs-placement="top">L.Tot</label>{{ item_form.pantalon_largo_total }}</div>
+      <div class="medida-cell"><label title="Contorno Cintura" data-bs-toggle="tooltip" data-bs-placement="top">C.Cin</label>{{ item_form.pantalon_contorno_cintura }}</div>
+      <div class="medida-cell"><label title="Contorno Cadera" data-bs-toggle="tooltip" data-bs-placement="top">C.Cad</label>{{ item_form.pantalon_contorno_cadera }}</div>
+      <div class="medida-cell"><label title="Largo Entrepierna" data-bs-toggle="tooltip" data-bs-placement="top">L.Ent</label>{{ item_form.pantalon_largo_entrepierna }}</div>
+      <div class="medida-cell"><label title="Contorno Pierna" data-bs-toggle="tooltip" data-bs-placement="top">C.Pna</label>{{ item_form.pantalon_contorno_pierna }}</div>
+      <div class="medida-cell"><label title="Contorno Rodilla" data-bs-toggle="tooltip" data-bs-placement="top">C.Rod</label>{{ item_form.pantalon_contorno_rodilla }}</div>
+      <div class="medida-cell"><label title="Contorno Bota" data-bs-toggle="tooltip" data-bs-placement="top">C.Bot</label>{{ item_form.pantalon_contorno_bota }}</div>
+      <div class="medida-cell"><label title="Tiro Delantero" data-bs-toggle="tooltip" data-bs-placement="top">T.Del</label>{{ item_form.pantalon_tiro_delantero }}</div>
+      <div class="medida-cell"><label title="Tiro Trasero" data-bs-toggle="tooltip" data-bs-placement="top">T.Tra</label>{{ item_form.pantalon_tiro_trasero }}</div>
+    </div>
+  </div>
+
+  <!-- Chaleco -->
+  <div class="medidas-block" data-tipo="chaleco" style="display:none">
+    <div class="d-flex flex-wrap gap-1 align-items-end">
+      <div class="medida-cell"><label title="Contorno Busto" data-bs-toggle="tooltip" data-bs-placement="top">C.Bus</label>{{ item_form.chaleco_contorno_busto }}</div>
+      <div class="medida-cell"><label title="Contorno Cintura" data-bs-toggle="tooltip" data-bs-placement="top">C.Cin</label>{{ item_form.chaleco_contorno_cintura }}</div>
+      <div class="medida-cell"><label title="Contorno Cadera" data-bs-toggle="tooltip" data-bs-placement="top">C.Cad</label>{{ item_form.chaleco_contorno_cadera }}</div>
+      <div class="medida-cell"><label title="Largo Talle" data-bs-toggle="tooltip" data-bs-placement="top">L.Tal</label>{{ item_form.chaleco_largo_talle }}</div>
+      <div class="medida-cell"><label title="Largo Total" data-bs-toggle="tooltip" data-bs-placement="top">L.Tot</label>{{ item_form.chaleco_largo_total }}</div>
+      <div class="medida-cell"><label title="Altura Botones" data-bs-toggle="tooltip" data-bs-placement="top">A.Bot</label>{{ item_form.chaleco_altura_botones }}</div>
+    </div>
+  </div>
+
+  <!-- Saco -->
+  <div class="medidas-block" data-tipo="saco" style="display:none">
+    <div class="d-flex flex-wrap gap-1 align-items-end">
+      <div class="medida-cell"><label title="Contorno Busto" data-bs-toggle="tooltip" data-bs-placement="top">C.Bus</label>{{ item_form.saco_contorno_busto }}</div>
+      <div class="medida-cell"><label title="Contorno Cintura" data-bs-toggle="tooltip" data-bs-placement="top">C.Cin</label>{{ item_form.saco_contorno_cintura }}</div>
+      <div class="medida-cell"><label title="Contorno Cadera" data-bs-toggle="tooltip" data-bs-placement="top">C.Cad</label>{{ item_form.saco_contorno_cadera }}</div>
+      <div class="medida-cell"><label title="Largo Talle" data-bs-toggle="tooltip" data-bs-placement="top">L.Tal</label>{{ item_form.saco_largo_talle }}</div>
+      <div class="medida-cell"><label title="Largo Total" data-bs-toggle="tooltip" data-bs-placement="top">L.Tot</label>{{ item_form.saco_largo_total }}</div>
+      <div class="medida-cell"><label title="Ancho Hombros" data-bs-toggle="tooltip" data-bs-placement="top">A.Hom</label>{{ item_form.saco_ancho_hombros }}</div>
+      <div class="medida-cell"><label title="Ancho Espalda" data-bs-toggle="tooltip" data-bs-placement="top">A.Esp</label>{{ item_form.saco_ancho_espalda }}</div>
+      <div class="medida-cell"><label title="Contorno Brazo" data-bs-toggle="tooltip" data-bs-placement="top">C.Bra</label>{{ item_form.saco_contorno_brazo }}</div>
+      <div class="medida-cell"><label title="Largo Manga" data-bs-toggle="tooltip" data-bs-placement="top">L.Man</label>{{ item_form.saco_largo_manga }}</div>
+      <div class="medida-cell"><label title="Contorno Puño" data-bs-toggle="tooltip" data-bs-placement="top">C.Puñ</label>{{ item_form.saco_contorno_puno }}</div>
+    </div>
+  </div>
+
+  <!-- Saco – Mujer -->
+  <div class="medidas-block" data-tipo="saco_mujer" style="display:none">
+    <div class="d-flex flex-wrap gap-1 align-items-end">
+      <div class="medida-cell"><label title="Contorno Busto" data-bs-toggle="tooltip" data-bs-placement="top">C.Bus</label>{{ item_form.saco_mujer_contorno_busto }}</div>
+      <div class="medida-cell"><label title="Contorno Cintura" data-bs-toggle="tooltip" data-bs-placement="top">C.Cin</label>{{ item_form.saco_mujer_contorno_cintura }}</div>
+      <div class="medida-cell"><label title="Contorno Cadera" data-bs-toggle="tooltip" data-bs-placement="top">C.Cad</label>{{ item_form.saco_mujer_contorno_cadera }}</div>
+      <div class="medida-cell"><label title="Ancho Hombros" data-bs-toggle="tooltip" data-bs-placement="top">A.Hom</label>{{ item_form.saco_mujer_ancho_hombros }}</div>
+      <div class="medida-cell"><label title="Ancho Espalda" data-bs-toggle="tooltip" data-bs-placement="top">A.Esp</label>{{ item_form.saco_mujer_ancho_espalda }}</div>
+      <div class="medida-cell"><label title="Largo Talle" data-bs-toggle="tooltip" data-bs-placement="top">L.Tal</label>{{ item_form.saco_mujer_largo_talle }}</div>
+      <div class="medida-cell"><label title="Largo Total" data-bs-toggle="tooltip" data-bs-placement="top">L.Tot</label>{{ item_form.saco_mujer_largo_total }}</div>
+      <div class="medida-cell"><label title="Altura Busto" data-bs-toggle="tooltip" data-bs-placement="top">A.Bus</label>{{ item_form.saco_mujer_altura_busto }}</div>
+      <div class="medida-cell"><label title="Separación Busto" data-bs-toggle="tooltip" data-bs-placement="top">S.Bus</label>{{ item_form.saco_mujer_separacion_busto }}</div>
+      <div class="medida-cell"><label title="Dif. Talle" data-bs-toggle="tooltip" data-bs-placement="top">D.Tal</label>{{ item_form.saco_mujer_dif_talle }}</div>
+    </div>
+  </div>
+
+  <!-- Chaleco – Mujer -->
+  <div class="medidas-block" data-tipo="chaleco_mujer" style="display:none">
+    <div class="d-flex flex-wrap gap-1 align-items-end">
+      <div class="medida-cell"><label title="Contorno Busto" data-bs-toggle="tooltip" data-bs-placement="top">C.Bus</label>{{ item_form.chaleco_mujer_contorno_busto }}</div>
+      <div class="medida-cell"><label title="Contorno Cintura" data-bs-toggle="tooltip" data-bs-placement="top">C.Cin</label>{{ item_form.chaleco_mujer_contorno_cintura }}</div>
+      <div class="medida-cell"><label title="Contorno Cadera" data-bs-toggle="tooltip" data-bs-placement="top">C.Cad</label>{{ item_form.chaleco_mujer_contorno_cadera }}</div>
+      <div class="medida-cell"><label title="Largo Talle" data-bs-toggle="tooltip" data-bs-placement="top">L.Tal</label>{{ item_form.chaleco_mujer_largo_talle }}</div>
+      <div class="medida-cell"><label title="Largo Total" data-bs-toggle="tooltip" data-bs-placement="top">L.Tot</label>{{ item_form.chaleco_mujer_largo_total }}</div>
+      <div class="medida-cell"><label title="Altura Busto" data-bs-toggle="tooltip" data-bs-placement="top">A.Bus</label>{{ item_form.chaleco_mujer_altura_busto }}</div>
+      <div class="medida-cell"><label title="Separación Busto" data-bs-toggle="tooltip" data-bs-placement="top">S.Bus</label>{{ item_form.chaleco_mujer_separacion_busto }}</div>
+      <div class="medida-cell"><label title="Largo Delantero" data-bs-toggle="tooltip" data-bs-placement="top">L.Del</label>{{ item_form.chaleco_mujer_largo_delantero }}</div>
+    </div>
+  </div>
+</div>

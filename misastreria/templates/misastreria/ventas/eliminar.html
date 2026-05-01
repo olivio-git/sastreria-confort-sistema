@@ -1,20 +1,31 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}Eliminar Venta{% endblock %}
 {% block contenido %}
-<div class="container py-4">
-    <h2 class="mb-4">Eliminar Venta: {{ venta.codigo }}</h2>
-    {% if messages %}
-        <div class="alert alert-info">
-            {% for message in messages %}
-                {{ message }}
-            {% endfor %}
-        </div>
-    {% endif %}
-    <p>¿Estás seguro de que deseas eliminar la venta <strong>{{ venta.codigo }}</strong> del artículo <strong>{{ venta.articulo }}</strong> para el cliente <strong>{{ venta.cliente|default:"sin cliente" }}</strong> del <strong>{{ venta.fecha_venta|date:"d/m/Y" }}</strong>?</p>
-    <form method="post">
-        {% csrf_token %}
-        <button type="submit" class="btn btn-danger">Eliminar</button>
-        <a href="{% url 'lista_ventas' %}" class="btn btn-secondary">Cancelar</a>
-    </form>
+<div class="page-header">
+  <h1 class="page-title"><i class="bi bi-trash me-2"></i>Eliminar Venta</h1>
+</div>
+
+<div class="form-card" style="max-width:560px">
+  <p class="mb-3">¿Eliminar la venta <strong>{{ venta.codigo }}</strong>
+    {% if venta.cliente %}del cliente <strong>{{ venta.cliente }}</strong>{% endif %}
+    del <strong>{{ venta.fecha_venta|date:"d/m/Y" }}</strong>?
+  </p>
+
+  {% if venta.items.all %}
+  <p class="text-muted mb-1">Se restaurará el stock de las siguientes prendas:</p>
+  <ul class="mb-3">
+    {% for item in venta.items.all %}
+    <li>{{ item.articulo }} × {{ item.cantidad }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  <form method="post">
+    {% csrf_token %}
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-danger"><i class="bi bi-trash me-1"></i>Eliminar</button>
+      <a href="{% url 'lista_ventas' %}" class="btn btn-outline-secondary">Cancelar</a>
+    </div>
+  </form>
 </div>
 {% endblock %}

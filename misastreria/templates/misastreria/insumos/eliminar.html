@@ -1,0 +1,22 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Eliminar Insumo{% endblock %}
+{% block contenido %}
+
+<div class="page-header">
+  <h1 class="page-title"><i class="bi bi-trash me-2"></i>Eliminar Insumo</h1>
+</div>
+
+<div class="form-card">
+  <p>¿Estás seguro de que deseas eliminar el insumo <strong>{{ insumo }}</strong> ({{ insumo.codigo }})?</p>
+  <p class="text-muted">Esta acción no se puede deshacer.</p>
+
+  <form method="post" class="d-flex gap-2">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-danger">
+      <i class="bi bi-trash me-1"></i>Sí, eliminar
+    </button>
+    <a href="{% url 'lista_insumos' %}" class="btn btn-outline-secondary">Cancelar</a>
+  </form>
+</div>
+
+{% endblock %}

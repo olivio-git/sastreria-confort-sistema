@@ -1,0 +1,149 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}{{ titulo }}{% endblock %}
+
+{% block contenido %}
+<div class="page-header">
+  <h1 class="page-title"><i class="bi bi-scissors me-2"></i>{{ titulo }}</h1>
+  {% if orden %}<small class="text-muted ms-2">{{ orden.codigo }}</small>{% endif %}
+</div>
+
+<form method="post" id="ordenForm">
+  {% csrf_token %}
+
+  <!-- Datos de la orden -->
+  <div class="form-card mb-3">
+    <h6 class="fw-semibold mb-3 text-muted">Datos de la orden</h6>
+    <div class="row g-3">
+      <div class="col-md-12">
+        <label class="form-label">{{ form.descripcion.label }}</label>
+        {{ form.descripcion }}
+        {% if form.descripcion.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.descripcion.errors }}</div>{% endif %}
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">{{ form.empleado.label }}</label>
+        {{ form.empleado }}
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">{{ form.confeccion.label }}</label>
+        {{ form.confeccion }}
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">{{ form.fecha_inicio.label }}</label>
+        {{ form.fecha_inicio }}
+        {% if form.fecha_inicio.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.fecha_inicio.errors }}</div>{% endif %}
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">{{ form.fecha_estimada.label }}</label>
+        {{ form.fecha_estimada }}
+      </div>
+      <div class="col-md-4">
+        {% if orden %}
+        <label class="form-label">Estado actual</label>
+        <div class="form-control-plaintext">
+          <span class="badge-estado badge-{{ orden.estado }}">{{ orden.get_estado_display }}</span>
+        </div>
+        {% endif %}
+      </div>
+      <div class="col-md-12">
+        <label class="form-label">{{ form.notas.label }}</label>
+        {{ form.notas }}
+      </div>
+    </div>
+  </div>
+
+  <!-- Insumos utilizados -->
+  <div class="form-card mb-3">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h6 class="fw-semibold mb-0 text-muted">Insumos utilizados</h6>
+      <button type="button" class="btn btn-outline-primary btn-sm" id="btnAgregarInsumo">
+        <i class="bi bi-plus-lg me-1"></i>Agregar insumo
+      </button>
+    </div>
+
+    <div class="table-responsive">
+      <table class="table table-sm" id="tablaInsumos">
+        <thead>
+          <tr>
+            <th style="min-width:280px">Insumo</th>
+            <th style="width:160px">Cantidad usada</th>
+            <th style="width:44px"></th>
+          </tr>
+        </thead>
+        <tbody id="insumosBody"></tbody>
+      </table>
+    </div>
+    <div id="sinInsumos" class="text-muted text-center py-2">
+      <i class="bi bi-box me-1"></i>Sin insumos registrados (opcional).
+    </div>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button type="submit" class="btn btn-primary">
+      <i class="bi bi-check-lg me-1"></i>Guardar
+    </button>
+    <a href="{% url 'lista_ordenes' %}" class="btn btn-outline-secondary">Cancelar</a>
+  </div>
+</form>
+
+<template id="insumoRowTemplate">
+  <tr class="insumo-row">
+    <td>
+      <select name="item_insumo" class="form-select form-select-sm item-insumo">
+        <option value="">— Seleccionar insumo —</option>
+      </select>
+    </td>
+    <td><input type="number" name="item_cantidad" class="form-control form-control-sm item-cantidad" step="0.001" min="0.001" placeholder="0.000"></td>
+    <td class="align-middle">
+      <button type="button" class="btn btn-sm btn-outline-danger btn-remove-insumo" title="Quitar">
+        <i class="bi bi-x-lg"></i>
+      </button>
+    </td>
+  </tr>
+</template>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const INSUMOS = {{ insumos_json|safe }};
+const ITEMS_INICIALES = {{ items_existentes|default:"[]"|safe }};
+
+const tbody    = document.getElementById('insumosBody');
+const sinLabel = document.getElementById('sinInsumos');
+
+function buildOptions(selectedId) {
+  let opts = '<option value="">— Seleccionar insumo —</option>';
+  INSUMOS.forEach(ins => {
+    const sel = (selectedId && ins.id == selectedId) ? 'selected' : '';
+    opts += `<option value="${ins.id}" ${sel}>${ins.label}</option>`;
+  });
+  return opts;
+}
+
+function actualizarSinLabel() {
+  sinLabel.style.display = tbody.querySelectorAll('.insumo-row').length ? 'none' : 'block';
+}
+
+function addRow(insumoId, cantidad) {
+  const tmpl = document.getElementById('insumoRowTemplate');
+  const row  = tmpl.content.cloneNode(true).querySelector('tr');
+
+  row.querySelector('.item-insumo').innerHTML = buildOptions(insumoId);
+  if (cantidad) row.querySelector('.item-cantidad').value = parseFloat(cantidad).toFixed(3);
+
+  row.querySelector('.btn-remove-insumo').addEventListener('click', function() {
+    row.remove(); actualizarSinLabel();
+  });
+
+  tbody.appendChild(row);
+  actualizarSinLabel();
+}
+
+if (ITEMS_INICIALES.length > 0) {
+  ITEMS_INICIALES.forEach(item => addRow(item.insumo_id, item.cantidad));
+} else {
+  actualizarSinLabel();
+}
+
+document.getElementById('btnAgregarInsumo').addEventListener('click', () => addRow());
+</script>
+{% endblock %}

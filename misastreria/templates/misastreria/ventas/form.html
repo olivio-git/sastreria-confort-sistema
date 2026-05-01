@@ -1,71 +1,206 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}{{ titulo }}{% endblock %}
+
 {% block contenido %}
-<div class="container py-4">
-    <h2 class="mb-4">{{ titulo }}</h2>
-    {% if messages %}
-        <div class="alert {% if 'error' in message.tags %}alert-danger{% else %}alert-info{% endif %}">
-            {% for message in messages %}
-                {{ message }}
-            {% endfor %}
-        </div>
-    {% endif %}
-    <form method="post" id="ventaForm">
-        {% csrf_token %}
-        <div class="row g-3">
-            {% for field in form %}
-                <div class="col-md-6">
-                    <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
-                    {{ field }}
-                    {% if field.errors %}
-                        <div class="alert alert-danger mt-1 py-1">{{ field.errors }}</div>
-                    {% endif %}
-                </div>
-            {% endfor %}
-            <div class="col-md-6">
-                <label for="precio_total_display" class="form-label">Precio Total</label>
-                <input type="text" id="precio_total_display" class="form-control" readonly value="{% if form.instance.pk %}{{ form.instance.precio_total|floatformat:2 }}{% else %}0.00{% endif %}">
-            </div>
-        </div>
-        <div class="mt-4">
-            <button type="submit" class="btn btn-primary">Guardar</button>
-            <a href="{% url 'lista_ventas' %}" class="btn btn-secondary">Cancelar</a>
-        </div>
-    </form>
+<div class="page-header">
+  <h1 class="page-title"><i class="bi bi-cart me-2"></i>{{ titulo }}</h1>
+  {% if venta %}<small class="text-muted ms-2">{{ venta.codigo }}</small>{% endif %}
 </div>
 
-<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-<script>
-$(document).ready(function() {
-    function updatePrecioTotal() {
-        var articuloId = $('#id_articulo').val();
-        var cantidad = parseInt($('#id_cantidad').val()) || 0;
-        
-        if (articuloId && cantidad > 0) {
-            $.ajax({
-                url: '{% url 'get_precio_articulo' %}',
-                data: { articulo_id: articuloId },
-                success: function(data) {
-                    if (data.precio) {
-                        var precioTotal = (data.precio * cantidad).toFixed(2);
-                        $('#precio_total_display').val(precioTotal);
-                    } else {
-                        $('#precio_total_display').val('0.00');
-                    }
-                },
-                error: function() {
-                    $('#precio_total_display').val('0.00');
-                }
-            });
-        } else {
-            $('#precio_total_display').val('0.00');
-        }
-    }
+<form method="post" id="ventaForm">
+  {% csrf_token %}
 
-    $('#id_articulo, #id_cantidad').on('change keyup', updatePrecioTotal);
-    
-    // Ejecutar al cargar la página si hay datos iniciales
-    updatePrecioTotal();
+  <!-- Cabecera de la venta -->
+  <div class="form-card mb-3">
+    <h6 class="fw-semibold mb-3 text-muted">Datos de la venta</h6>
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label">Cliente</label>
+        <div style="position:relative">
+          <input type="text"
+                 data-cliente-search="id_cliente"
+                 data-endpoint="{% url 'buscar_clientes' %}"
+                 class="form-control"
+                 placeholder="Buscar por CI o nombre…"
+                 value="{% if form.instance.pk and form.instance.cliente %}{{ form.instance.cliente }}{% endif %}"
+                 autocomplete="off">
+          <input type="hidden" name="cliente" id="id_cliente" value="{{ form.cliente.value|default:'' }}">
+        </div>
+        {% if form.cliente.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.cliente.errors }}</div>{% endif %}
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">{{ form.empleado.label }}</label>
+        {{ form.empleado }}
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label">{{ form.fecha_venta.label }}</label>
+        {{ form.fecha_venta }}
+        {% if form.fecha_venta.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.fecha_venta.errors }}</div>{% endif %}
+      </div>
+      <div class="col-md-8">
+        <label class="form-label">{{ form.notas.label }}</label>
+        {{ form.notas }}
+      </div>
+    </div>
+  </div>
+
+  <!-- Tabla de prendas (multi-item) -->
+  <div class="form-card mb-3">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h6 class="fw-semibold mb-0 text-muted">Prendas</h6>
+      <button type="button" class="btn btn-outline-primary btn-sm" id="btnAgregarItem">
+        <i class="bi bi-plus-lg me-1"></i>Agregar prenda
+      </button>
+    </div>
+
+    <div class="table-responsive">
+      <table class="table table-sm" id="tablaItems">
+        <thead>
+          <tr>
+            <th style="min-width:260px">Prenda</th>
+            <th style="width:90px">Cant.</th>
+            <th style="width:130px">Precio unit.</th>
+            <th style="width:120px" class="text-end">Subtotal</th>
+            <th style="width:44px"></th>
+          </tr>
+        </thead>
+        <tbody id="itemsBody"></tbody>
+      </table>
+    </div>
+
+    <div id="sinItems" class="text-muted text-center py-3" style="display:none">
+      <i class="bi bi-cart-x me-1"></i>Sin prendas. Agrega al menos una.
+    </div>
+
+    <!-- Totales -->
+    <div class="d-flex flex-column align-items-end gap-1 mt-3 border-top pt-3">
+      <div class="d-flex gap-3 align-items-center">
+        <span class="text-muted">Subtotal</span>
+        <strong id="resSubtotal" style="min-width:110px;text-align:right">0.00</strong>
+      </div>
+      <div class="d-flex gap-3 align-items-center">
+        <label class="text-muted mb-0">Descuento</label>
+        <div class="input-group" style="width:140px">
+          {{ form.descuento }}
+          <span class="input-group-text">%</span>
+        </div>
+        <strong id="resDescuento" style="min-width:110px;text-align:right">- 0.00</strong>
+      </div>
+      <div class="d-flex gap-3 align-items-center fs-5">
+        <span class="fw-semibold">Total</span>
+        <strong id="resTotal" style="min-width:110px;text-align:right">0.00</strong>
+      </div>
+    </div>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button type="submit" class="btn btn-primary">
+      <i class="bi bi-check-lg me-1"></i>Guardar
+    </button>
+    <a href="{% url 'lista_ventas' %}" class="btn btn-outline-secondary">Cancelar</a>
+  </div>
+</form>
+
+<!-- Template de fila de ítem (oculto, fuera del form) -->
+<template id="itemRowTemplate">
+  <tr class="item-row">
+    <td>
+      <select name="item_articulo" class="form-select form-select-sm item-articulo">
+        <option value="">— Seleccionar prenda —</option>
+      </select>
+    </td>
+    <td><input type="number" name="item_cantidad" class="form-control form-control-sm item-cantidad" value="1" min="1"></td>
+    <td><input type="number" name="item_precio" class="form-control form-control-sm item-precio" step="0.01" min="0" placeholder="0.00"></td>
+    <td class="text-end align-middle"><span class="item-subtotal fw-semibold">0.00</span></td>
+    <td class="align-middle">
+      <button type="button" class="btn btn-sm btn-outline-danger btn-remove-item" title="Quitar">
+        <i class="bi bi-x-lg"></i>
+      </button>
+    </td>
+  </tr>
+</template>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const PRENDAS = {{ prendas_json|safe }};
+const ITEMS_INICIALES = {{ items_existentes|default:"[]"|safe }};
+
+const tbody     = document.getElementById('itemsBody');
+const sinItems  = document.getElementById('sinItems');
+const descInput = document.querySelector('[name="descuento"]');
+
+function buildOptions(selectedId) {
+  let opts = '<option value="">— Seleccionar prenda —</option>';
+  PRENDAS.forEach(p => {
+    const sel = (selectedId && p.id == selectedId) ? 'selected' : '';
+    opts += `<option value="${p.id}" data-precio="${p.precio}" ${sel}>${p.label} (stock: ${p.cantidad})</option>`;
+  });
+  return opts;
+}
+
+function calcFila(row) {
+  const cant   = parseFloat(row.querySelector('.item-cantidad').value) || 0;
+  const precio = parseFloat(row.querySelector('.item-precio').value)   || 0;
+  const sub    = cant * precio;
+  row.querySelector('.item-subtotal').textContent = sub.toFixed(2);
+  return sub;
+}
+
+function calcTotales() {
+  let subtotal = 0;
+  tbody.querySelectorAll('.item-row').forEach(r => { subtotal += calcFila(r); });
+  const pct       = parseFloat(descInput.value) || 0;
+  const descuento = subtotal * pct / 100;
+  const total     = subtotal - descuento;
+  document.getElementById('resSubtotal').textContent  = subtotal.toFixed(2);
+  document.getElementById('resDescuento').textContent = '- ' + descuento.toFixed(2);
+  document.getElementById('resTotal').textContent     = total.toFixed(2);
+  sinItems.style.display = tbody.querySelectorAll('.item-row').length ? 'none' : 'block';
+}
+
+function addRow(articuloId, cantidad, precio) {
+  const tmpl = document.getElementById('itemRowTemplate');
+  const row  = tmpl.content.cloneNode(true).querySelector('tr');
+
+  row.querySelector('.item-articulo').innerHTML = buildOptions(articuloId);
+  if (cantidad) row.querySelector('.item-cantidad').value = cantidad;
+  if (precio)   row.querySelector('.item-precio').value   = parseFloat(precio).toFixed(2);
+
+  row.querySelector('.item-articulo').addEventListener('change', function() {
+    const opt = this.selectedOptions[0];
+    if (opt && opt.dataset.precio) {
+      row.querySelector('.item-precio').value = parseFloat(opt.dataset.precio).toFixed(2);
+    }
+    calcTotales();
+  });
+  row.querySelector('.item-cantidad').addEventListener('input', calcTotales);
+  row.querySelector('.item-precio').addEventListener('input', calcTotales);
+  row.querySelector('.btn-remove-item').addEventListener('click', function() {
+    row.remove(); calcTotales();
+  });
+
+  tbody.appendChild(row);
+  calcTotales();
+}
+
+if (ITEMS_INICIALES.length > 0) {
+  ITEMS_INICIALES.forEach(item => addRow(item.articulo_id, item.cantidad, item.precio_unitario));
+} else {
+  addRow();
+}
+
+document.getElementById('btnAgregarItem').addEventListener('click', () => addRow());
+descInput.addEventListener('input', calcTotales);
+
+document.getElementById('ventaForm').addEventListener('submit', function(e) {
+  const validas = [...tbody.querySelectorAll('.item-row')]
+    .filter(r => r.querySelector('.item-articulo').value).length;
+  if (validas === 0) {
+    e.preventDefault();
+    alert('Debes agregar al menos una prenda a la venta.');
+  }
 });
 </script>
 {% endblock %}

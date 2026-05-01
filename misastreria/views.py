@@ -1,11 +1,12 @@
+from decimal import Decimal
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.db.models import Sum, F, ExpressionWrapper, DecimalField
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.auth.decorators import login_required
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
-from .models import Empleado, Cliente, Reparacion, Venta, Confeccion, Alquiler, Transaccion, Inventario, Permiso, Falta, Categoria
-from .forms import EmpleadoForm, ClienteForm, ReparacionForm, VentaForm, ConfeccionForm, AlquilerForm, TransaccionForm, InventarioForm, PermisoForm, FaltaForm, BajaInventarioForm, EmpleadoReporteForm, ClienteReporteForm, ReparacionReporteForm
+from .models import Empleado, Cliente, Reparacion, Venta, VentaItem, Confeccion, ConfeccionItem, Alquiler, AlquilerItem, Transaccion, PrendaInventario, Insumo, Permiso, Falta, OrdenProduccion, InsumoCortado
+from .forms import EmpleadoForm, ClienteForm, ReparacionForm, VentaForm, VentaItemForm, ConfeccionForm, ConfeccionItemFormSet, AlquilerForm, AlquilerItemForm, TransaccionForm, PrendaInventarioForm, InsumoForm, PermisoForm, FaltaForm, EmpleadoReporteForm, ClienteReporteForm, ReparacionReporteForm, OrdenProduccionForm, InsumoCortadoForm
 from django.core.paginator import Paginator
 from datetime import date, datetime, timedelta
 from dateutil import rrule
@@ -42,25 +43,36 @@ pdfmetrics.registerFont(TTFont('DejaVuSans', FONT_PATH))
 
 @login_required
 def dashboard(request):
-    modulos = [
-        {'nombre': 'Empleados', 'url': 'lista_empleados', 'icono': 'bi bi-people-fill', 'descripcion': 'Gestiona la información de los empleados.'},
-        {'nombre': 'Clientes', 'url': 'lista_clientes', 'icono': 'bi bi-person-lines-fill', 'descripcion': 'Administra los datos de los clientes.'},
-        {'nombre': 'Reparaciones', 'url': 'lista_reparaciones', 'icono': 'bi bi-tools', 'descripcion': 'Registra y gestiona reparaciones de prendas.'},
-        {'nombre': 'Ventas', 'url': 'lista_ventas', 'icono': 'bi bi-cart-fill', 'descripcion': 'Registra las ventas realizadas.'},
-        {'nombre': 'Confecciones', 'url': 'lista_confecciones', 'icono': 'bi bi-scissors', 'descripcion': 'Gestiona las confecciones de trajes.'},
-        {'nombre': 'Alquileres', 'url': 'lista_alquileres', 'icono': 'bi bi-bag-fill', 'descripcion': 'Administra los alquileres de prendas.'},
-        {'nombre': 'Transacciones', 'url': 'lista_transacciones', 'icono': 'bi bi-currency-dollar', 'descripcion': 'Registra las transacciones del negocio.'},
-        {'nombre': 'Inventario', 'url': 'lista_inventario', 'icono': 'bi bi-box-seam', 'descripcion': 'Controla el inventario de artículos.'},
-        {'nombre': 'Reportes', 'url': 'reporte_empleados', 'icono': 'bi bi-bar-chart-fill', 'descripcion': 'Consulta reportes de empleados, clientes, artículos, stock e ingresos.'},
-    ]
-    return render(request, 'misastreria/dashboard.html', {'modulos': modulos})
+    prendas_alerta = PrendaInventario.objects.filter(
+        estado='ACT', stock_minimo__isnull=False
+    ).extra(where=['cantidad <= stock_minimo']).order_by('nombre')
+
+    insumos_alerta = Insumo.objects.filter(
+        estado='ACT', stock_minimo__isnull=False
+    ).extra(where=['cantidad <= stock_minimo']).order_by('articulo')
+
+    reparaciones_pendientes = Reparacion.objects.filter(estado='pendiente').count()
+    alquileres_activos = Alquiler.objects.filter(estado='alquilado').count()
+    ordenes_activas = OrdenProduccion.objects.exclude(estado='terminado').count()
+
+    return render(request, 'misastreria/dashboard.html', {
+        'prendas_alerta':         prendas_alerta,
+        'insumos_alerta':         insumos_alerta,
+        'reparaciones_pendientes': reparaciones_pendientes,
+        'alquileres_activos':     alquileres_activos,
+        'ordenes_activas':        ordenes_activas,
+    })
 
 @login_required
 def lista_empleados(request):
     q = request.GET.get('q', '').strip()
     activo = request.GET.get('activo', '')
+    orden = request.GET.get('orden', 'desc')
 
-    empleados = Empleado.objects.order_by('-creado')
+    sort = '-creado' if orden == 'desc' else 'creado'
+    empleados = Empleado.objects.order_by(sort)
+    _p = request.GET.copy(); _p['orden'] = 'asc' if orden == 'desc' else 'desc'; _p.pop('page', None)
+    orden_toggle_url = '?' + _p.urlencode()
 
     if q:
         empleados = empleados.filter(
@@ -74,7 +86,7 @@ def lista_empleados(request):
     page_obj = paginator.get_page(request.GET.get('page'))
     return render(request, 'misastreria/empleados/lista.html', {
         'page_obj': page_obj, 'q': q, 'activo': activo,
-        'total': empleados.count(),
+        'total': empleados.count(), 'orden': orden, 'orden_toggle_url': orden_toggle_url,
     })
 
 @login_required
@@ -109,6 +121,17 @@ def eliminar_empleado(request, id):
     return render(request, 'misastreria/empleados/eliminar.html', {'empleado': empleado})
 
 @login_required
+def detalle_empleado(request, id):
+    empleado = get_object_or_404(Empleado, id=id)
+    permisos = empleado.permisos.order_by('-fecha_permiso')
+    faltas = empleado.faltas.order_by('-fecha_falta')
+    return render(request, 'misastreria/empleados/detalle.html', {
+        'empleado': empleado,
+        'permisos': permisos,
+        'faltas': faltas,
+    })
+
+@login_required
 def crear_permiso(request, empleado_id):
     empleado = get_object_or_404(Empleado, id=empleado_id)
     if request.method == 'POST':
@@ -117,7 +140,7 @@ def crear_permiso(request, empleado_id):
             permiso = form.save(commit=False)
             permiso.empleado = empleado
             permiso.save()
-            return redirect('lista_empleados')
+            return redirect('detalle_empleado', id=empleado_id)
     else:
         form = PermisoForm()
     return render(request, 'misastreria/empleados/crear_permiso.html', {'form': form, 'empleado': empleado})
@@ -131,10 +154,26 @@ def crear_falta(request, empleado_id):
             falta = form.save(commit=False)
             falta.empleado = empleado
             falta.save()
-            return redirect('lista_empleados')
+            return redirect('detalle_empleado', id=empleado_id)
     else:
         form = FaltaForm()
     return render(request, 'misastreria/empleados/crear_falta.html', {'form': form, 'empleado': empleado})
+
+@login_required
+def eliminar_permiso(request, id):
+    permiso = get_object_or_404(Permiso, id=id)
+    empleado_id = permiso.empleado.id
+    if request.method == 'POST':
+        permiso.delete()
+    return redirect('detalle_empleado', id=empleado_id)
+
+@login_required
+def eliminar_falta(request, id):
+    falta = get_object_or_404(Falta, id=id)
+    empleado_id = falta.empleado.id
+    if request.method == 'POST':
+        falta.delete()
+    return redirect('detalle_empleado', id=empleado_id)
 
 @login_required
 def reporte_dias_trabajados(request):
@@ -199,8 +238,12 @@ def lista_clientes(request):
     q = request.GET.get('q', '').strip()
     desde = request.GET.get('desde', '')
     hasta = request.GET.get('hasta', '')
+    orden = request.GET.get('orden', 'desc')
 
-    clientes = Cliente.objects.order_by('-id')
+    sort = '-creado' if orden == 'desc' else 'creado'
+    clientes = Cliente.objects.order_by(sort)
+    _p = request.GET.copy(); _p['orden'] = 'asc' if orden == 'desc' else 'desc'; _p.pop('page', None)
+    orden_toggle_url = '?' + _p.urlencode()
 
     if q:
         clientes = clientes.filter(
@@ -216,7 +259,7 @@ def lista_clientes(request):
     page_obj = paginator.get_page(request.GET.get('page'))
     return render(request, 'misastreria/clientes/lista.html', {
         'page_obj': page_obj, 'q': q, 'desde': desde, 'hasta': hasta,
-        'total': clientes.count(),
+        'total': clientes.count(), 'orden': orden, 'orden_toggle_url': orden_toggle_url,
     })
 
 @login_required
@@ -264,17 +307,29 @@ def buscar_clientes(request):
 
 @login_required
 def historial_cliente(request, id):
-    cliente = get_object_or_404(Cliente, id=id)
+    cliente      = get_object_or_404(Cliente, id=id)
     reparaciones = cliente.reparaciones.order_by('-creado')
-    confecciones = cliente.confeccion_set.order_by('-fecha_inicio')
-    alquileres = cliente.alquileres.order_by('-fecha_alquiler')
-    ventas = cliente.ventas.order_by('-fecha_venta')
+    confecciones = cliente.confeccion_set.order_by('-creado')
+    alquileres   = cliente.alquileres.prefetch_related('items__articulo').order_by('-fecha_alquiler')
+    ventas       = cliente.ventas.prefetch_related('items__articulo').order_by('-fecha_venta')
+
+    total_reparaciones = reparaciones.aggregate(t=Sum('costo'))['t'] or 0
+    total_confecciones = confecciones.aggregate(t=Sum('precio'))['t'] or 0
+    total_alquileres   = alquileres.aggregate(t=Sum('total'))['t'] or 0
+    total_ventas       = ventas.aggregate(t=Sum('total'))['t'] or 0
+    total_general      = total_reparaciones + total_confecciones + total_alquileres + total_ventas
+
     return render(request, 'misastreria/clientes/historial.html', {
-        'cliente': cliente,
+        'cliente':      cliente,
         'reparaciones': reparaciones,
         'confecciones': confecciones,
-        'alquileres': alquileres,
-        'ventas': ventas,
+        'alquileres':   alquileres,
+        'ventas':       ventas,
+        'total_reparaciones': total_reparaciones,
+        'total_confecciones': total_confecciones,
+        'total_alquileres':   total_alquileres,
+        'total_ventas':       total_ventas,
+        'total_general':      total_general,
     })
 
 @login_required
@@ -285,6 +340,7 @@ def lista_reparaciones(request):
     desde = request.GET.get('desde', '')
     hasta = request.GET.get('hasta', '')
     periodo = request.GET.get('periodo', '')
+    orden = request.GET.get('orden', 'desc')
 
     hoy = date.today()
     if periodo == 'semana':
@@ -297,7 +353,10 @@ def lista_reparaciones(request):
         desde = (hoy - timedelta(days=90)).isoformat()
         hasta = hoy.isoformat()
 
-    reparaciones = Reparacion.objects.order_by('-creado')
+    sort = '-creado' if orden == 'desc' else 'creado'
+    reparaciones = Reparacion.objects.order_by(sort)
+    _p = request.GET.copy(); _p['orden'] = 'asc' if orden == 'desc' else 'desc'; _p.pop('page', None)
+    orden_toggle_url = '?' + _p.urlencode()
 
     if q:
         reparaciones = reparaciones.filter(
@@ -321,7 +380,7 @@ def lista_reparaciones(request):
         'page_obj': page_obj,
         'q': q, 'estado': estado, 'tipo_prenda': tipo_prenda,
         'desde': desde, 'hasta': hasta, 'periodo': periodo,
-        'total': reparaciones.count(),
+        'total': reparaciones.count(), 'orden': orden, 'orden_toggle_url': orden_toggle_url,
         'tipo_prenda_choices': Reparacion.TIPO_PRENDA_CHOICES,
         'estado_choices': Reparacion.ESTADO_CHOICES,
     })
@@ -331,8 +390,8 @@ def crear_reparacion(request):
     if request.method == 'POST':
         form = ReparacionForm(request.POST)
         if form.is_valid():
-            form.save()
-            messages.success(request, "Reparación creada con éxito.")
+            reparacion = form.save()
+            messages.success(request, f"Reparación {reparacion.codigo} creada con éxito.")
             return redirect('lista_reparaciones')
         else:
             messages.error(request, "Por favor corrige los errores en el formulario.")
@@ -445,6 +504,7 @@ def lista_ventas(request):
     desde = request.GET.get('desde', '').strip()
     hasta = request.GET.get('hasta', '').strip()
     periodo = request.GET.get('periodo', '').strip()
+    orden = request.GET.get('orden', 'desc')
 
     hoy = date.today()
     if periodo == 'semana':
@@ -457,15 +517,18 @@ def lista_ventas(request):
         periodo = periodo or '3meses'
         desde = (hoy - timedelta(days=90)).isoformat()
 
-    ventas = Venta.objects.all().order_by('-fecha_venta')
+    sort = '-fecha_venta' if orden == 'desc' else 'fecha_venta'
+    ventas = Venta.objects.all().order_by(sort)
+    _p = request.GET.copy(); _p['orden'] = 'asc' if orden == 'desc' else 'desc'; _p.pop('page', None)
+    orden_toggle_url = '?' + _p.urlencode()
     if q:
         ventas = ventas.filter(
             Q(codigo__icontains=q) |
-            Q(articulo__articulo__icontains=q) |
+            Q(items__articulo__nombre__icontains=q) |
             Q(cliente__nombres__icontains=q) |
             Q(cliente__apellido_paterno__icontains=q) |
             Q(cliente__ci__icontains=q)
-        )
+        ).distinct()
     if desde:
         ventas = ventas.filter(fecha_venta__gte=desde)
     if hasta:
@@ -482,7 +545,58 @@ def lista_ventas(request):
         'desde': desde,
         'hasta': hasta,
         'periodo': periodo,
+        'orden': orden, 'orden_toggle_url': orden_toggle_url,
     })
+
+
+def _guardar_items_venta(venta, post_data):
+    """Guarda los ítems de la venta y gestiona el stock."""
+    for item in venta.items.all():
+        item.articulo.cantidad += item.cantidad
+        item.articulo.save()
+    venta.items.all().delete()
+
+    articulos  = post_data.getlist('item_articulo')
+    cantidades = post_data.getlist('item_cantidad')
+    precios    = post_data.getlist('item_precio')
+
+    errores = []
+    for i, (art_id, cant_str, precio_str) in enumerate(zip(articulos, cantidades, precios), 1):
+        if not art_id:
+            continue
+        try:
+            prenda   = PrendaInventario.objects.get(pk=art_id)
+            cantidad = int(cant_str or 1)
+            precio   = Decimal(precio_str or prenda.precio)
+            if cantidad < 1:
+                errores.append(f"Fila {i}: la cantidad debe ser al menos 1.")
+                continue
+            if prenda.cantidad < cantidad:
+                errores.append(f"Fila {i}: stock insuficiente para {prenda} (disponible: {prenda.cantidad}).")
+                continue
+            VentaItem.objects.create(
+                venta=venta, articulo=prenda,
+                cantidad=cantidad, precio_unitario=precio,
+            )
+            prenda.cantidad -= cantidad
+            prenda.save()
+        except (PrendaInventario.DoesNotExist, ValueError, Exception):
+            errores.append(f"Fila {i}: datos inválidos.")
+
+    venta.recalcular_totales()
+    return errores
+
+
+def _prendas_venta_json():
+    import json
+    prendas = list(
+        PrendaInventario.objects.filter(tipo='venta', estado='ACT')
+        .values('id', 'nombre', 'talla', 'color', 'precio', 'cantidad')
+    )
+    for p in prendas:
+        p['precio'] = float(p['precio'])
+        p['label'] = str(PrendaInventario.objects.get(pk=p['id']))
+    return json.dumps(prendas)
 
 
 @login_required
@@ -490,18 +604,23 @@ def crear_venta(request):
     if request.method == 'POST':
         form = VentaForm(request.POST)
         if form.is_valid():
-            venta = form.save(commit=False)
-            venta.save()  # El modelo calcula precio_unitario y precio_total
-            messages.success(request, 'Venta creada exitosamente.')
+            venta = form.save()
+            errores = _guardar_items_venta(venta, request.POST)
+            if errores:
+                messages.warning(request, 'Venta creada con advertencias: ' + '; '.join(errores))
+            else:
+                messages.success(request, f"Venta {venta.codigo} creada exitosamente.")
             return redirect('lista_ventas')
         else:
-            messages.error(request, f"Por favor corrige los errores: {form.errors.as_text()}")
+            messages.error(request, 'Por favor corrige los errores del formulario.')
     else:
         form = VentaForm()
     return render(request, 'misastreria/ventas/form.html', {
         'form': form,
-        'titulo': 'Crear Venta'
+        'titulo': 'Nueva Venta',
+        'prendas_json': _prendas_venta_json(),
     })
+
 
 @login_required
 def editar_venta(request, id):
@@ -509,28 +628,38 @@ def editar_venta(request, id):
     if request.method == 'POST':
         form = VentaForm(request.POST, instance=venta)
         if form.is_valid():
-            venta = form.save(commit=False)
-            venta.save()  # El modelo calcula precio_unitario y precio_total
-            messages.success(request, 'Venta actualizada exitosamente.')
+            venta = form.save()
+            errores = _guardar_items_venta(venta, request.POST)
+            if errores:
+                messages.warning(request, 'Actualizado con advertencias: ' + '; '.join(errores))
+            else:
+                messages.success(request, 'Venta actualizada correctamente.')
             return redirect('lista_ventas')
         else:
-            messages.error(request, f"Por favor corrige los errores: {form.errors.as_text()}")
+            messages.error(request, 'Por favor corrige los errores del formulario.')
     else:
         form = VentaForm(instance=venta)
+    items_existentes = list(venta.items.select_related('articulo').values(
+        'articulo_id', 'cantidad', 'precio_unitario'
+    ))
     return render(request, 'misastreria/ventas/form.html', {
-        'form': form,
-        'titulo': 'Editar Venta',
-        'venta': venta
+        'form':    form,
+        'titulo':  'Editar Venta',
+        'venta':   venta,
+        'items_existentes': items_existentes,
+        'prendas_json': _prendas_venta_json(),
     })
+
 
 @login_required
 def eliminar_venta(request, id):
     venta = get_object_or_404(Venta, id=id)
     if request.method == 'POST':
-        venta.articulo.cantidad += venta.cantidad
-        venta.articulo.save()
+        for item in venta.items.all():
+            item.articulo.cantidad += item.cantidad
+            item.articulo.save()
         venta.delete()
-        messages.success(request, 'Venta eliminada exitosamente.')
+        messages.success(request, 'Venta eliminada correctamente.')
         return redirect('lista_ventas')
     return render(request, 'misastreria/ventas/eliminar.html', {'venta': venta})
 
@@ -539,40 +668,58 @@ def exportar_recibo_pdf(request, id):
     venta = get_object_or_404(Venta, id=id)
     response = HttpResponse(content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="recibo_venta_{venta.codigo}.pdf"'
-    
+
     doc = SimpleDocTemplate(response, pagesize=letter)
     elements = []
     styles = getSampleStyleSheet()
 
-    elements.append(Paragraph("Recibo de Venta", styles['Heading1']))
-    elements.append(Paragraph(f"Código: {venta.codigo}", styles['Normal']))
+    elements.append(Paragraph("Sastrería Confort", styles['Heading1']))
+    elements.append(Paragraph(f"Recibo de Venta — {venta.codigo}", styles['Heading2']))
+    elements.append(Spacer(1, 0.1 * inch))
 
-    data = [
-        ['Campo', 'Valor'],
-        ['Cliente', str(venta.cliente) if venta.cliente else '-'],
-        ['Artículo', str(venta.articulo)],
-        ['Cantidad', venta.cantidad],
-        ['Precio Unitario', f"${venta.precio_unitario:.2f}"],
-        ['Precio Total', f"${venta.precio_total:.2f}"],
-        ['Fecha de Venta', venta.fecha_venta.strftime('%d/%m/%Y')],
+    info = [
+        ['Cliente', str(venta.cliente) if venta.cliente else '—'],
+        ['Empleado', str(venta.empleado) if venta.empleado else '—'],
+        ['Fecha', venta.fecha_venta.strftime('%d/%m/%Y')],
     ]
-
-    table = Table(data, colWidths=[150, 350])
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.darkgrey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 1), (-1, -1), 10),
-        ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+    info_table = Table(info, colWidths=[120, 350])
+    info_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
     ]))
-    
-    elements.append(table)
+    elements.append(info_table)
+    elements.append(Spacer(1, 0.15 * inch))
+
+    data = [['Prenda', 'Cant.', 'P. Unit. (Bs.)', 'Subtotal (Bs.)']]
+    for item in venta.items.select_related('articulo').all():
+        data.append([
+            str(item.articulo),
+            str(item.cantidad),
+            f"{item.precio_unitario:.2f}",
+            f"{item.subtotal:.2f}",
+        ])
+    data.append(['', '', 'Subtotal', f"{venta.subtotal:.2f}"])
+    if venta.descuento:
+        data.append(['', '', f'Descuento ({venta.descuento}%)', f"- {(venta.subtotal - venta.total):.2f}"])
+    data.append(['', '', 'TOTAL', f"Bs. {venta.total:.2f}"])
+
+    items_table = Table(data, colWidths=[220, 50, 110, 110])
+    items_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e3a8a')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+        ('GRID', (0, 0), (-1, -2), 0.5, colors.grey),
+        ('FONTNAME', (-2, -1), (-1, -1), 'Helvetica-Bold'),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    ]))
+    elements.append(items_table)
+
     doc.build(elements)
     return response
 
@@ -580,9 +727,9 @@ def exportar_recibo_pdf(request, id):
 def get_precio_articulo(request):
     articulo_id = request.GET.get('articulo_id')
     try:
-        articulo = Inventario.objects.get(id=articulo_id)
+        articulo = PrendaInventario.objects.get(id=articulo_id)
         return JsonResponse({'precio': float(articulo.precio)})
-    except Inventario.DoesNotExist:
+    except PrendaInventario.DoesNotExist:
         return JsonResponse({'error': 'Artículo no encontrado'}, status=404)
 
 @login_required
@@ -593,6 +740,7 @@ def lista_confecciones(request):
     desde = request.GET.get('desde', '').strip()
     hasta = request.GET.get('hasta', '').strip()
     periodo = request.GET.get('periodo', '').strip()
+    orden = request.GET.get('orden', 'desc')
 
     hoy = date.today()
     if periodo == 'semana':
@@ -605,7 +753,10 @@ def lista_confecciones(request):
         periodo = periodo or '3meses'
         desde = (hoy - timedelta(days=90)).isoformat()
 
-    confecciones = Confeccion.objects.all().order_by('-fecha_inicio')
+    sort = '-creado' if orden == 'desc' else 'creado'
+    confecciones = Confeccion.objects.all().order_by(sort)
+    _p = request.GET.copy(); _p['orden'] = 'asc' if orden == 'desc' else 'desc'; _p.pop('page', None)
+    orden_toggle_url = '?' + _p.urlencode()
     if q:
         confecciones = confecciones.filter(
             Q(codigo__icontains=q) |
@@ -614,7 +765,7 @@ def lista_confecciones(request):
             Q(cliente__ci__icontains=q)
         )
     if tipo_prenda:
-        confecciones = confecciones.filter(tipo_prenda=tipo_prenda)
+        confecciones = confecciones.filter(items__tipo_prenda=tipo_prenda).distinct()
     if estado:
         confecciones = confecciones.filter(estado=estado)
     if desde:
@@ -635,6 +786,7 @@ def lista_confecciones(request):
         'desde': desde,
         'hasta': hasta,
         'periodo': periodo,
+        'orden': orden, 'orden_toggle_url': orden_toggle_url,
         'tipo_prenda_choices': Confeccion.TIPO_PRENDA_CHOICES,
         'estado_choices': Confeccion.ESTADO_CHOICES,
     })
@@ -644,19 +796,37 @@ def lista_confecciones(request):
 def crear_confeccion(request):
     if request.method == 'POST':
         form = ConfeccionForm(request.POST)
-        if form.is_valid():
+        formset = ConfeccionItemFormSet(request.POST, prefix='items')
+        if form.is_valid() and formset.is_valid():
             confeccion = form.save(commit=False)
             confeccion.tipo = 'confeccion'
             confeccion.save()
-            messages.success(request, 'Confección creada exitosamente.')
+            formset.instance = confeccion
+            formset.save()
+            messages.success(request, f"Confección {confeccion.codigo} creada exitosamente.")
             return redirect('lista_confecciones')
         else:
-            messages.error(request, f"Por favor corrige los errores: {form.errors.as_text()}")
+            messages.error(request, "Por favor corrige los errores del formulario.")
     else:
-        form = ConfeccionForm()
+        initial = {}
+        desde_alquiler_id = request.GET.get('desde_alquiler')
+        if desde_alquiler_id:
+            try:
+                alquiler = Alquiler.objects.select_related('cliente').prefetch_related('items__articulo').get(pk=desde_alquiler_id)
+                initial['cliente'] = alquiler.cliente_id
+                primer_item = alquiler.items.select_related('articulo').first()
+                if primer_item:
+                    initial['color'] = primer_item.articulo.color
+                    initial['modelo'] = primer_item.articulo.modelo
+                initial['observaciones'] = f"Basado en alquiler {alquiler.codigo}"
+            except Alquiler.DoesNotExist:
+                pass
+        form = ConfeccionForm(initial=initial)
+        formset = ConfeccionItemFormSet(prefix='items')
     return render(request, 'misastreria/confecciones/form.html', {
         'form': form,
-        'titulo': 'Crear Confección'
+        'formset': formset,
+        'titulo': 'Crear Confección',
     })
 
 @login_required
@@ -664,18 +834,22 @@ def editar_confeccion(request, id):
     confeccion = get_object_or_404(Confeccion, id=id)
     if request.method == 'POST':
         form = ConfeccionForm(request.POST, instance=confeccion)
-        if form.is_valid():
+        formset = ConfeccionItemFormSet(request.POST, instance=confeccion, prefix='items')
+        if form.is_valid() and formset.is_valid():
             form.save()
+            formset.save()
             messages.success(request, 'Confección actualizada exitosamente.')
             return redirect('lista_confecciones')
         else:
-            messages.error(request, f"Por favor corrige los errores: {form.errors.as_text()}")
+            messages.error(request, "Por favor corrige los errores del formulario.")
     else:
         form = ConfeccionForm(instance=confeccion)
+        formset = ConfeccionItemFormSet(instance=confeccion, prefix='items')
     return render(request, 'misastreria/confecciones/form.html', {
         'form': form,
+        'formset': formset,
         'titulo': 'Editar Confección',
-        'confeccion': confeccion
+        'confeccion': confeccion,
     })
 
 @login_required
@@ -720,7 +894,7 @@ def exportar_recibo_confeccion_pdf(request, id):
     data = [
         ['Campo', 'Valor'],
         ['Fecha Inicio', confeccion.fecha_inicio.strftime('%d/%m/%Y')],
-        ['Tipo de Prenda', confeccion.get_tipo_prenda_display()],
+        ['Prendas', confeccion.tipos_prenda_display or '—'],
         ['Color', confeccion.color],
         ['Modelo', confeccion.modelo],
         ['Cliente', str(confeccion.cliente)],
@@ -752,32 +926,38 @@ def exportar_recibo_confeccion_pdf(request, id):
 
 @login_required
 def lista_alquileres(request):
-    q = request.GET.get('q', '').strip()
+    q      = request.GET.get('q', '').strip()
     estado = request.GET.get('estado', '').strip()
-    desde = request.GET.get('desde', '').strip()
-    hasta = request.GET.get('hasta', '').strip()
+    prenda = request.GET.get('prenda', '').strip()
+    desde  = request.GET.get('desde', '').strip()
+    hasta  = request.GET.get('hasta', '').strip()
     periodo = request.GET.get('periodo', '').strip()
+    orden  = request.GET.get('orden', 'desc')
 
     hoy = date.today()
     if periodo == 'semana':
-        desde = (hoy - timedelta(days=7)).isoformat()
-        hasta = ''
+        desde = (hoy - timedelta(days=7)).isoformat(); hasta = ''
     elif periodo == 'mes':
-        desde = hoy.replace(day=1).isoformat()
-        hasta = ''
+        desde = hoy.replace(day=1).isoformat(); hasta = ''
     elif not desde and not hasta:
         periodo = periodo or '3meses'
         desde = (hoy - timedelta(days=90)).isoformat()
 
-    alquileres = Alquiler.objects.all().order_by('-fecha_alquiler')
+    sort = '-fecha_alquiler' if orden == 'desc' else 'fecha_alquiler'
+    alquileres = Alquiler.objects.all().order_by(sort)
+    _p = request.GET.copy(); _p['orden'] = 'asc' if orden == 'desc' else 'desc'; _p.pop('page', None)
+    orden_toggle_url = '?' + _p.urlencode()
+
     if q:
         alquileres = alquileres.filter(
             Q(codigo__icontains=q) |
-            Q(articulo__articulo__icontains=q) |
             Q(cliente__nombres__icontains=q) |
             Q(cliente__apellido_paterno__icontains=q) |
-            Q(cliente__ci__icontains=q)
-        )
+            Q(cliente__ci__icontains=q) |
+            Q(items__articulo__nombre__icontains=q)
+        ).distinct()
+    if prenda:
+        alquileres = alquileres.filter(items__articulo__nombre__icontains=prenda).distinct()
     if estado:
         alquileres = alquileres.filter(estado=estado)
     if desde:
@@ -787,18 +967,62 @@ def lista_alquileres(request):
 
     total = alquileres.count()
     paginator = Paginator(alquileres, 15)
-    page_obj = paginator.get_page(request.GET.get('page'))
+    page_obj  = paginator.get_page(request.GET.get('page'))
 
     return render(request, 'misastreria/alquileres/lista.html', {
         'page_obj': page_obj,
-        'total': total,
-        'q': q,
-        'estado': estado,
-        'desde': desde,
-        'hasta': hasta,
-        'periodo': periodo,
-        'estado_choices': Alquiler.ESTADO_OPCIONES,
+        'total':    total,
+        'q':        q,
+        'prenda':   prenda,
+        'estado':   estado,
+        'desde':    desde,
+        'hasta':    hasta,
+        'periodo':  periodo,
+        'orden':    orden,
+        'orden_toggle_url': orden_toggle_url,
+        'estado_choices':   Alquiler.ESTADO_OPCIONES,
     })
+
+
+def _guardar_items_alquiler(alquiler, post_data, estado_anterior=None):
+    """Guarda los ítems del alquiler y gestiona el stock."""
+    # Si había estado 'alquilado', restaurar stock de ítems viejos antes de reemplazarlos
+    if estado_anterior == 'alquilado':
+        for item in alquiler.items.all():
+            item.articulo.cantidad += item.cantidad
+            item.articulo.save()
+    alquiler.items.all().delete()
+
+    articulos  = post_data.getlist('item_articulo')
+    cantidades = post_data.getlist('item_cantidad')
+    precios    = post_data.getlist('item_precio')
+
+    errores = []
+    for i, (art_id, cant_str, precio_str) in enumerate(zip(articulos, cantidades, precios), 1):
+        if not art_id:
+            continue
+        try:
+            prenda   = PrendaInventario.objects.get(pk=art_id)
+            cantidad = int(cant_str or 1)
+            precio   = Decimal(precio_str or prenda.precio)
+            if cantidad < 1:
+                errores.append(f"Fila {i}: la cantidad debe ser al menos 1.")
+                continue
+            if alquiler.estado == 'alquilado' and prenda.cantidad < cantidad:
+                errores.append(f"Fila {i}: stock insuficiente para {prenda} (disponible: {prenda.cantidad}).")
+                continue
+            AlquilerItem.objects.create(
+                alquiler=alquiler, articulo=prenda,
+                cantidad=cantidad, precio_unitario=precio,
+            )
+            if alquiler.estado == 'alquilado':
+                prenda.cantidad -= cantidad
+                prenda.save()
+        except (PrendaInventario.DoesNotExist, ValueError, Exception):
+            errores.append(f"Fila {i}: datos inválidos.")
+
+    alquiler.recalcular_totales()
+    return errores
 
 
 @login_required
@@ -806,48 +1030,79 @@ def crear_alquiler(request):
     if request.method == 'POST':
         form = AlquilerForm(request.POST)
         if form.is_valid():
-            form.save()
-            messages.success(request, 'Alquiler creado exitosamente.')
+            alquiler = form.save()
+            errores = _guardar_items_alquiler(alquiler, request.POST)
+            if errores:
+                messages.warning(request, 'Alquiler creado con advertencias: ' + '; '.join(errores))
+            else:
+                messages.success(request, f"Alquiler {alquiler.codigo} creado exitosamente.")
             return redirect('lista_alquileres')
         else:
-            messages.error(request, f"Por favor corrige los errores: {form.errors.as_text()}")
+            messages.error(request, 'Por favor corrige los errores del formulario.')
     else:
         form = AlquilerForm()
     return render(request, 'misastreria/alquileres/form.html', {
         'form': form,
-        'titulo': 'Crear Alquiler'
+        'titulo': 'Nuevo Alquiler',
+        'prendas_json': _prendas_alquiler_json(),
     })
+
 
 @login_required
 def editar_alquiler(request, id):
     alquiler = get_object_or_404(Alquiler, id=id)
     if request.method == 'POST':
+        estado_anterior = alquiler.estado
         form = AlquilerForm(request.POST, instance=alquiler)
         if form.is_valid():
-            form.save()
-            messages.success(request, 'Alquiler actualizado exitosamente.')
+            alquiler = form.save()
+            errores = _guardar_items_alquiler(alquiler, request.POST, estado_anterior=estado_anterior)
+            if errores:
+                messages.warning(request, 'Actualizado con advertencias: ' + '; '.join(errores))
+            else:
+                messages.success(request, 'Alquiler actualizado correctamente.')
             return redirect('lista_alquileres')
         else:
-            messages.error(request, f"Por favor corrige los errores: {form.errors.as_text()}")
+            messages.error(request, 'Por favor corrige los errores del formulario.')
     else:
         form = AlquilerForm(instance=alquiler)
+    items_existentes = list(alquiler.items.select_related('articulo').values(
+        'articulo_id', 'cantidad', 'precio_unitario'
+    ))
     return render(request, 'misastreria/alquileres/form.html', {
-        'form': form,
-        'titulo': 'Editar Alquiler',
-        'alquiler': alquiler
+        'form':    form,
+        'titulo':  'Editar Alquiler',
+        'alquiler': alquiler,
+        'items_existentes': items_existentes,
+        'prendas_json': _prendas_alquiler_json(),
     })
+
+
+def _prendas_alquiler_json():
+    import json
+    prendas = list(
+        PrendaInventario.objects.filter(tipo='alquiler', estado='ACT')
+        .values('id', 'nombre', 'talla', 'color', 'precio', 'cantidad')
+    )
+    for p in prendas:
+        p['precio'] = float(p['precio'])
+        p['label'] = str(PrendaInventario.objects.get(pk=p['id']))
+    return json.dumps(prendas)
+
 
 @login_required
 def eliminar_alquiler(request, id):
     alquiler = get_object_or_404(Alquiler, id=id)
     if request.method == 'POST':
         if alquiler.estado == 'alquilado':
-            alquiler.articulo.cantidad += alquiler.cantidad
-            alquiler.articulo.save()
+            for item in alquiler.items.all():
+                item.articulo.cantidad += item.cantidad
+                item.articulo.save()
         alquiler.delete()
-        messages.success(request, 'Alquiler eliminado exitosamente.')
+        messages.success(request, 'Alquiler eliminado correctamente.')
         return redirect('lista_alquileres')
     return render(request, 'misastreria/alquileres/eliminar.html', {'alquiler': alquiler})
+
 
 @login_required
 def devolver_alquiler(request, id):
@@ -856,18 +1111,24 @@ def devolver_alquiler(request, id):
         messages.error(request, 'El alquiler ya está marcado como devuelto.')
         return redirect('lista_alquileres')
     if request.method == 'POST':
+        for item in alquiler.items.all():
+            item.articulo.cantidad += item.cantidad
+            item.articulo.save()
+            item.articulo.veces_alquilado += 1
+            item.articulo.save()
         alquiler.estado = 'devuelto'
-        alquiler.save()  # Esto restaura el stock vía Alquiler.save()
-        messages.success(request, f'Alquiler {alquiler.codigo} marcado como devuelto. Stock restaurado.')
+        alquiler.save()
+        messages.success(request, f'Alquiler {alquiler.codigo} devuelto. Stock restaurado.')
         return redirect('lista_alquileres')
     return render(request, 'misastreria/alquileres/devolver.html', {'alquiler': alquiler})
+
 
 @login_required
 def exportar_comprobante_alquiler_pdf(request, id):
     alquiler = get_object_or_404(Alquiler, id=id)
     response = HttpResponse(content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="comprobante_alquiler_{alquiler.codigo}.pdf"'
-    
+
     doc = SimpleDocTemplate(response, pagesize=letter)
     elements = []
     styles = getSampleStyleSheet()
@@ -875,32 +1136,55 @@ def exportar_comprobante_alquiler_pdf(request, id):
     elements.append(Paragraph("Comprobante de Alquiler", styles['Heading1']))
     elements.append(Paragraph(f"Código: {alquiler.codigo}", styles['Normal']))
 
-    data = [
+    cabecera = [
         ['Campo', 'Valor'],
-        ['Cliente', str(alquiler.cliente) if alquiler.cliente else '-'],
-        ['Artículo', str(alquiler.articulo)],
-        ['Costo de Alquiler', f"${alquiler.costo_alquiler:.2f}"],
-        ['Fecha de Alquiler', alquiler.fecha_alquiler.strftime('%d/%m/%Y')],
-        ['Fecha de Devolución', alquiler.fecha_devolucion.strftime('%d/%m/%Y')],
-        ['Garantía', alquiler.garantia or '-'],
+        ['Cliente',      str(alquiler.cliente) if alquiler.cliente else '-'],
+        ['Empleado',     str(alquiler.empleado) if alquiler.empleado else '-'],
+        ['Fecha alquiler',   alquiler.fecha_alquiler.strftime('%d/%m/%Y')],
+        ['Fecha devolución', alquiler.fecha_devolucion.strftime('%d/%m/%Y')],
+        ['Garantía',    alquiler.garantia or '-'],
     ]
-
-    table = Table(data, colWidths=[150, 350])
-    table.setStyle(TableStyle([
+    t1 = Table(cabecera, colWidths=[150, 350])
+    t1.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.darkgrey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 1), (-1, -1), 10),
-        ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TEXTCOLOR',  (0, 0), (-1, 0), colors.white),
+        ('FONTNAME',   (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE',   (0, 0), (-1, -1), 10),
+        ('GRID',       (0, 0), (-1, -1), 0.5, colors.black),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
     ]))
-    
-    elements.append(table)
+    elements.append(t1)
+
+    from reportlab.platypus import Spacer
+    elements.append(Spacer(1, 12))
+    elements.append(Paragraph("Prendas", styles['Heading2']))
+
+    items_data = [['Prenda', 'Cant.', 'Precio unit.', 'Subtotal']]
+    for item in alquiler.items.select_related('articulo'):
+        items_data.append([
+            str(item.articulo), str(item.cantidad),
+            f"{item.precio_unitario:.2f}", f"{item.subtotal:.2f}",
+        ])
+    items_data.append(['', '', 'Subtotal:', f"{alquiler.subtotal:.2f}"])
+    if alquiler.descuento:
+        items_data.append(['', '', f'Descuento {alquiler.descuento}%:', f"-{(alquiler.subtotal - alquiler.total):.2f}"])
+    items_data.append(['', '', 'TOTAL:', f"{alquiler.total:.2f}"])
+
+    t2 = Table(items_data, colWidths=[240, 60, 100, 100])
+    t2.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.darkgrey),
+        ('TEXTCOLOR',  (0, 0), (-1, 0), colors.white),
+        ('FONTNAME',   (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTNAME',   (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('FONTSIZE',   (0, 0), (-1, -1), 10),
+        ('ALIGN',      (1, 0), (-1, -1), 'RIGHT'),
+        ('GRID',       (0, 0), (-1, -2), 0.5, colors.black),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    ]))
+    elements.append(t2)
+
     doc.build(elements)
     return response
 
@@ -911,6 +1195,7 @@ def lista_transacciones(request):
     desde = request.GET.get('desde', '').strip()
     hasta = request.GET.get('hasta', '').strip()
     periodo = request.GET.get('periodo', '').strip()
+    orden = request.GET.get('orden', 'desc')
 
     hoy = date.today()
     if periodo == 'semana':
@@ -923,7 +1208,10 @@ def lista_transacciones(request):
         periodo = periodo or '3meses'
         desde = (hoy - timedelta(days=90)).isoformat()
 
-    transacciones = Transaccion.objects.all().order_by('-fecha')
+    sort = '-creado' if orden == 'desc' else 'creado'
+    transacciones = Transaccion.objects.all().order_by(sort)
+    _p = request.GET.copy(); _p['orden'] = 'asc' if orden == 'desc' else 'desc'; _p.pop('page', None)
+    orden_toggle_url = '?' + _p.urlencode()
     if q:
         transacciones = transacciones.filter(
             Q(codigo__icontains=q) |
@@ -948,6 +1236,7 @@ def lista_transacciones(request):
         'desde': desde,
         'hasta': hasta,
         'periodo': periodo,
+        'orden': orden, 'orden_toggle_url': orden_toggle_url,
         'tipo_transaccion_choices': Transaccion.TIPO_TRANSACCION_CHOICES,
     })
 
@@ -957,8 +1246,8 @@ def crear_transaccion(request):
     if request.method == 'POST':
         form = TransaccionForm(request.POST)
         if form.is_valid():
-            form.save()
-            messages.success(request, 'Transacción creada exitosamente.')
+            transaccion = form.save()
+            messages.success(request, f"Transacción {transaccion.codigo} creada exitosamente.")
             return redirect('lista_transacciones')
         else:
             messages.error(request, f"Por favor corrige los errores: {form.errors.as_text()}")
@@ -998,120 +1287,160 @@ def eliminar_transaccion(request, id):
     return render(request, 'misastreria/transacciones/eliminar.html', {'transaccion': transaccion})
 
 @login_required
-def lista_inventario(request):
-    q = request.GET.get('q', '').strip()
+def lista_prendas(request):
+    q      = request.GET.get('q', '').strip()
+    tipo   = request.GET.get('tipo', '').strip()
     estado = request.GET.get('estado', 'ACT').strip()
 
-    inventarios = Inventario.objects.all().order_by('-fecha_ingreso')
+    qs = PrendaInventario.objects.all().order_by('-creado')
     if q:
-        inventarios = inventarios.filter(
-            Q(codigo__icontains=q) |
-            Q(articulo__icontains=q)
+        qs = qs.filter(
+            Q(codigo__icontains=q) | Q(nombre__icontains=q) |
+            Q(color__icontains=q)  | Q(talla__icontains=q)  |
+            Q(codigo_referencia__icontains=q)
         )
+    if tipo:
+        qs = qs.filter(tipo=tipo)
     if estado:
-        inventarios = inventarios.filter(estado=estado)
+        qs = qs.filter(estado=estado)
 
-    total = inventarios.count()
-    paginator = Paginator(inventarios, 15)
-    page_obj = paginator.get_page(request.GET.get('page'))
+    total = qs.count()
+    paginator = Paginator(qs, 15)
+    page_obj  = paginator.get_page(request.GET.get('page'))
 
-    return render(request, 'misastreria/inventario/lista.html', {
+    return render(request, 'misastreria/prendas/lista.html', {
         'page_obj': page_obj,
-        'total': total,
-        'q': q,
-        'estado': estado,
-        'estado_choices': Inventario.ESTADO_OPCIONES,
+        'total':    total,
+        'q':        q,
+        'tipo':     tipo,
+        'estado':   estado,
+        'tipo_choices':   PrendaInventario.TIPO_CHOICES,
+        'estado_choices': PrendaInventario.ESTADO_OPCIONES,
     })
 
 
 @login_required
-def crear_inventario(request):
+def crear_prenda(request):
     if request.method == 'POST':
-        form = InventarioForm(request.POST)
+        form = PrendaInventarioForm(request.POST)
+        if form.is_valid():
+            prenda = form.save()
+            messages.success(request, f'Prenda creada con código {prenda.codigo}.')
+            return redirect('lista_prendas')
+    else:
+        form = PrendaInventarioForm()
+    return render(request, 'misastreria/prendas/form.html', {
+        'form':   form,
+        'titulo': 'Nueva Prenda',
+    })
+
+
+@login_required
+def editar_prenda(request, id):
+    prenda = get_object_or_404(PrendaInventario, id=id)
+    if request.method == 'POST':
+        form = PrendaInventarioForm(request.POST, instance=prenda)
         if form.is_valid():
             form.save()
-            messages.success(request, 'Artículo de inventario creado exitosamente.')
-            return redirect('lista_inventario')
-        else:
-            messages.error(request, f"Por favor corrige los errores: {form.errors.as_text()}")
+            messages.success(request, 'Prenda actualizada correctamente.')
+            return redirect('lista_prendas')
     else:
-        form = InventarioForm()
-    return render(request, 'misastreria/inventario/form.html', {
-        'form': form,
-        'titulo': 'Crear Artículo de Inventario'
+        form = PrendaInventarioForm(instance=prenda)
+    return render(request, 'misastreria/prendas/form.html', {
+        'form':   form,
+        'titulo': 'Editar Prenda',
+        'prenda': prenda,
     })
 
-@login_required
-def editar_inventario(request, id):
-    inventario = get_object_or_404(Inventario, id=id)
-    if request.method == 'POST':
-        form = InventarioForm(request.POST, instance=inventario)
-        if form.is_valid():
-            form.save()
-            messages.success(request, 'Artículo de inventario actualizado exitosamente.')
-            return redirect('lista_inventario')
-        else:
-            messages.error(request, f"Por favor corrige los errores: {form.errors.as_text()}")
-    else:
-        form = InventarioForm(instance=inventario)
-    return render(request, 'misastreria/inventario/form.html', {
-        'form': form,
-        'titulo': 'Editar Artículo de Inventario'
-    })
 
 @login_required
-def eliminar_inventario(request, id):
-    inventario = get_object_or_404(Inventario, id=id)
+def eliminar_prenda(request, id):
+    prenda = get_object_or_404(PrendaInventario, id=id)
     if request.method == 'POST':
         try:
-            inventario.delete()
-            messages.success(request, 'Artículo de inventario eliminado exitosamente.')
+            prenda.delete()
+            messages.success(request, 'Prenda eliminada correctamente.')
         except ProtectedError:
-            messages.error(request, 'No se puede eliminar el artículo porque está asociado a una o más ventas.')
-        return redirect('lista_inventario')
-    return render(request, 'misastreria/inventario/eliminar.html', {'inventario': inventario})
+            messages.error(request, 'No se puede eliminar la prenda porque tiene ventas o alquileres asociados.')
+        return redirect('lista_prendas')
+    return render(request, 'misastreria/prendas/eliminar.html', {'prenda': prenda})
+
 
 @login_required
-def dar_baja_inventario(request, id):
-    inventario = get_object_or_404(Inventario, id=id)
-    if inventario.estado == 'BAJ':
-        messages.error(request, 'El artículo ya está dado de baja.')
-        return redirect('lista_inventario')
-    
-    if request.method == 'POST':
-        form = BajaInventarioForm(request.POST)
-        if form.is_valid():
-            cantidad_baja = form.cleaned_data['cantidad']
-            if cantidad_baja > inventario.cantidad:
-                messages.error(request, f"La cantidad a dar de baja ({cantidad_baja}) no puede exceder la cantidad disponible ({inventario.cantidad}).")
-                return render(request, 'misastreria/inventario/baja.html', {
-                    'form': form,
-                    'inventario': inventario,
-                    'titulo': 'Dar de Baja Artículo de Inventario'
-                })
-            try:
-                baja = form.save(commit=False)
-                baja.inventario = inventario
-                baja.save()
-                inventario.cantidad -= cantidad_baja
-                if inventario.cantidad == 0:
-                    inventario.estado = 'BAJ'
-                    inventario.fecha_baja = baja.fecha_baja
-                    inventario.motivo_baja = baja.motivo_baja
-                inventario.save()
-                messages.success(request, f'{cantidad_baja} unidades dadas de baja exitosamente.')
-                return redirect('lista_inventario')
-            except ValidationError as e:
-                messages.error(request, f"Error al dar de baja: {e}")
-        else:
-            messages.error(request, f"Por favor corrige los errores: {form.errors.as_text()}")
-    else:
-        form = BajaInventarioForm()
-    return render(request, 'misastreria/inventario/baja.html', {
-        'form': form,
-        'inventario': inventario,
-        'titulo': 'Dar de Baja Artículo de Inventario'
+def lista_insumos(request):
+    q            = request.GET.get('q', '').strip()
+    tipo_material= request.GET.get('tipo_material', '').strip()
+    estado       = request.GET.get('estado', 'ACT').strip()
+
+    qs = Insumo.objects.all().order_by('-creado')
+    if q:
+        qs = qs.filter(
+            Q(codigo__icontains=q)    | Q(articulo__icontains=q) |
+            Q(coleccion__icontains=q) | Q(color__icontains=q)    |
+            Q(codigo_referencia__icontains=q)
+        )
+    if tipo_material:
+        qs = qs.filter(tipo_material=tipo_material)
+    if estado:
+        qs = qs.filter(estado=estado)
+
+    total = qs.count()
+    paginator = Paginator(qs, 15)
+    page_obj  = paginator.get_page(request.GET.get('page'))
+
+    return render(request, 'misastreria/insumos/lista.html', {
+        'page_obj':     page_obj,
+        'total':        total,
+        'q':            q,
+        'tipo_material':tipo_material,
+        'estado':       estado,
+        'tipo_material_choices': Insumo.TIPO_MATERIAL_CHOICES,
+        'estado_choices':        Insumo.ESTADO_OPCIONES,
     })
+
+
+@login_required
+def crear_insumo(request):
+    if request.method == 'POST':
+        form = InsumoForm(request.POST)
+        if form.is_valid():
+            insumo = form.save()
+            messages.success(request, f'Insumo creado con código {insumo.codigo}.')
+            return redirect('lista_insumos')
+    else:
+        form = InsumoForm()
+    return render(request, 'misastreria/insumos/form.html', {
+        'form':   form,
+        'titulo': 'Nuevo Insumo',
+    })
+
+
+@login_required
+def editar_insumo(request, id):
+    insumo = get_object_or_404(Insumo, id=id)
+    if request.method == 'POST':
+        form = InsumoForm(request.POST, instance=insumo)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'Insumo actualizado correctamente.')
+            return redirect('lista_insumos')
+    else:
+        form = InsumoForm(instance=insumo)
+    return render(request, 'misastreria/insumos/form.html', {
+        'form':   form,
+        'titulo': 'Editar Insumo',
+        'insumo': insumo,
+    })
+
+
+@login_required
+def eliminar_insumo(request, id):
+    insumo = get_object_or_404(Insumo, id=id)
+    if request.method == 'POST':
+        insumo.delete()
+        messages.success(request, 'Insumo eliminado correctamente.')
+        return redirect('lista_insumos')
+    return render(request, 'misastreria/insumos/eliminar.html', {'insumo': insumo})
 
 @login_required
 def reporte_empleados(request):
@@ -1841,16 +2170,14 @@ def exportar_reparaciones_excel(request, reparaciones_data, filtros_aplicados):
     return response
 @login_required
 def reporte_ventas(request):
-    ventas = Venta.objects.all()
+    ventas = Venta.objects.prefetch_related('items__articulo').all()
     clientes = Cliente.objects.all()
     empleados = Empleado.objects.all()
-    articulos = Inventario.objects.all().order_by('articulo')
 
     fecha_desde = request.GET.get('fecha_desde')
     fecha_hasta = request.GET.get('fecha_hasta')
     cliente_id = request.GET.get('cliente')
     empleado_id = request.GET.get('empleado')
-    selected_articulo_id = request.GET.get('articulo')
 
     if fecha_desde:
         ventas = ventas.filter(fecha_venta__gte=fecha_desde)
@@ -1861,13 +2188,10 @@ def reporte_ventas(request):
         ventas = ventas.filter(cliente__id=cliente_id)
     if empleado_id and empleado_id != '':
         ventas = ventas.filter(empleado__id=empleado_id)
-    
-    if selected_articulo_id and selected_articulo_id != '':
-        ventas = ventas.filter(articulo__id=selected_articulo_id)
 
     ventas = ventas.order_by('fecha_venta')
 
-    total_ventas = ventas.aggregate(Sum('precio_total'))['precio_total__sum'] or 0.00
+    total_ventas = ventas.aggregate(Sum('total'))['total__sum'] or 0.00
 
     export_format = request.GET.get('export_format')
     if export_format == 'pdf':
@@ -1879,12 +2203,10 @@ def reporte_ventas(request):
         'ventas': ventas,
         'clientes': clientes,
         'empleados': empleados,
-        'articulos': articulos,
         'selected_fecha_desde': fecha_desde,
         'selected_fecha_hasta': fecha_hasta,
         'selected_cliente': cliente_id,
         'selected_empleado': empleado_id,
-        'selected_articulo': selected_articulo_id,
         'total_ventas': total_ventas,
     }
     return render(request, 'misastreria/reportes/reporte_ventas.html', context)
@@ -1960,46 +2282,48 @@ def exportar_reporte_ventas_pdf(request, ventas, fecha_desde, fecha_hasta, total
         except ObjectDoesNotExist:
             filter_text += f"Vendedor (ID {request.GET.get('empleado')}) no encontrado. "
     
-    selected_articulo_id = request.GET.get('articulo')
-    if selected_articulo_id and selected_articulo_id != '':
-        try:
-            articulo_obj = Inventario.objects.get(id=selected_articulo_id)
-            filter_text += f"Nombre del Artículo: {articulo_obj.articulo}. "
-        except ObjectDoesNotExist:
-            filter_text += f"Artículo (ID {selected_articulo_id}) no encontrado. "
-    else:
-        filter_text += "Nombre del Artículo: Todos los Artículos. "
-
-
     if filter_text:
         elements.append(Paragraph(filter_text.strip(), styles['SubTitle']))
         elements.append(Spacer(1, 0.1 * inch))
 
     data = [[
-        Paragraph('Código Venta', styles['TableHeader']),
+        Paragraph('Código', styles['TableHeader']),
         Paragraph('Fecha', styles['TableHeader']),
         Paragraph('Cliente', styles['TableHeader']),
         Paragraph('Vendedor', styles['TableHeader']),
-        Paragraph('Nombre del Artículo', styles['TableHeader']),
+        Paragraph('Prenda', styles['TableHeader']),
         Paragraph('Cant.', styles['TableHeader']),
         Paragraph('P. Unit (Bs.)', styles['TableHeader']),
         Paragraph('Total (Bs.)', styles['TableHeader'])
     ]]
 
     for venta in ventas:
-        cliente_full_name = f"{venta.cliente.nombres} {venta.cliente.apellido_paterno} {venta.cliente.apellido_materno}".strip() if venta.cliente else "N/A"
-        empleado_full_name = f"{venta.empleado.nombres} {venta.empleado.apellido_paterno}".strip() if hasattr(venta, 'empleado') and venta.empleado else "N/A"
-        
-        data.append([
-            Paragraph(venta.codigo, styles['TableContent']),
-            Paragraph(venta.fecha_venta.strftime('%d/%m/%Y'), styles['TableContent']),
-            Paragraph(cliente_full_name, styles['TableContent']),
-            Paragraph(empleado_full_name, styles['TableContent']),
-            Paragraph(venta.articulo.articulo, styles['TableContent']),
-            Paragraph(str(venta.cantidad), styles['TableContent']),
-            Paragraph(f"{venta.precio_unitario:.2f}", styles['TableContent']),
-            Paragraph(f"{venta.precio_total:.2f}", styles['TableContent'])
-        ])
+        cliente_full_name = f"{venta.cliente.nombres} {venta.cliente.apellido_paterno}".strip() if venta.cliente else "N/A"
+        empleado_full_name = f"{venta.empleado.nombres} {venta.empleado.apellido_paterno}".strip() if venta.empleado else "N/A"
+        items = list(venta.items.select_related('articulo').all())
+        if items:
+            for idx, item in enumerate(items):
+                data.append([
+                    Paragraph(venta.codigo if idx == 0 else '', styles['TableContent']),
+                    Paragraph(venta.fecha_venta.strftime('%d/%m/%Y') if idx == 0 else '', styles['TableContent']),
+                    Paragraph(cliente_full_name if idx == 0 else '', styles['TableContent']),
+                    Paragraph(empleado_full_name if idx == 0 else '', styles['TableContent']),
+                    Paragraph(str(item.articulo), styles['TableContent']),
+                    Paragraph(str(item.cantidad), styles['TableContent']),
+                    Paragraph(f"{item.precio_unitario:.2f}", styles['TableContent']),
+                    Paragraph(f"{item.subtotal:.2f}" if idx == len(items) - 1 else '', styles['TableContent']),
+                ])
+        else:
+            data.append([
+                Paragraph(venta.codigo, styles['TableContent']),
+                Paragraph(venta.fecha_venta.strftime('%d/%m/%Y'), styles['TableContent']),
+                Paragraph(cliente_full_name, styles['TableContent']),
+                Paragraph(empleado_full_name, styles['TableContent']),
+                Paragraph('—', styles['TableContent']),
+                Paragraph('', styles['TableContent']),
+                Paragraph('', styles['TableContent']),
+                Paragraph(f"{venta.total:.2f}", styles['TableContent']),
+            ])
 
     table_style = TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e3a8a')),
@@ -2086,27 +2410,16 @@ def exportar_reporte_ventas_excel(request, ventas, fecha_desde, fecha_hasta, tot
         except ObjectDoesNotExist:
             filter_text += f"Vendedor (ID {request.GET.get('empleado')}) no encontrado. "
     
-    selected_articulo_id = request.GET.get('articulo')
-    if selected_articulo_id and selected_articulo_id != '':
-        try:
-            articulo_obj = Inventario.objects.get(id=selected_articulo_id)
-            filter_text += f"Nombre del Artículo: {articulo_obj.articulo}. "
-        except ObjectDoesNotExist:
-            filter_text += f"Artículo (ID {selected_articulo_id}) no encontrado. "
-    else:
-        filter_text += "Nombre del Artículo: Todos los Artículos. "
-
-
     if filter_text:
         ws.merge_cells(f'A{filter_row}:H{filter_row}')
         ws[f'A{filter_row}'] = filter_text.strip()
         ws[f'A{filter_row}'].font = Font(name='Calibri', size=10)
         ws[f'A{filter_row}'].alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         filter_row += 1
-    
+
     header_row = filter_row + 1
 
-    headers = ['Código Venta', 'Fecha', 'Cliente', 'Vendedor', 'Nombre del Artículo', 'Cantidad', 'P. Unitario (Bs.)', 'Total (Bs.)']
+    headers = ['Código', 'Fecha', 'Cliente', 'Vendedor', 'Prenda', 'Cantidad', 'P. Unitario (Bs.)', 'Total (Bs.)']
     ws.append(headers)
 
     for col_num, cell in enumerate(ws[header_row]):
@@ -2116,27 +2429,29 @@ def exportar_reporte_ventas_excel(request, ventas, fecha_desde, fecha_hasta, tot
         cell.border = full_border
 
     for venta in ventas:
-        cliente_full_name = f"{venta.cliente.nombres} {venta.cliente.apellido_paterno} {venta.cliente.apellido_materno}".strip() if venta.cliente else "N/A"
-        empleado_full_name = f"{venta.empleado.nombres} {venta.empleado.apellido_paterno}".strip() if hasattr(venta, 'empleado') and venta.empleado else "N/A"
-
-        row_data = [
-            venta.codigo,
-            venta.fecha_venta.strftime('%d/%m/%Y'),
-            cliente_full_name,
-            empleado_full_name,
-            venta.articulo.articulo,
-            venta.cantidad,
-            venta.precio_unitario,
-            venta.precio_total
-        ]
-        ws.append(row_data)
-        for col_num, cell in enumerate(ws[ws.max_row]):
-            cell.font = content_font
-            cell.border = full_border
-            if col_num in [6, 7]:
-                cell.number_format = '#,##0.00'
-            else:
-                cell.alignment = Alignment(horizontal="center")
+        cliente_full_name = f"{venta.cliente.nombres} {venta.cliente.apellido_paterno}".strip() if venta.cliente else "N/A"
+        empleado_full_name = f"{venta.empleado.nombres} {venta.empleado.apellido_paterno}".strip() if venta.empleado else "N/A"
+        items = list(venta.items.select_related('articulo').all())
+        rows_to_write = items if items else [None]
+        for idx, item in enumerate(rows_to_write):
+            row_data = [
+                venta.codigo if idx == 0 else '',
+                venta.fecha_venta.strftime('%d/%m/%Y') if idx == 0 else '',
+                cliente_full_name if idx == 0 else '',
+                empleado_full_name if idx == 0 else '',
+                str(item.articulo) if item else '—',
+                item.cantidad if item else '',
+                float(item.precio_unitario) if item else '',
+                float(item.subtotal) if item else float(venta.total),
+            ]
+            ws.append(row_data)
+            for col_num, cell in enumerate(ws[ws.max_row]):
+                cell.font = content_font
+                cell.border = full_border
+                if col_num in [6, 7]:
+                    cell.number_format = '#,##0.00'
+                else:
+                    cell.alignment = Alignment(horizontal="center")
 
 
     last_data_row = ws.max_row
@@ -2175,17 +2490,10 @@ def exportar_reporte_ventas_excel(request, ventas, fecha_desde, fecha_hasta, tot
 @login_required
 def reporte_articulos(request):
     # Obtén todos los artículos o aplica filtros si los tienes
-    articulos = Inventario.objects.all().order_by('articulo') # O 'codigo', si es tu campo principal de nombre
-
-    # Aquí puedes añadir lógica de filtrado si lo deseas, similar a reporte_ventas
-    # Ejemplo:
-    # categoria_id = request.GET.get('categoria')
-    # if categoria_id:
-    #     articulos = articulos.filter(categoria__id=categoria_id)
+    articulos = PrendaInventario.objects.all().order_by('nombre')
 
     context = {
         'articulos': articulos,
-        # 'categorias': Categoria.objects.all(), # Si tienes un filtro por categoría
     }
     return render(request, 'misastreria/reportes/reporte_articulos.html', context)
 
@@ -2545,9 +2853,9 @@ def exportar_reporte_confecciones_excel(request, confecciones, fecha_desde, fech
 
 @login_required
 def reporte_alquileres(request):
-    alquileres = Alquiler.objects.all()
+    alquileres = Alquiler.objects.prefetch_related('items__articulo').all()
     clientes = Cliente.objects.all()
-    articulos_inventario = Inventario.objects.all().order_by('articulo') # Para el filtro de artículo
+    articulos_inventario = PrendaInventario.objects.filter(tipo='alquiler').order_by('nombre')
     estado_alquiler_choices = Alquiler.ESTADO_OPCIONES
 
     fecha_desde = request.GET.get('fecha_desde')
@@ -2556,24 +2864,21 @@ def reporte_alquileres(request):
     selected_articulo_id = request.GET.get('articulo')
     selected_estado = request.GET.get('estado')
 
-    # Aplicar filtros
     if fecha_desde:
-        alquileres = alquileres.filter(fecha_alquiler__gte=fecha_desde) 
+        alquileres = alquileres.filter(fecha_alquiler__gte=fecha_desde)
     if fecha_hasta:
         fecha_hasta_dt = datetime.strptime(fecha_hasta, '%Y-%m-%d').date() + timedelta(days=1)
         alquileres = alquileres.filter(fecha_alquiler__lt=fecha_hasta_dt)
     if cliente_id and cliente_id != '':
         alquileres = alquileres.filter(cliente__id=cliente_id)
-    
     if selected_articulo_id and selected_articulo_id != '':
-        alquileres = alquileres.filter(articulo__id=selected_articulo_id)
-    
+        alquileres = alquileres.filter(items__articulo__id=selected_articulo_id).distinct()
     if selected_estado and selected_estado != '':
         alquileres = alquileres.filter(estado=selected_estado)
 
-    alquileres = alquileres.order_by('fecha_alquiler') 
+    alquileres = alquileres.order_by('fecha_alquiler')
 
-    total_alquileres = alquileres.aggregate(Sum('costo_alquiler'))['costo_alquiler__sum'] or 0.00
+    total_alquileres = alquileres.aggregate(Sum('total'))['total__sum'] or 0.00
 
     export_format = request.GET.get('export_format')
     if export_format == 'pdf':
@@ -2603,43 +2908,19 @@ def exportar_reporte_alquileres_pdf(request, alquileres, fecha_desde, fecha_hast
                             topMargin=inch/4, bottomMargin=inch/4)
     styles = getSampleStyleSheet()
 
-    styles.add(ParagraphStyle(name='CompanyTitle',
-                              fontSize=20,
-                              leading=24,
-                              alignment=1,
-                              fontName='DejaVuSans',
-                              textColor=colors.HexColor('#1e3a8a')))
-
-    styles.add(ParagraphStyle(name='ReportTitle',
-                              fontSize=16,
-                              leading=20,
-                              alignment=1,
-                              fontName='DejaVuSans',
-                              textColor=colors.HexColor('#2563eb')))
-
-    styles.add(ParagraphStyle(name='SubTitle',
-                              fontSize=10,
-                              leading=12,
-                              alignment=1,
+    styles.add(ParagraphStyle(name='CompanyTitle', fontSize=20, leading=24, alignment=1,
+                              fontName='DejaVuSans', textColor=colors.HexColor('#1e3a8a')))
+    styles.add(ParagraphStyle(name='ReportTitle', fontSize=16, leading=20, alignment=1,
+                              fontName='DejaVuSans', textColor=colors.HexColor('#2563eb')))
+    styles.add(ParagraphStyle(name='SubTitle', fontSize=10, leading=12, alignment=1,
                               fontName='DejaVuSans'))
-    styles.add(ParagraphStyle(name='TableHeader',
-                              fontSize=9,
-                              fontName='DejaVuSans',
-                              alignment=1))
-    styles.add(ParagraphStyle(name='TableContent',
-                              fontSize=7,
-                              fontName='DejaVuSans',
-                              alignment=0))
-    styles.add(ParagraphStyle(name='TotalStyle',
-                              fontSize=10,
-                              fontName='DejaVuSans',
-                              alignment=2))
+    styles.add(ParagraphStyle(name='TableHeader', fontSize=9, fontName='DejaVuSans', alignment=1))
+    styles.add(ParagraphStyle(name='TableContent', fontSize=7, fontName='DejaVuSans', alignment=0))
+    styles.add(ParagraphStyle(name='TotalStyle', fontSize=10, fontName='DejaVuSans', alignment=2))
 
     elements = []
-
     elements.append(Paragraph("SISTEMA DE GESTION SASTRERIA CONFORT Y MAS", styles['CompanyTitle']))
     elements.append(Spacer(1, 0.1 * inch))
-
     elements.append(Paragraph("REPORTE DE ALQUILERES", styles['ReportTitle']))
     elements.append(Spacer(1, 0.2 * inch))
 
@@ -2650,62 +2931,66 @@ def exportar_reporte_alquileres_pdf(request, alquileres, fecha_desde, fecha_hast
         filter_text += f"Desde: {fecha_desde}. "
     elif fecha_hasta:
         filter_text += f"Hasta: {fecha_hasta}. "
-    
     if request.GET.get('cliente') and request.GET.get('cliente') != '':
         try:
             cliente_obj = Cliente.objects.get(id=request.GET.get('cliente'))
-            filter_text += f"Cliente: {cliente_obj.nombres} {cliente_obj.apellido_paterno} {cliente_obj.apellido_materno}. "
+            filter_text += f"Cliente: {cliente_obj.nombres} {cliente_obj.apellido_paterno}. "
         except ObjectDoesNotExist:
-            filter_text += f"Cliente (ID {request.GET.get('cliente')}) no encontrado. "
-    
+            pass
     selected_articulo_id = request.GET.get('articulo')
     if selected_articulo_id and selected_articulo_id != '':
         try:
-            articulo_obj = Inventario.objects.get(id=selected_articulo_id)
-            filter_text += f"Artículo: {articulo_obj.articulo}. "
+            articulo_obj = PrendaInventario.objects.get(id=selected_articulo_id)
+            filter_text += f"Artículo: {articulo_obj.nombre}. "
         except ObjectDoesNotExist:
-            filter_text += f"Artículo (ID {selected_articulo_id}) no encontrado. "
-    else:
-        filter_text += "Artículo: Todos los Artículos. "
-
+            pass
     selected_estado = request.GET.get('estado')
     if selected_estado and selected_estado != '':
-        estado_display = dict(Alquiler.ESTADO_OPCIONES).get(selected_estado, selected_estado)
-        filter_text += f"Estado: {estado_display}. "
-    else:
-        filter_text += "Estado: Todos los Estados. "
-
-
+        filter_text += f"Estado: {dict(Alquiler.ESTADO_OPCIONES).get(selected_estado, selected_estado)}. "
     if filter_text:
         elements.append(Paragraph(filter_text.strip(), styles['SubTitle']))
         elements.append(Spacer(1, 0.1 * inch))
 
     data = [[
-        Paragraph('Código Alq.', styles['TableHeader']),
-        Paragraph('Fecha Alquiler', styles['TableHeader']),
+        Paragraph('Código', styles['TableHeader']),
+        Paragraph('Fecha Alq.', styles['TableHeader']),
+        Paragraph('F. Dev.', styles['TableHeader']),
         Paragraph('Cliente', styles['TableHeader']),
-        Paragraph('Artículo', styles['TableHeader']),
-        Paragraph('Cant.', styles['TableHeader']),
-        Paragraph('Fecha Devolución', styles['TableHeader']),
         Paragraph('Estado', styles['TableHeader']),
-        Paragraph('Costo (Bs.)', styles['TableHeader'])
+        Paragraph('Prenda', styles['TableHeader']),
+        Paragraph('Cant.', styles['TableHeader']),
+        Paragraph('P.Unit.', styles['TableHeader']),
+        Paragraph('Total (Bs.)', styles['TableHeader']),
     ]]
 
     for alquiler in alquileres:
-        cliente_full_name = f"{alquiler.cliente.nombres} {alquiler.cliente.apellido_paterno} {alquiler.cliente.apellido_materno}".strip() if alquiler.cliente else "N/A"
-        
-        row_data = [
-            Paragraph(alquiler.codigo, styles['TableContent']),
-            Paragraph(alquiler.fecha_alquiler.strftime('%d/%m/%Y'), styles['TableContent']),
-            Paragraph(cliente_full_name, styles['TableContent']),
-            Paragraph(alquiler.articulo.articulo, styles['TableContent']),
-            Paragraph(str(alquiler.cantidad), styles['TableContent']),
-            Paragraph(alquiler.fecha_devolucion.strftime('%d/%m/%Y'), styles['TableContent']),
-            Paragraph(alquiler.get_estado_display(), styles['TableContent']),
-            Paragraph(f"{alquiler.costo_alquiler:.2f}", styles['TableContent'])
-        ]
-        
-        data.append(row_data)
+        cliente_str = f"{alquiler.cliente.nombres} {alquiler.cliente.apellido_paterno}".strip() if alquiler.cliente else "N/A"
+        items = list(alquiler.items.all())
+        if items:
+            for idx, item in enumerate(items):
+                data.append([
+                    Paragraph(alquiler.codigo if idx == 0 else '', styles['TableContent']),
+                    Paragraph(alquiler.fecha_alquiler.strftime('%d/%m/%Y') if idx == 0 else '', styles['TableContent']),
+                    Paragraph(alquiler.fecha_devolucion.strftime('%d/%m/%Y') if idx == 0 else '', styles['TableContent']),
+                    Paragraph(cliente_str if idx == 0 else '', styles['TableContent']),
+                    Paragraph(alquiler.get_estado_display() if idx == 0 else '', styles['TableContent']),
+                    Paragraph(str(item.articulo), styles['TableContent']),
+                    Paragraph(str(item.cantidad), styles['TableContent']),
+                    Paragraph(f"{item.precio_unitario:.2f}", styles['TableContent']),
+                    Paragraph(f"{alquiler.total:.2f}" if idx == len(items) - 1 else '', styles['TableContent']),
+                ])
+        else:
+            data.append([
+                Paragraph(alquiler.codigo, styles['TableContent']),
+                Paragraph(alquiler.fecha_alquiler.strftime('%d/%m/%Y'), styles['TableContent']),
+                Paragraph(alquiler.fecha_devolucion.strftime('%d/%m/%Y'), styles['TableContent']),
+                Paragraph(cliente_str, styles['TableContent']),
+                Paragraph(alquiler.get_estado_display(), styles['TableContent']),
+                Paragraph('—', styles['TableContent']),
+                Paragraph('', styles['TableContent']),
+                Paragraph('', styles['TableContent']),
+                Paragraph(f"{alquiler.total:.2f}", styles['TableContent']),
+            ])
 
     table_style = TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e3a8a')),
@@ -2719,22 +3004,20 @@ def exportar_reporte_alquileres_pdf(request, alquileres, fecha_desde, fecha_hast
         ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
         ('BOX', (0, 0), (-1, -1), 1, colors.black),
     ])
-
     table = Table(data, colWidths=[
-        0.8*inch, # Código Alq.
-        0.9*inch, # Fecha Alquiler
-        1.2*inch, # Cliente
-        1.2*inch, # Artículo
-        0.5*inch, # Cant.
-        0.9*inch, # Fecha Devolución
-        0.8*inch, # Estado
-        0.8*inch  # Costo
+        0.7*inch,  # Código
+        0.8*inch,  # Fecha Alq.
+        0.8*inch,  # F. Dev.
+        1.3*inch,  # Cliente
+        0.7*inch,  # Estado
+        1.5*inch,  # Prenda
+        0.4*inch,  # Cant.
+        0.7*inch,  # P.Unit.
+        0.7*inch,  # Total
     ])
-    
     table.setStyle(table_style)
     elements.append(table)
     elements.append(Spacer(1, 0.2 * inch))
-
     elements.append(Paragraph(f"Total de Alquileres Filtrados: Bs. {total_alquileres:.2f}", styles['TotalStyle']))
 
     doc.build(elements)
@@ -2754,21 +3037,20 @@ def exportar_reporte_alquileres_excel(request, alquileres, fecha_desde, fecha_ha
     header_alignment = Alignment(horizontal="center", vertical="center")
     border_style = Side(border_style="thin", color="000000")
     full_border = Border(left=border_style, right=border_style, top=border_style, bottom=border_style)
-    
     content_font = Font(name='Calibri', size=10)
     total_font = Font(name='Calibri', bold=True, size=12)
-    total_alignment = Alignment(horizontal="right")
 
-    ws.merge_cells('A1:H1') # Ajusta el rango por el número de columnas (8 columnas)
+    num_cols = 9
+    col_letter = get_column_letter(num_cols)
+    ws.merge_cells(f'A1:{col_letter}1')
     ws['A1'] = "SISTEMA DE GESTION SASTRERIA CONFORT Y MAS"
     ws['A1'].font = Font(name='Calibri', size=20, bold=True, color='1E3A8A')
     ws['A1'].alignment = Alignment(horizontal="center", vertical="center")
 
-    ws.merge_cells('A2:H2') # Ajusta el rango por el número de columnas (8 columnas)
+    ws.merge_cells(f'A2:{col_letter}2')
     ws['A2'] = "REPORTE DE ALQUILERES"
     ws['A2'].font = Font(name='Calibri', size=16, bold=True, color='2563EB')
     ws['A2'].alignment = Alignment(horizontal="center", vertical="center")
-
 
     filter_row = 4
     filter_text = ""
@@ -2778,82 +3060,70 @@ def exportar_reporte_alquileres_excel(request, alquileres, fecha_desde, fecha_ha
         filter_text += f"Desde: {fecha_desde}. "
     elif fecha_hasta:
         filter_text += f"Hasta: {fecha_hasta}. "
-    
     if request.GET.get('cliente') and request.GET.get('cliente') != '':
         try:
             cliente_obj = Cliente.objects.get(id=request.GET.get('cliente'))
-            filter_text += f"Cliente: {cliente_obj.nombres} {cliente_obj.apellido_paterno} {cliente_obj.apellido_materno}. "
+            filter_text += f"Cliente: {cliente_obj.nombres} {cliente_obj.apellido_paterno}. "
         except ObjectDoesNotExist:
-            filter_text += f"Cliente (ID {request.GET.get('cliente')}) no encontrado. "
-    
+            pass
     selected_articulo_id = request.GET.get('articulo')
     if selected_articulo_id and selected_articulo_id != '':
         try:
-            articulo_obj = Inventario.objects.get(id=selected_articulo_id)
-            filter_text += f"Artículo: {articulo_obj.articulo}. "
+            articulo_obj = PrendaInventario.objects.get(id=selected_articulo_id)
+            filter_text += f"Artículo: {articulo_obj.nombre}. "
         except ObjectDoesNotExist:
-            filter_text += f"Artículo (ID {selected_articulo_id}) no encontrado. "
-    else:
-        filter_text += "Artículo: Todos los Artículos. "
-
+            pass
     selected_estado = request.GET.get('estado')
     if selected_estado and selected_estado != '':
-        estado_display = dict(Alquiler.ESTADO_OPCIONES).get(selected_estado, selected_estado)
-        filter_text += f"Estado: {estado_display}. "
-    else:
-        filter_text += "Estado: Todos los Estados. "
-
-
+        filter_text += f"Estado: {dict(Alquiler.ESTADO_OPCIONES).get(selected_estado, selected_estado)}. "
     if filter_text:
-        ws.merge_cells(f'A{filter_row}:H{filter_row}') # Ajusta el rango por el número de columnas (8 columnas)
+        ws.merge_cells(f'A{filter_row}:{col_letter}{filter_row}')
         ws[f'A{filter_row}'] = filter_text.strip()
         ws[f'A{filter_row}'].font = Font(name='Calibri', size=10)
         ws[f'A{filter_row}'].alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         filter_row += 1
-    
+
     header_row = filter_row + 1
-
-    headers = ['Código Alq.', 'Fecha Alquiler', 'Cliente', 'Artículo', 'Cantidad', 'Fecha Devolución', 'Estado', 'Costo (Bs.)'] # Nuevos encabezados
+    headers = ['Código', 'Fecha Alq.', 'F. Devolución', 'Cliente', 'Estado', 'Prenda', 'Cantidad', 'P. Unitario (Bs.)', 'Subtotal (Bs.)']
     ws.append(headers)
-
-    for col_num, cell in enumerate(ws[header_row]):
+    for cell in ws[header_row]:
         cell.font = header_font
         cell.fill = header_fill
         cell.alignment = header_alignment
         cell.border = full_border
 
     for alquiler in alquileres:
-        cliente_full_name = f"{alquiler.cliente.nombres} {alquiler.cliente.apellido_paterno} {alquiler.cliente.apellido_materno}".strip() if alquiler.cliente else "N/A"
-
-        row_data = [
-            alquiler.codigo,
-            alquiler.fecha_alquiler.strftime('%d/%m/%Y'),
-            cliente_full_name,
-            alquiler.articulo.articulo,
-            alquiler.cantidad,
-            alquiler.fecha_devolucion.strftime('%d/%m/%Y'),
-            alquiler.get_estado_display(),
-            alquiler.costo_alquiler
-        ]
-        
-        ws.append(row_data)
-        for col_num, cell in enumerate(ws[ws.max_row]):
-            cell.font = content_font
-            cell.border = full_border
-            if col_num == 7: # El Costo (Bs.) ahora está en la columna 7 (índice base 0)
-                cell.number_format = '#,##0.00'
-            else:
-                cell.alignment = Alignment(horizontal="center")
-
+        cliente_str = f"{alquiler.cliente.nombres} {alquiler.cliente.apellido_paterno}".strip() if alquiler.cliente else "N/A"
+        items = list(alquiler.items.all())
+        rows = items if items else [None]
+        for idx, item in enumerate(rows):
+            row_data = [
+                alquiler.codigo if idx == 0 else '',
+                alquiler.fecha_alquiler.strftime('%d/%m/%Y') if idx == 0 else '',
+                alquiler.fecha_devolucion.strftime('%d/%m/%Y') if idx == 0 else '',
+                cliente_str if idx == 0 else '',
+                alquiler.get_estado_display() if idx == 0 else '',
+                str(item.articulo) if item else '—',
+                item.cantidad if item else '',
+                float(item.precio_unitario) if item else '',
+                float(item.subtotal) if item else float(alquiler.total),
+            ]
+            ws.append(row_data)
+            for col_num, cell in enumerate(ws[ws.max_row]):
+                cell.font = content_font
+                cell.border = full_border
+                if col_num in [7, 8]:
+                    cell.number_format = '#,##0.00'
+                else:
+                    cell.alignment = Alignment(horizontal="center")
 
     last_data_row = ws.max_row
-    ws.merge_cells(start_row=last_data_row + 2, start_column=1, end_row=last_data_row + 2, end_column=7) # Ajusta el colspan a 7 para 8 columnas en total
+    ws.merge_cells(start_row=last_data_row + 2, start_column=1, end_row=last_data_row + 2, end_column=num_cols - 1)
     total_label_cell = ws.cell(row=last_data_row + 2, column=1)
     total_label_cell.value = "Total de Alquileres Filtrados: Bs."
     total_label_cell.font = total_font
-    total_label_cell.alignment = total_alignment
-
-    total_value_cell = ws.cell(row=last_data_row + 2, column=8) # El Total (Bs.) ahora está en la columna 8
+    total_label_cell.alignment = Alignment(horizontal="right")
+    total_value_cell = ws.cell(row=last_data_row + 2, column=num_cols)
     total_value_cell.value = total_alquileres
     total_value_cell.font = total_font
     total_value_cell.alignment = Alignment(horizontal="right")
@@ -2861,18 +3131,16 @@ def exportar_reporte_alquileres_excel(request, alquileres, fecha_desde, fecha_ha
 
     for col in ws.columns:
         max_length = 0
-        for cell in col[header_row-1:]:
+        for cell in col[header_row - 1:]:
             try:
                 if cell.value is not None:
                     cell_len = len(str(cell.value))
                     if cell_len > max_length:
                         max_length = cell_len
-            except:
+            except Exception:
                 pass
-        adjusted_width = (max_length + 2) * 1.2
-        if adjusted_width > 50: adjusted_width = 50
+        adjusted_width = min((max_length + 2) * 1.2, 50)
         ws.column_dimensions[get_column_letter(col[0].column)].width = adjusted_width
-
 
     response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     response['Content-Disposition'] = 'attachment; filename="reporte_alquileres.xlsx"'
@@ -3248,454 +3516,228 @@ def exportar_reporte_transacciones_excel(request, transacciones, fecha_desde, fe
 
 # --- FIN de funciones de Reporte de Transacciones ---
 
-# --- INICIO de funciones de Reporte de INVENTARIO (NUEVO) ---
-
 @login_required
 def reporte_inventario(request):
-    inventario_items = Inventario.objects.all()
-    estado_choices = Inventario.ESTADO_OPCIONES
-    categorias = Categoria.objects.all()
+    q      = request.GET.get('q', '').strip()
+    tipo   = request.GET.get('tipo', '').strip()
+    estado = request.GET.get('estado', 'ACT').strip()
 
-    # Parámetros de filtro
-    articulo_filtro = request.GET.get('articulo')
-    fecha_desde = request.GET.get('fecha_desde')
-    fecha_hasta = request.GET.get('fecha_hasta')
-    selected_estado = request.GET.get('estado')
-    selected_categoria_id = request.GET.get('categoria')
-    selected_inventario_id = request.GET.get('inventario_id') # Para el "Kardex"
+    qs = PrendaInventario.objects.all().order_by('nombre', 'talla')
+    if q:
+        qs = qs.filter(
+            Q(codigo__icontains=q) | Q(nombre__icontains=q) |
+            Q(color__icontains=q)  | Q(talla__icontains=q)
+        )
+    if tipo:
+        qs = qs.filter(tipo=tipo)
+    if estado:
+        qs = qs.filter(estado=estado)
 
-    # Aplicar filtros
-    if articulo_filtro:
-        inventario_items = inventario_items.filter(articulo__icontains=articulo_filtro)
-    
-    if fecha_desde:
-        inventario_items = inventario_items.filter(fecha_ingreso__gte=fecha_desde) 
-    if fecha_hasta:
-        fecha_hasta_dt = datetime.strptime(fecha_hasta, '%Y-%m-%d').date() + timedelta(days=1)
-        inventario_items = inventario_items.filter(fecha_ingreso__lt=fecha_hasta_dt)
-    
-    if selected_estado and selected_estado != '':
-        inventario_items = inventario_items.filter(estado=selected_estado)
-
-    if selected_categoria_id and selected_categoria_id != '':
-        inventario_items = inventario_items.filter(categoria__id=selected_categoria_id)
-
-    inventario_items = inventario_items.order_by('articulo')
-
-    # Calcular valor total del inventario activo
-    # Anotamos el valor total por item (cantidad * precio) antes de sumar
-    valor_total_inventario_activo = Inventario.objects.filter(estado='ACT').annotate(
+    valor_total = qs.filter(estado='ACT').annotate(
         valor_item=ExpressionWrapper(F('cantidad') * F('precio'), output_field=DecimalField())
-    ).aggregate(total_valor=Sum('valor_item'))['total_valor'] or 0.00
-    
-    # Manejo del "Kardex" (movimientos de un artículo específico)
-    articulo_seleccionado = None
-    bajas_articulo = None
-    if selected_inventario_id:
-        try:
-            articulo_seleccionado = Inventario.objects.get(id=selected_inventario_id)
-            bajas_articulo = BajaInventario.objects.filter(inventario=articulo_seleccionado).order_by('fecha_baja')
-        except ObjectDoesNotExist:
-            articulo_seleccionado = None
-            bajas_articulo = None
+    ).aggregate(total=Sum('valor_item'))['total'] or 0
 
+    total = qs.count()
+    paginator = Paginator(qs, 20)
+    page_obj  = paginator.get_page(request.GET.get('page'))
 
-    export_format = request.GET.get('export_format')
-    if export_format == 'pdf':
-        return exportar_reporte_inventario_pdf(request, inventario_items, articulo_seleccionado, bajas_articulo, fecha_desde, fecha_hasta, selected_estado, selected_categoria_id, articulo_filtro, valor_total_inventario_activo)
-    elif export_format == 'excel':
-        return exportar_reporte_inventario_excel(request, inventario_items, articulo_seleccionado, bajas_articulo, fecha_desde, fecha_hasta, selected_estado, selected_categoria_id, articulo_filtro, valor_total_inventario_activo)
+    return render(request, 'misastreria/reportes/reporte_inventario.html', {
+        'page_obj':     page_obj,
+        'total':        total,
+        'q':            q,
+        'tipo':         tipo,
+        'estado':       estado,
+        'valor_total':  valor_total,
+        'tipo_choices':   PrendaInventario.TIPO_CHOICES,
+        'estado_choices': PrendaInventario.ESTADO_OPCIONES,
+    })
 
-
-    context = {
-        'inventario_items': inventario_items,
-        'estado_choices': estado_choices,
-        'categorias': categorias,
-        'selected_articulo': articulo_filtro,
-        'selected_fecha_desde': fecha_desde,
-        'selected_fecha_hasta': fecha_hasta,
-        'selected_estado': selected_estado,
-        'selected_categoria_id': selected_categoria_id,
-        'selected_inventario_id': selected_inventario_id, # Pasa el ID seleccionado
-        'articulo_seleccionado': articulo_seleccionado, # Pasa el objeto para sus detalles
-        'bajas_articulo': bajas_articulo, # Pasa las bajas si hay un artículo seleccionado
-        'valor_total_inventario_activo': valor_total_inventario_activo,
-    }
-    return render(request, 'misastreria/reportes/reporte_inventario.html', context)
-
-
-def exportar_reporte_inventario_pdf(request, inventario_items, articulo_seleccionado, bajas_articulo, fecha_desde, fecha_hasta, selected_estado, selected_categoria_id, articulo_filtro, valor_total_inventario_activo):
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter,
-                            rightMargin=inch/4, leftMargin=inch/4,
-                            topMargin=inch/4, bottomMargin=inch/4)
-    styles = getSampleStyleSheet()
-
-    # Estilos personalizados (asegúrate de que DejaVuSans esté registrado)
-    styles.add(ParagraphStyle(name='CompanyTitle',
-                              fontSize=20, leading=24, alignment=1, fontName='DejaVuSans', textColor=colors.HexColor('#1e3a8a')))
-    styles.add(ParagraphStyle(name='ReportTitle',
-                              fontSize=16, leading=20, alignment=1, fontName='DejaVuSans', textColor=colors.HexColor('#2563eb')))
-    styles.add(ParagraphStyle(name='SubTitle',
-                              fontSize=10, leading=12, alignment=1, fontName='DejaVuSans'))
-    styles.add(ParagraphStyle(name='TableHeader',
-                              fontSize=9, fontName='DejaVuSans', alignment=1))
-    styles.add(ParagraphStyle(name='TableContent',
-                              fontSize=7, fontName='DejaVuSans', alignment=0))
-    styles.add(ParagraphStyle(name='TotalStyle',
-                              fontSize=10, fontName='DejaVuSans', alignment=2))
-    styles.add(ParagraphStyle(name='KardexTitle',
-                              fontSize=14, leading=18, alignment=0, fontName='DejaVuSans', textColor=colors.HexColor('#10b981'))) # Color para Kardex
-    styles.add(ParagraphStyle(name='KardexContent',
-                              fontSize=8, fontName='DejaVuSans', alignment=0))
-
-
-    elements = []
-
-    elements.append(Paragraph("SISTEMA DE GESTION SASTRERIA CONFORT Y MAS", styles['CompanyTitle']))
-    elements.append(Spacer(1, 0.1 * inch))
-
-    elements.append(Paragraph("REPORTE DE INVENTARIO", styles['ReportTitle']))
-    elements.append(Spacer(1, 0.2 * inch))
-
-    # Filtros aplicados
-    filter_text_lines = []
-    if articulo_filtro:
-        filter_text_lines.append(f"Artículo contiene: '{articulo_filtro}'.")
-    if fecha_desde and fecha_hasta:
-        filter_text_lines.append(f"Fecha de Ingreso: {fecha_desde} al {fecha_hasta}.")
-    elif fecha_desde:
-        filter_text_lines.append(f"Fecha de Ingreso Desde: {fecha_desde}.")
-    elif fecha_hasta:
-        filter_text_lines.append(f"Fecha de Ingreso Hasta: {fecha_hasta}.")
-    
-    estado_display = dict(Inventario.ESTADO_OPCIONES).get(selected_estado, "Todos")
-    filter_text_lines.append(f"Estado: {estado_display}.")
-
-    if selected_categoria_id:
-        try:
-            categoria_obj = Categoria.objects.get(id=selected_categoria_id)
-            filter_text_lines.append(f"Categoría: {categoria_obj.nombre}.")
-        except ObjectDoesNotExist:
-            pass # Categoría no encontrada
-    else:
-        filter_text_lines.append("Categoría: Todas.")
-
-    if filter_text_lines:
-        for line in filter_text_lines:
-            elements.append(Paragraph(line, styles['SubTitle']))
-        elements.append(Spacer(1, 0.1 * inch))
-
-
-    # Tabla principal de Inventario
-    data = [[
-        Paragraph('Código', styles['TableHeader']),
-        Paragraph('Artículo', styles['TableHeader']),
-        Paragraph('Cant.', styles['TableHeader']),
-        Paragraph('Costo (Bs.)', styles['TableHeader']),
-        Paragraph('Precio (Bs.)', styles['TableHeader']),
-        Paragraph('F. Ingreso', styles['TableHeader']),
-        Paragraph('Categoría', styles['TableHeader']),
-        Paragraph('Estado', styles['TableHeader']),
-    ]]
-
-    for item in inventario_items:
-        row_data = [
-            Paragraph(item.codigo, styles['TableContent']),
-            Paragraph(item.articulo, styles['TableContent']),
-            Paragraph(str(item.cantidad), styles['TableContent']),
-            Paragraph(f"{item.costo:.2f}" if item.costo is not None else "N/A", styles['TableContent']),
-            Paragraph(f"{item.precio:.2f}", styles['TableContent']),
-            Paragraph(item.fecha_ingreso.strftime('%d/%m/%Y'), styles['TableContent']),
-            Paragraph(item.categoria.nombre if item.categoria else 'Sin Categoría', styles['TableContent']),
-            Paragraph(item.get_estado_display(), styles['TableContent']),
-        ]
-        data.append(row_data)
-
-    table_style = TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e3a8a')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('FONTNAME', (0, 0), (-1, 0), 'DejaVuSans'),
-        ('FONTSIZE', (0, 0), (-1, 0), 9),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#f8f8f8')),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-        ('BOX', (0, 0), (-1, -1), 1, colors.black),
-    ])
-
-    table = Table(data, colWidths=[
-        0.8*inch,  # Código
-        1.5*inch,  # Artículo
-        0.5*inch,  # Cant.
-        0.8*inch,  # Costo
-        0.8*inch,  # Precio
-        0.9*inch,  # F. Ingreso
-        1.0*inch,  # Categoría
-        0.6*inch   # Estado
-    ])
-    
-    table.setStyle(table_style)
-    elements.append(table)
-    elements.append(Spacer(1, 0.2 * inch))
-
-    # Total del valor de inventario activo
-    elements.append(Paragraph(f"Valor Total de Inventario Activo: Bs. {valor_total_inventario_activo:.2f}", styles['TotalStyle']))
-    elements.append(Spacer(1, 0.2 * inch))
-
-    # Sección de Kardex (si hay un artículo seleccionado)
-    if articulo_seleccionado:
-        elements.append(PageBreak()) # Nueva página para el Kardex
-        elements.append(Paragraph(f"KARDEX DEL ARTÍCULO: {articulo_seleccionado.articulo} ({articulo_seleccionado.codigo})", styles['KardexTitle']))
-        elements.append(Spacer(1, 0.1 * inch))
-
-        elements.append(Paragraph(f"Fecha de Ingreso Inicial: {articulo_seleccionado.fecha_ingreso.strftime('%d/%m/%Y')}", styles['KardexContent']))
-        elements.append(Paragraph(f"Cantidad Actual: {articulo_seleccionado.cantidad}", styles['KardexContent']))
-        elements.append(Paragraph(f"Estado: {articulo_seleccionado.get_estado_display()}", styles['KardexContent']))
-        elements.append(Spacer(1, 0.1 * inch))
-        elements.append(Paragraph("MOVIMIENTOS DE BAJA:", styles['KardexContent']))
-        elements.append(Spacer(1, 0.05 * inch))
-
-        if bajas_articulo:
-            kardex_data = [[
-                Paragraph('Fecha Baja', styles['TableHeader']),
-                Paragraph('Cantidad Baja', styles['TableHeader']),
-                Paragraph('Motivo Baja', styles['TableHeader'])
-            ]]
-            for baja in bajas_articulo:
-                kardex_data.append([
-                    Paragraph(baja.fecha_baja.strftime('%d/%m/%Y'), styles['TableContent']),
-                    Paragraph(str(baja.cantidad), styles['TableContent']),
-                    Paragraph(baja.motivo_baja, styles['TableContent'])
-                ])
-            
-            kardex_table = Table(kardex_data, colWidths=[1.5*inch, 1.5*inch, 3.0*inch])
-            kardex_table.setStyle(table_style) # Reusar estilo de tabla
-            elements.append(kardex_table)
-        else:
-            elements.append(Paragraph("No hay movimientos de baja registrados para este artículo.", styles['KardexContent']))
-
-    doc.build(elements)
-    buffer.seek(0)
-    response = HttpResponse(buffer, content_type='application/pdf')
-    response['Content-Disposition'] = 'attachment; filename="reporte_inventario.pdf"'
-    return response
-
-
-def exportar_reporte_inventario_excel(request, inventario_items, articulo_seleccionado, bajas_articulo, fecha_desde, fecha_hasta, selected_estado, selected_categoria_id, articulo_filtro, valor_total_inventario_activo):
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Reporte de Inventario"
-
-    # Estilos de Excel
-    header_font = Font(name='Calibri', bold=True, color='FFFFFF')
-    header_fill = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
-    header_alignment = Alignment(horizontal="center", vertical="center")
-    border_style = Side(border_style="thin", color="000000")
-    full_border = Border(left=border_style, right=border_style, top=border_style, bottom=border_style)
-    
-    content_font = Font(name='Calibri', size=10)
-    total_font = Font(name='Calibri', bold=True, size=12)
-    total_alignment = Alignment(horizontal="right")
-    
-    # Títulos principales
-    ws.merge_cells('A1:H1') # 8 columnas
-    ws['A1'] = "SISTEMA DE GESTION SASTRERIA CONFORT Y MAS"
-    ws['A1'].font = Font(name='Calibri', size=20, bold=True, color='1E3A8A')
-    ws['A1'].alignment = Alignment(horizontal="center", vertical="center")
-
-    ws.merge_cells('A2:H2') # 8 columnas
-    ws['A2'] = "REPORTE DE INVENTARIO"
-    ws['A2'].font = Font(name='Calibri', size=16, bold=True, color='2563EB')
-    ws['A2'].alignment = Alignment(horizontal="center", vertical="center")
-
-    # Filtros aplicados
-    filter_row_start = 4
-    filter_col_span = 8
-    filter_text_lines = []
-    if articulo_filtro:
-        filter_text_lines.append(f"Artículo contiene: '{articulo_filtro}'.")
-    if fecha_desde and fecha_hasta:
-        filter_text_lines.append(f"Fecha de Ingreso: {fecha_desde} al {fecha_hasta}.")
-    elif fecha_desde:
-        filter_text_lines.append(f"Fecha de Ingreso Desde: {fecha_desde}.")
-    elif fecha_hasta:
-        filter_text_lines.append(f"Fecha de Ingreso Hasta: {fecha_hasta}.")
-    
-    estado_display = dict(Inventario.ESTADO_OPCIONES).get(selected_estado, "Todos")
-    filter_text_lines.append(f"Estado: {estado_display}.")
-
-    if selected_categoria_id:
-        try:
-            categoria_obj = Categoria.objects.get(id=selected_categoria_id)
-            filter_text_lines.append(f"Categoría: {categoria_obj.nombre}.")
-        except ObjectDoesNotExist:
-            pass
-    else:
-        filter_text_lines.append("Categoría: Todas.")
-
-    for i, line in enumerate(filter_text_lines):
-        ws.merge_cells(start_row=filter_row_start + i, start_column=1, end_row=filter_row_start + i, end_column=filter_col_span)
-        ws[f'A{filter_row_start + i}'] = line
-        ws[f'A{filter_row_start + i}'].font = Font(name='Calibri', size=10)
-        ws[f'A{filter_row_start + i}'].alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    
-    header_row = filter_row_start + len(filter_text_lines) + 1
-
-
-    # Cabecera de la tabla principal
-    headers = ['Código', 'Artículo', 'Cantidad', 'Costo (Bs.)', 'Precio (Bs.)', 'Fecha Ingreso', 'Categoría', 'Estado']
-    ws.append(headers)
-
-    for col_num, cell in enumerate(ws[header_row]):
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = header_alignment
-        cell.border = full_border
-
-    # Datos de la tabla principal
-    for item in inventario_items:
-        row_data = [
-            item.codigo,
-            item.articulo,
-            item.cantidad,
-            item.costo,
-            item.precio,
-            item.fecha_ingreso.strftime('%d/%m/%Y'),
-            item.categoria.nombre if item.categoria else 'Sin Categoría',
-            item.get_estado_display(),
-        ]
-        ws.append(row_data)
-        for col_num, cell in enumerate(ws[ws.max_row]):
-            cell.font = content_font
-            cell.border = full_border
-            if col_num in [3, 4]: # Costo y Precio
-                cell.number_format = '#,##0.00'
-            elif col_num == 2: # Cantidad
-                cell.number_format = '#,##0'
-            else:
-                cell.alignment = Alignment(horizontal="center")
-
-    last_data_row = ws.max_row
-
-    # Total del valor de inventario activo
-    total_label_row = last_data_row + 2
-    ws.merge_cells(start_row=total_label_row, start_column=1, end_row=total_label_row, end_column=7) # Ajusta el colspan
-    total_label = ws.cell(row=total_label_row, column=1)
-    total_label.value = "Valor Total de Inventario Activo:"
-    total_label.font = total_font
-    total_label.alignment = total_alignment
-    
-    total_value = ws.cell(row=total_label_row, column=8)
-    total_value.value = valor_total_inventario_activo
-    total_value.font = Font(name='Calibri', bold=True, size=12, color='059669') # Verde
-    total_value.alignment = Alignment(horizontal="right")
-    total_value.number_format = '#,##0.00'
-
-
-    # Sección de Kardex (si hay un artículo seleccionado)
-    if articulo_seleccionado:
-        kardex_start_row = ws.max_row + 4
-        ws.merge_cells(start_row=kardex_start_row, start_column=1, end_row=kardex_start_row, end_column=8)
-        ws.cell(row=kardex_start_row, column=1).value = f"KARDEX DEL ARTÍCULO: {articulo_seleccionado.articulo} ({articulo_seleccionado.codigo})"
-        ws.cell(row=kardex_start_row, column=1).font = Font(name='Calibri', size=14, bold=True, color='10B981')
-        ws.cell(row=kardex_start_row, column=1).alignment = Alignment(horizontal="center")
-
-        kardex_start_row += 2
-        ws.merge_cells(start_row=kardex_start_row, start_column=1, end_row=kardex_start_row, end_column=3)
-        ws.cell(row=kardex_start_row, column=1).value = f"Fecha de Ingreso Inicial: {articulo_seleccionado.fecha_ingreso.strftime('%d/%m/%Y')}"
-        ws.cell(row=kardex_start_row, column=1).font = content_font
-        ws.cell(row=kardex_start_row, column=1).alignment = Alignment(horizontal="left")
-
-        kardex_start_row += 1
-        ws.merge_cells(start_row=kardex_start_row, start_column=1, end_row=kardex_start_row, end_column=3)
-        ws.cell(row=kardex_start_row, column=1).value = f"Cantidad Actual: {articulo_seleccionado.cantidad}"
-        ws.cell(row=kardex_start_row, column=1).font = content_font
-        ws.cell(row=kardex_start_row, column=1).alignment = Alignment(horizontal="left")
-
-        kardex_start_row += 1
-        ws.merge_cells(start_row=kardex_start_row, start_column=1, end_row=kardex_start_row, end_column=3)
-        ws.cell(row=kardex_start_row, column=1).value = f"Estado: {articulo_seleccionado.get_estado_display()}"
-        ws.cell(row=kardex_start_row, column=1).font = content_font
-        ws.cell(row=kardex_start_row, column=1).alignment = Alignment(horizontal="left")
-
-        kardex_start_row += 2
-        ws.merge_cells(start_row=kardex_start_row, start_column=1, end_row=kardex_start_row, end_column=3)
-        ws.cell(row=kardex_start_row, column=1).value = "MOVIMIENTOS DE BAJA:"
-        ws.cell(row=kardex_start_row, column=1).font = content_font
-        ws.cell(row=kardex_start_row, column=1).alignment = Alignment(horizontal="left")
-
-        kardex_start_row += 1
-        if bajas_articulo:
-            kardex_headers = ['Fecha Baja', 'Cantidad Baja', 'Motivo Baja']
-            ws.append(kardex_headers)
-            for col_num, cell in enumerate(ws[ws.max_row]):
-                cell.font = header_font
-                cell.fill = header_fill
-                cell.alignment = header_alignment
-                cell.border = full_border
-
-            for baja in bajas_articulo:
-                ws.append([
-                    baja.fecha_baja.strftime('%d/%m/%Y'),
-                    baja.cantidad,
-                    baja.motivo_baja
-                ])
-                for col_num, cell in enumerate(ws[ws.max_row]):
-                    cell.font = content_font
-                    cell.border = full_border
-                    if col_num == 1: # Cantidad Baja
-                        cell.number_format = '#,##0'
-                    else:
-                        cell.alignment = Alignment(horizontal="center")
-        else:
-            ws.merge_cells(start_row=ws.max_row + 1, start_column=1, end_row=ws.max_row + 1, end_column=3)
-            ws.cell(row=ws.max_row + 1, column=1).value = "No hay movimientos de baja registrados para este artículo."
-            ws.cell(row=ws.max_row + 1, column=1).font = content_font
-            ws.cell(row=ws.max_row + 1, column=1).alignment = Alignment(horizontal="center")
-
-
-    # Ajustar ancho de columnas para todas las columnas existentes
-    for col_idx in range(1, ws.max_column + 1):
-        max_length = 0
-        column = get_column_letter(col_idx)
-        for cell in ws[column]:
-            try:
-                if cell.value is not None:
-                    cell_len = len(str(cell.value))
-                    if cell_len > max_length:
-                        max_length = cell_len
-            except:
-                pass
-        adjusted_width = (max_length + 2) * 1.2
-        if adjusted_width > 50: adjusted_width = 50
-        ws.column_dimensions[column].width = adjusted_width
-
-
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = 'attachment; filename="reporte_inventario.xlsx"'
-    wb.save(response)
-    return response
-
-# --- FIN de funciones de Reporte de Inventario ---
 
 @login_required
 def reporte_stock(request):
-    inventarios = Inventario.objects.all()
-    return render(request, 'misastreria/reportes/stock.html', {'inventarios': inventarios})
+    prendas = PrendaInventario.objects.filter(estado='ACT').order_by('nombre')
+    return render(request, 'misastreria/reportes/stock.html', {'prendas': prendas})
 
 @login_required
 def reporte_ingresos(request):
     fecha_inicio = request.GET.get('fecha_inicio')
     fecha_fin = request.GET.get('fecha_fin')
     transacciones = Transaccion.objects.all()
-    
+
     if fecha_inicio and fecha_fin:
         transacciones = transacciones.filter(fecha__range=[fecha_inicio, fecha_fin])
-    
+
     total_ingresos = transacciones.aggregate(Sum('precio'))['precio__sum'] or 0
     return render(request, 'misastreria/reportes/ingresos.html', {
         'transacciones': transacciones,
         'total_ingresos': total_ingresos,
     })
+
+
+# ── Producción ─────────────────────────────────────────────────────────────
+
+def _guardar_insumos_orden(orden, post_data):
+    """Restaura stock de los insumos viejos, elimina los registros y crea los nuevos."""
+    for ins in orden.insumos.select_related('insumo').all():
+        ins.insumo.cantidad += ins.cantidad
+        ins.insumo.save()
+    orden.insumos.all().delete()
+
+    insumo_ids  = post_data.getlist('item_insumo')
+    cantidades  = post_data.getlist('item_cantidad')
+
+    errores = []
+    for i, (ins_id, cant_str) in enumerate(zip(insumo_ids, cantidades), 1):
+        if not ins_id:
+            continue
+        try:
+            insumo   = Insumo.objects.get(pk=ins_id)
+            cantidad = Decimal(cant_str or '0')
+            if cantidad <= 0:
+                errores.append(f"Fila {i}: la cantidad debe ser mayor que cero.")
+                continue
+            if insumo.cantidad < cantidad:
+                errores.append(f"Fila {i}: stock insuficiente de {insumo} (disponible: {insumo.cantidad}).")
+                continue
+            InsumoCortado.objects.create(orden=orden, insumo=insumo, cantidad=cantidad)
+            insumo.cantidad -= cantidad
+            insumo.save()
+        except (Insumo.DoesNotExist, Exception):
+            errores.append(f"Fila {i}: datos inválidos.")
+    return errores
+
+
+def _insumos_json():
+    import json
+    insumos = list(
+        Insumo.objects.filter(estado='ACT')
+        .values('id', 'articulo', 'unidad_medida', 'cantidad')
+    )
+    for ins in insumos:
+        ins['cantidad'] = float(ins['cantidad'])
+        ins['label'] = f"{ins['articulo']} ({ins['unidad_medida']}) — stock: {ins['cantidad']}"
+    return json.dumps(insumos)
+
+
+@login_required
+def lista_ordenes(request):
+    q       = request.GET.get('q', '').strip()
+    estado  = request.GET.get('estado', '').strip()
+    desde   = request.GET.get('desde', '').strip()
+    hasta   = request.GET.get('hasta', '').strip()
+    periodo = request.GET.get('periodo', '').strip()
+
+    hoy = date.today()
+    if periodo == 'semana':
+        desde = (hoy - timedelta(days=7)).isoformat(); hasta = ''
+    elif periodo == 'mes':
+        desde = hoy.replace(day=1).isoformat(); hasta = ''
+    elif not desde and not hasta:
+        periodo = periodo or '3meses'
+        desde = (hoy - timedelta(days=90)).isoformat()
+
+    qs = OrdenProduccion.objects.select_related('empleado', 'confeccion').order_by('-creado')
+    if q:
+        qs = qs.filter(
+            Q(codigo__icontains=q) |
+            Q(descripcion__icontains=q) |
+            Q(empleado__nombres__icontains=q)
+        )
+    if estado:
+        qs = qs.filter(estado=estado)
+    if desde:
+        qs = qs.filter(fecha_inicio__gte=desde)
+    if hasta:
+        qs = qs.filter(fecha_inicio__lte=hasta)
+
+    total = qs.count()
+    paginator = Paginator(qs, 15)
+    page_obj  = paginator.get_page(request.GET.get('page'))
+
+    return render(request, 'misastreria/produccion/lista.html', {
+        'page_obj':      page_obj,
+        'total':         total,
+        'q':             q,
+        'estado':        estado,
+        'desde':         desde,
+        'hasta':         hasta,
+        'periodo':       periodo,
+        'estado_choices': OrdenProduccion.ESTADO_CHOICES,
+    })
+
+
+@login_required
+def crear_orden(request):
+    if request.method == 'POST':
+        form = OrdenProduccionForm(request.POST)
+        if form.is_valid():
+            orden = form.save()
+            errores = _guardar_insumos_orden(orden, request.POST)
+            if errores:
+                messages.warning(request, 'Orden creada con advertencias: ' + '; '.join(errores))
+            else:
+                messages.success(request, f"Orden {orden.codigo} creada exitosamente.")
+            return redirect('lista_ordenes')
+        else:
+            messages.error(request, 'Por favor corrige los errores del formulario.')
+    else:
+        form = OrdenProduccionForm()
+    return render(request, 'misastreria/produccion/form.html', {
+        'form':        form,
+        'titulo':      'Nueva Orden de Producción',
+        'insumos_json': _insumos_json(),
+    })
+
+
+@login_required
+def editar_orden(request, id):
+    orden = get_object_or_404(OrdenProduccion, id=id)
+    if request.method == 'POST':
+        form = OrdenProduccionForm(request.POST, instance=orden)
+        if form.is_valid():
+            orden = form.save()
+            errores = _guardar_insumos_orden(orden, request.POST)
+            if errores:
+                messages.warning(request, 'Actualizado con advertencias: ' + '; '.join(errores))
+            else:
+                messages.success(request, 'Orden actualizada correctamente.')
+            return redirect('lista_ordenes')
+        else:
+            messages.error(request, 'Por favor corrige los errores del formulario.')
+    else:
+        form = OrdenProduccionForm(instance=orden)
+    items_existentes = list(orden.insumos.select_related('insumo').values('insumo_id', 'cantidad'))
+    return render(request, 'misastreria/produccion/form.html', {
+        'form':             form,
+        'titulo':           'Editar Orden de Producción',
+        'orden':            orden,
+        'items_existentes': items_existentes,
+        'insumos_json':     _insumos_json(),
+    })
+
+
+@login_required
+def eliminar_orden(request, id):
+    orden = get_object_or_404(OrdenProduccion, id=id)
+    if request.method == 'POST':
+        for ins in orden.insumos.select_related('insumo').all():
+            ins.insumo.cantidad += ins.cantidad
+            ins.insumo.save()
+        orden.delete()
+        messages.success(request, 'Orden eliminada correctamente.')
+        return redirect('lista_ordenes')
+    return render(request, 'misastreria/produccion/eliminar.html', {'orden': orden})
+
+
+@login_required
+def avanzar_estado_orden(request, id):
+    orden = get_object_or_404(OrdenProduccion, id=id)
+    siguiente = OrdenProduccion.ESTADO_SIGUIENTE.get(orden.estado)
+    if not siguiente:
+        messages.warning(request, 'Esta orden ya está en estado Terminado.')
+        return redirect('lista_ordenes')
+    if request.method == 'POST':
+        orden.estado = siguiente
+        orden.save()
+        messages.success(request, f"Orden {orden.codigo} avanzó a: {orden.get_estado_display()}.")
+    return redirect('lista_ordenes')

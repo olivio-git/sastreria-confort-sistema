@@ -1,54 +1,72 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}Editar Empleado{% endblock %}
 {% block contenido %}
-<div class="container py-4" style="background-color: #f1f5f9;">
-    <h2 class="mb-4">Editar Empleado: {{ empleado }}</h2>
+<div class="form-container">
+
+  <div class="page-header">
+    <h1 class="page-title"><i class="bi bi-pencil me-2"></i>Editar Empleado: {{ empleado }}</h1>
+    <a href="{% url 'lista_empleados' %}" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-arrow-left me-1"></i>Volver
+    </a>
+  </div>
+
+  <div class="form-card">
     <form method="post">
-        {% csrf_token %}
-        <div class="row">
-            <div class="col-md-6 mb-3">
-                <label for="id_codigo" class="form-label">Código</label>
-                {{ form.codigo }}
-            </div>
-            <div class="col-md-6 mb-3">
-                <label for="id_nombres" class="form-label">Nombres</label>
-                {{ form.nombres }}
-            </div>
-            <div class="col-md-6 mb-3">
-                <label for="id_apellido_paterno" class="form-label">Apellido Paterno</label>
-                {{ form.apellido_paterno }}
-            </div>
-            <div class="col-md-6 mb-3">
-                <label for="id_apellido_materno" class="form-label">Apellido Materno</label>
-                {{ form.apellido_materno }}
-            </div>
-            <div class="col-md-6 mb-3">
-                <label for="id_celular" class="form-label">Celular</label>
-                {{ form.celular }}
-            </div>
-            <div class="col-md-6 mb-3">
-                <label for="id_email" class="form-label">Correo Electrónico</label>
-                {{ form.email }}
-            </div>
-            <div class="col-md-6 mb-3">
-                <label for="id_tipo_contrato" class="form-label">Tipo de Contrato</label>
-                {{ form.tipo_contrato }}
-            </div>
-            <div class="col-md-6 mb-3">
-                <label for="id_fecha_ingreso" class="form-label">Fecha de Ingreso</label>
-                {{ form.fecha_ingreso }}
-            </div>
-            <div class="col-md-6 mb-3">
-                <label for="id_fecha_baja" class="form-label">Fecha de Baja</label>
-                {{ form.fecha_baja }}
-            </div>
-            <div class="col-md-6 mb-3">
-                <label for="id_activo" class="form-label">Activo</label>
-                {{ form.activo }}
-            </div>
+      {% csrf_token %}
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label for="id_ci" class="form-label">CI (Cédula de Identidad)</label>
+          {{ form.ci }}
+          {% if form.ci.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.ci.errors }}</div>{% endif %}
         </div>
-        <button type="submit" class="btn btn-primary" style="background-color: #2563eb; border-color: #2563eb;">Guardar</button>
-        <a href="{% url 'lista_empleados' %}" class="btn btn-secondary">Cancelar</a>
+        <div class="col-md-6">
+          <label for="id_nombres" class="form-label">Nombres</label>
+          {{ form.nombres }}
+          {% if form.nombres.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.nombres.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-6">
+          <label for="id_apellido_paterno" class="form-label">Apellido Paterno</label>
+          {{ form.apellido_paterno }}
+          {% if form.apellido_paterno.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.apellido_paterno.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-6">
+          <label for="id_apellido_materno" class="form-label">Apellido Materno</label>
+          {{ form.apellido_materno }}
+          {% if form.apellido_materno.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.apellido_materno.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-6">
+          <label for="id_celular" class="form-label">Celular</label>
+          {{ form.celular }}
+          {% if form.celular.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.celular.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-6">
+          <label for="id_tipo_contrato" class="form-label">Tipo de Contrato</label>
+          {{ form.tipo_contrato }}
+          {% if form.tipo_contrato.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.tipo_contrato.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-6">
+          <label for="id_fecha_ingreso" class="form-label">Fecha de Ingreso</label>
+          {{ form.fecha_ingreso }}
+          {% if form.fecha_ingreso.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.fecha_ingreso.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-6">
+          <label for="id_fecha_baja" class="form-label">Fecha de Despido / Baja</label>
+          <div class="input-group">
+            {{ form.fecha_baja }}
+            <button type="button" class="btn btn-outline-secondary" data-clear-target="id_fecha_baja" title="Limpiar fecha (reactivar empleado)">
+              <i class="bi bi-x-lg"></i>
+            </button>
+          </div>
+          <div class="form-text">Sin fecha = empleado activo.</div>
+          {% if form.fecha_baja.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.fecha_baja.errors }}</div>{% endif %}
+        </div>
+      </div>
+      <div class="mt-4 d-flex gap-2">
+        <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Guardar</button>
+        <a href="{% url 'lista_empleados' %}" class="btn btn-outline-secondary">Cancelar</a>
+      </div>
     </form>
+  </div>
+
 </div>
 {% endblock %}

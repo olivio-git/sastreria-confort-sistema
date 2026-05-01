@@ -1,0 +1,83 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}{{ titulo }}{% endblock %}
+{% block contenido %}
+
+<div class="page-header">
+  <h1 class="page-title"><i class="bi bi-scissors me-2"></i>{{ titulo }}</h1>
+  {% if insumo %}<small class="text-muted ms-2">{{ insumo.codigo }}</small>{% endif %}
+</div>
+
+<form method="post" class="form-card">
+  {% csrf_token %}
+
+  <div class="row g-3">
+    <div class="col-md-4">
+      <label class="form-label">{{ form.tipo_material.label }}</label>
+      {{ form.tipo_material }}
+      {% if form.tipo_material.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.tipo_material.errors }}</div>{% endif %}
+    </div>
+    <div class="col-md-8">
+      <label class="form-label">{{ form.articulo.label }}</label>
+      {{ form.articulo }}
+      {% if form.articulo.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.articulo.errors }}</div>{% endif %}
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label">{{ form.coleccion.label }}</label>
+      {{ form.coleccion }}
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">{{ form.color.label }}</label>
+      {{ form.color }}
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">{{ form.tipo_tela.label }}</label>
+      {{ form.tipo_tela }}
+    </div>
+
+    <div class="col-md-6">
+      <label class="form-label">{{ form.codigo_referencia.label }}</label>
+      {{ form.codigo_referencia }}
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">{{ form.proveedor.label }}</label>
+      {{ form.proveedor }}
+    </div>
+
+    <div class="col-md-3">
+      <label class="form-label">{{ form.cantidad.label }}</label>
+      {{ form.cantidad }}
+      {% if form.cantidad.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.cantidad.errors }}</div>{% endif %}
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">{{ form.unidad_medida.label }}</label>
+      {{ form.unidad_medida }}
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">{{ form.stock_minimo.label }}</label>
+      {{ form.stock_minimo }}
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">{{ form.precio_costo.label }}</label>
+      {{ form.precio_costo }}
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label">{{ form.estado.label }}</label>
+      {{ form.estado }}
+    </div>
+    <div class="col-12">
+      <label class="form-label">{{ form.notas.label }}</label>
+      {{ form.notas }}
+    </div>
+  </div>
+
+  <div class="d-flex gap-2 mt-4">
+    <button type="submit" class="btn btn-primary">
+      <i class="bi bi-check-lg me-1"></i>Guardar
+    </button>
+    <a href="{% url 'lista_insumos' %}" class="btn btn-outline-secondary">Cancelar</a>
+  </div>
+</form>
+
+{% endblock %}

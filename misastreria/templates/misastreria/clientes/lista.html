@@ -3,15 +3,28 @@
 {% block contenido %}
 <div class="page-header">
   <h1 class="page-title"><i class="bi bi-person-lines-fill me-2"></i>Clientes</h1>
-  <a href="{% url 'crear_cliente' %}" class="btn btn-success btn-sm">
-    <i class="bi bi-plus-lg me-1"></i>Nuevo Cliente
-  </a>
+  <div class="d-flex gap-2">
+    <button class="btn btn-outline-secondary btn-sm" data-col-toggle="tablaClientes">
+      <i class="bi bi-layout-three-columns me-1"></i>Columnas
+    </button>
+    <a href="{% url 'crear_cliente' %}" class="btn btn-success btn-sm">
+      <i class="bi bi-plus-lg me-1"></i>Nuevo Cliente
+    </a>
+  </div>
 </div>
 
-<form method="get" class="filter-bar">
+<form method="get" class="filter-bar" id="filterForm">
   <div class="filter-group" style="flex:1;min-width:200px">
     <label>Buscar</label>
-    <input type="text" name="q" class="form-control" placeholder="Nombre, CI, celular…" value="{{ q }}" data-debounce="400">
+    <!-- input con data-debounce, sin id innecesario -->
+    <input
+      type="text"
+      name="q"
+      class="form-control"
+      placeholder="Nombre, CI, celular…"
+      value="{{ q }}"
+      data-debounce="400"
+    >
   </div>
   <div class="filter-group">
     <label>Desde</label>
@@ -24,14 +37,22 @@
   <div class="filter-group justify-content-end">
     <label class="invisible">.</label>
     <div class="d-flex gap-2">
-      <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-search me-1"></i>Filtrar</button>
+      <button type="submit" class="btn btn-primary btn-sm" data-filter-btn><i class="bi bi-search me-1"></i>Filtrar</button>
       <a href="{% url 'lista_clientes' %}" class="btn btn-outline-secondary btn-sm">Limpiar</a>
     </div>
   </div>
+  <input type="hidden" name="orden" value="{{ orden }}">
 </form>
 
+<div class="d-flex justify-content-end mb-2">
+  <a href="{{ orden_toggle_url }}" class="btn btn-outline-secondary btn-sm" title="Cambiar orden">
+    {% if orden == 'desc' %}<i class="bi bi-sort-down me-1"></i>Más reciente primero
+    {% else %}<i class="bi bi-sort-up me-1"></i>Más antiguo primero{% endif %}
+  </a>
+</div>
+
 <div class="table-wrapper">
-  <table class="table table-hover">
+  <table class="table table-hover" id="tablaClientes">
     <thead>
       <tr>
         <th>CI</th>
@@ -39,7 +60,7 @@
         <th>Celular</th>
         <th>Registro</th>
         <th>Notas</th>
-        <th>Acciones</th>
+        <th data-no-toggle>Acciones</th>
       </tr>
     </thead>
     <tbody>
@@ -53,12 +74,13 @@
           {{ cliente.notas|default:"—" }}
         </td>
         <td>
+          <!-- botones en orden correcto: Editar → Historial → Eliminar -->
           <div class="btn-actions">
-            <a href="{% url 'historial_cliente' cliente.id %}" class="btn btn-sm btn-outline-info" title="Ver historial">
-              <i class="bi bi-clock-history"></i>
-            </a>
             <a href="{% url 'editar_cliente' cliente.id %}" class="btn btn-sm btn-outline-primary" title="Editar">
               <i class="bi bi-pencil"></i>
+            </a>
+            <a href="{% url 'historial_cliente' cliente.id %}" class="btn btn-sm btn-outline-secondary" title="Ver detalles">
+              <i class="bi bi-person-lines-fill"></i>
             </a>
             <a href="{% url 'eliminar_cliente' cliente.id %}" class="btn btn-sm btn-outline-danger" title="Eliminar">
               <i class="bi bi-trash"></i>
@@ -83,13 +105,13 @@
     <nav>
       <ul class="pagination pagination-sm mb-0">
         {% if page_obj.has_previous %}
-          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}">«</a></li>
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}">‹</a></li>
+          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}&orden={{ orden }}">«</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}&orden={{ orden }}">‹</a></li>
         {% endif %}
         <li class="page-item active"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
         {% if page_obj.has_next %}
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}">›</a></li>
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}">»</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}&orden={{ orden }}">›</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}&orden={{ orden }}">»</a></li>
         {% endif %}
       </ul>
     </nav>

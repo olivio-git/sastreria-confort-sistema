@@ -1,13 +1,39 @@
 // ── Debounce auto-submit para formularios de filtro ──────────────────────────
+const AUTO_BUSCAR_KEY = 'auto_buscar';
+
 document.querySelectorAll('[data-debounce]').forEach(function(input) {
   var timer;
   var delay = parseInt(input.dataset.debounce || '400');
   input.addEventListener('input', function() {
+    var toggle = document.getElementById('toggleAutoBuscar');
+    if (toggle && localStorage.getItem(AUTO_BUSCAR_KEY) === 'false') return;
+
     clearTimeout(timer);
     timer = setTimeout(function() { input.closest('form').submit(); }, delay);
   });
 });
 
+// ── Toggle auto-buscar ────────────────────────────────────────────────────────
+var toggleAB = document.getElementById('toggleAutoBuscar');
+
+function syncFilterButtons() {
+  var autoBuscar = localStorage.getItem(AUTO_BUSCAR_KEY) !== 'false';
+  document.querySelectorAll('[data-filter-btn]').forEach(function(btn) {
+    btn.style.display = autoBuscar ? 'none' : '';
+  });
+}
+
+if (toggleAB) {
+  toggleAB.checked = localStorage.getItem(AUTO_BUSCAR_KEY) !== 'false';
+  toggleAB.addEventListener('change', function() {
+    localStorage.setItem(AUTO_BUSCAR_KEY, toggleAB.checked ? 'true' : 'false');
+    syncFilterButtons();
+  });
+}
+
+syncFilterButtons();
+
+// ── Column toggle ... (resto sin cambios)
 // ── Column toggle (mostrar/ocultar columnas) ──────────────────────────────────
 document.querySelectorAll('[data-col-toggle]').forEach(function(btn) {
   var tableId = btn.dataset.colToggle;
@@ -60,6 +86,14 @@ document.querySelectorAll('[data-col-toggle]').forEach(function(btn) {
   applyHidden();
 });
 
+// ── Botón limpiar campo de fecha ──────────────────────────────────────────────
+document.addEventListener('click', function(e) {
+  var btn = e.target.closest('[data-clear-target]');
+  if (!btn) return;
+  var target = document.getElementById(btn.dataset.clearTarget);
+  if (target) target.value = '';
+});
+
 // ── Cliente autocomplete ───────────────────────────────────────────────────────
 document.querySelectorAll('[data-cliente-search]').forEach(function(input) {
   var hiddenId = input.dataset.clienteSearch;
@@ -67,12 +101,38 @@ document.querySelectorAll('[data-cliente-search]').forEach(function(input) {
   var endpoint = input.dataset.endpoint || '/clientes/buscar/';
   var timer;
 
+  // Wrapper already has position:relative from the template
+  var wrapper = input.parentElement;
+
   // Dropdown container
   var dropdown = document.createElement('ul');
   dropdown.className = 'list-group position-absolute shadow-sm';
-  dropdown.style.cssText = 'z-index:1050;width:100%;max-height:220px;overflow-y:auto;display:none;';
-  input.parentElement.style.position = 'relative';
-  input.parentElement.appendChild(dropdown);
+  dropdown.style.cssText = 'z-index:1050;width:100%;max-height:220px;overflow-y:auto;display:none;top:100%;left:0;';
+  wrapper.appendChild(dropdown);
+
+  // Clear (X) button — shown when a client is selected
+  var clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.className = 'btn btn-sm btn-outline-secondary';
+  clearBtn.style.cssText = 'position:absolute;right:0;top:0;height:100%;border-radius:0 0.375rem 0.375rem 0;display:none;z-index:2;';
+  clearBtn.innerHTML = '<i class="bi bi-x-lg"></i>';
+  clearBtn.title = 'Limpiar selección';
+  wrapper.appendChild(clearBtn);
+
+  function updateClearBtn() {
+    clearBtn.style.display = hidden.value ? 'block' : 'none';
+    input.style.paddingRight = hidden.value ? '2.5rem' : '';
+  }
+
+  clearBtn.addEventListener('click', function() {
+    input.value = '';
+    hidden.value = '';
+    updateClearBtn();
+    input.focus();
+  });
+
+  // Show clear btn on load if already has a value (edit forms)
+  updateClearBtn();
 
   function clearDropdown() {
     dropdown.innerHTML = '';
@@ -94,12 +154,13 @@ document.querySelectorAll('[data-cliente-search]').forEach(function(input) {
       li.className = 'list-group-item list-group-item-action';
       li.style.cursor = 'pointer';
       li.style.fontSize = '.85rem';
-      li.innerHTML = '<strong>' + c.ci + '</strong> — ' + c.nombre;
+      li.innerHTML = '<strong>' + (c.ci || '—') + '</strong> — ' + c.nombre;
       li.addEventListener('mousedown', function(e) {
         e.preventDefault();
         input.value = c.nombre + (c.ci ? ' (' + c.ci + ')' : '');
         hidden.value = c.id;
         clearDropdown();
+        updateClearBtn();
       });
       dropdown.appendChild(li);
     });
@@ -108,6 +169,7 @@ document.querySelectorAll('[data-cliente-search]').forEach(function(input) {
 
   input.addEventListener('input', function() {
     hidden.value = '';
+    updateClearBtn();
     var q = input.value.trim();
     clearTimeout(timer);
     if (q.length < 2) { clearDropdown(); return; }

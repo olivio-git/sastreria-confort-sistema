@@ -3,12 +3,17 @@
 {% block contenido %}
 <div class="page-header">
   <h1 class="page-title"><i class="bi bi-box-seam me-2"></i>Inventario</h1>
-  <a href="{% url 'crear_inventario' %}" class="btn btn-success btn-sm">
-    <i class="bi bi-plus-lg me-1"></i>Nuevo Artículo
-  </a>
+  <div class="d-flex gap-2">
+    <button class="btn btn-outline-secondary btn-sm" data-col-toggle="tablaInventario">
+      <i class="bi bi-layout-three-columns me-1"></i>Columnas
+    </button>
+    <a href="{% url 'crear_inventario' %}" class="btn btn-success btn-sm">
+      <i class="bi bi-plus-lg me-1"></i>Nuevo Artículo
+    </a>
+  </div>
 </div>
 
-<form method="get" class="filter-bar">
+<form method="get" class="filter-bar" id="filterForm">
   <div class="filter-group" style="flex:1;min-width:200px">
     <label>Buscar</label>
     <input type="text" name="q" class="form-control" placeholder="Código, artículo…" value="{{ q }}" data-debounce="400">
@@ -24,14 +29,22 @@
   <div class="filter-group justify-content-end">
     <label class="invisible">.</label>
     <div class="d-flex gap-2">
-      <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-search me-1"></i>Filtrar</button>
+      <button type="submit" class="btn btn-primary btn-sm" data-filter-btn><i class="bi bi-search me-1"></i>Filtrar</button>
       <a href="{% url 'lista_inventario' %}" class="btn btn-outline-secondary btn-sm">Limpiar</a>
     </div>
   </div>
+  <input type="hidden" name="orden" value="{{ orden }}">
 </form>
 
+<div class="d-flex justify-content-end mb-2">
+  <a href="{{ orden_toggle_url }}" class="btn btn-outline-secondary btn-sm" title="Cambiar orden">
+    {% if orden == 'desc' %}<i class="bi bi-sort-down me-1"></i>Más reciente primero
+    {% else %}<i class="bi bi-sort-up me-1"></i>Más antiguo primero{% endif %}
+  </a>
+</div>
+
 <div class="table-wrapper">
-  <table class="table table-hover">
+  <table class="table table-hover" id="tablaInventario">
     <thead>
       <tr>
         <th>Código</th>
@@ -42,7 +55,7 @@
         <th>Precio</th>
         <th>Ingreso</th>
         <th>Estado</th>
-        <th>Acciones</th>
+        <th data-no-toggle>Acciones</th>
       </tr>
     </thead>
     <tbody>
@@ -87,13 +100,13 @@
     <nav>
       <ul class="pagination pagination-sm mb-0">
         {% if page_obj.has_previous %}
-          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&estado={{ estado }}">«</a></li>
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&estado={{ estado }}">‹</a></li>
+          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&estado={{ estado }}&orden={{ orden }}">«</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&estado={{ estado }}&orden={{ orden }}">‹</a></li>
         {% endif %}
         <li class="page-item active"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
         {% if page_obj.has_next %}
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&estado={{ estado }}">›</a></li>
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&estado={{ estado }}">»</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&estado={{ estado }}&orden={{ orden }}">›</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&estado={{ estado }}&orden={{ orden }}">»</a></li>
         {% endif %}
       </ul>
     </nav>

@@ -1,0 +1,125 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Producción{% endblock %}
+{% block contenido %}
+<div class="page-header">
+  <h1 class="page-title"><i class="bi bi-scissors me-2"></i>Órdenes de Producción</h1>
+  <a href="{% url 'crear_orden' %}" class="btn btn-success btn-sm">
+    <i class="bi bi-plus-lg me-1"></i>Nueva Orden
+  </a>
+</div>
+
+<form method="get" class="filter-bar" id="filterForm">
+  <div class="filter-group" style="flex:1;min-width:180px">
+    <label>Buscar</label>
+    <input type="text" name="q" class="form-control" placeholder="Código, descripción, responsable…"
+           value="{{ q }}" data-debounce="400">
+  </div>
+  <div class="filter-group">
+    <label>Estado</label>
+    <select name="estado" class="form-select" data-debounce="0">
+      <option value="">Todos</option>
+      {% for val, label in estado_choices %}
+        <option value="{{ val }}" {% if estado == val %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>Desde</label>
+    <input type="date" name="desde" class="form-control" value="{{ desde }}">
+  </div>
+  <div class="filter-group">
+    <label>Hasta</label>
+    <input type="date" name="hasta" class="form-control" value="{{ hasta }}">
+  </div>
+  <div class="filter-group justify-content-end">
+    <label class="invisible">.</label>
+    <div class="d-flex gap-2 flex-wrap">
+      <div class="date-shortcuts">
+        <a href="?periodo=semana" class="btn btn-outline-secondary {% if periodo == 'semana' %}active{% endif %}">Semana</a>
+        <a href="?periodo=mes" class="btn btn-outline-secondary {% if periodo == 'mes' %}active{% endif %}">Mes</a>
+        <a href="?periodo=3meses" class="btn btn-outline-secondary {% if periodo == '3meses' or not periodo %}active{% endif %}">3 meses</a>
+      </div>
+      <a href="{% url 'lista_ordenes' %}" class="btn btn-outline-secondary">Limpiar</a>
+    </div>
+  </div>
+</form>
+
+<div class="table-wrapper">
+  <table class="table table-hover">
+    <thead>
+      <tr>
+        <th>Código</th>
+        <th>Descripción</th>
+        <th>Estado</th>
+        <th>Responsable</th>
+        <th>Confección</th>
+        <th>Insumos</th>
+        <th>F. Inicio</th>
+        <th>F. Estimada</th>
+        <th data-no-toggle>Acciones</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in page_obj %}
+      <tr>
+        <td class="fw-semibold">{{ o.codigo }}</td>
+        <td>{{ o.descripcion|truncatechars:50 }}</td>
+        <td>
+          <span class="badge-estado badge-{{ o.estado }}">{{ o.get_estado_display }}</span>
+        </td>
+        <td>{{ o.empleado|default:"—" }}</td>
+        <td>
+          {% if o.confeccion %}
+            <a href="{% url 'editar_confeccion' o.confeccion.id %}" class="text-decoration-none">{{ o.confeccion.codigo }}</a>
+          {% else %}—{% endif %}
+        </td>
+        <td>{{ o.insumos.count }}</td>
+        <td>{{ o.fecha_inicio|date:"d/m/Y" }}</td>
+        <td>{{ o.fecha_estimada|date:"d/m/Y"|default:"—" }}</td>
+        <td>
+          <div class="btn-actions">
+            <a href="{% url 'editar_orden' o.id %}" class="btn btn-sm btn-outline-primary" title="Editar"><i class="bi bi-pencil"></i></a>
+            {% if o.estado != 'terminado' %}
+            <form method="post" action="{% url 'avanzar_estado_orden' o.id %}" style="display:inline">
+              {% csrf_token %}
+              <button type="submit" class="btn btn-sm btn-outline-success" title="{% if o.estado == 'corte' %}Pasar a Costura{% else %}Marcar Terminado{% endif %}">
+                <i class="bi bi-arrow-right-circle"></i>
+              </button>
+            </form>
+            {% else %}
+            <span class="btn btn-sm btn-outline-secondary disabled" title="Terminado"><i class="bi bi-check-circle"></i></span>
+            {% endif %}
+            <a href="{% url 'eliminar_orden' o.id %}" class="btn btn-sm btn-outline-danger" title="Eliminar"><i class="bi bi-trash"></i></a>
+          </div>
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="9">
+          <div class="empty-state">
+            <i class="bi bi-scissors d-block"></i>
+            No hay órdenes de producción en el período seleccionado.
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="pagination-bar">
+    <span>{{ total }} orden{{ total|pluralize:"es" }}</span>
+    <nav>
+      <ul class="pagination pagination-sm mb-0">
+        {% if page_obj.has_previous %}
+          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}">«</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}">‹</a></li>
+        {% endif %}
+        <li class="page-item active"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
+        {% if page_obj.has_next %}
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}">›</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}">»</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+  </div>
+</div>
+{% endblock %}

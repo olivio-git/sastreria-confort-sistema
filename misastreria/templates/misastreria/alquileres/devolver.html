@@ -1,20 +1,41 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}Devolver Alquiler{% endblock %}
 {% block contenido %}
-<div class="container py-4">
-    <h2 class="mb-4">Devolver Alquiler: {{ alquiler.codigo }}</h2>
-    {% if messages %}
-        <div class="alert alert-info">
-            {% for message in messages %}
-                {{ message }}
-            {% endfor %}
-        </div>
-    {% endif %}
-    <p>¿Estás seguro de que deseas marcar como devuelto el alquiler <strong>{{ alquiler.codigo }}</strong> del artículo <strong>{{ alquiler.articulo }}</strong> para el cliente <strong>{{ alquiler.cliente|default:"sin cliente" }}</strong>? Esto restaurará <strong>{{ alquiler.cantidad }}</strong> unidades al inventario.</p>
-    <form method="post">
-        {% csrf_token %}
-        <button type="submit" class="btn btn-success">Confirmar Devolución</button>
-        <a href="{% url 'lista_alquileres' %}" class="btn btn-secondary">Cancelar</a>
-    </form>
+
+<div class="page-header">
+  <h1 class="page-title"><i class="bi bi-arrow-return-left me-2"></i>Devolver Alquiler</h1>
 </div>
+
+<div class="form-card">
+  <p class="mb-3">
+    ¿Confirmas la devolución del alquiler <strong>{{ alquiler.codigo }}</strong>
+    {% if alquiler.cliente %}del cliente <strong>{{ alquiler.cliente }}</strong>{% endif %}?
+  </p>
+  <p class="text-muted mb-3">Se restaurará el stock de las siguientes prendas:</p>
+
+  <table class="table table-sm mb-4">
+    <thead>
+      <tr><th>Prenda</th><th class="text-center">Cantidad</th></tr>
+    </thead>
+    <tbody>
+      {% for item in alquiler.items.all %}
+      <tr>
+        <td>{{ item.articulo }}</td>
+        <td class="text-center">{{ item.cantidad }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="2" class="text-muted">Sin prendas registradas.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <form method="post" class="d-flex gap-2">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-success">
+      <i class="bi bi-check-lg me-1"></i>Confirmar devolución
+    </button>
+    <a href="{% url 'lista_alquileres' %}" class="btn btn-outline-secondary">Cancelar</a>
+  </form>
+</div>
+
 {% endblock %}

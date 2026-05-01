@@ -1,8 +1,5 @@
 from django.contrib import admin
-from .models import Cliente, Inventario, Venta, Categoria, Alquiler, Transaccion, Reparacion, Empleado, Permiso, Falta, BajaInventario, Confeccion, BajaInventario
-from django.urls import reverse
-from django.utils.html import format_html
-from django.conf import settings
+from .models import Cliente, PrendaInventario, Insumo, Venta, VentaItem, Alquiler, AlquilerItem, Transaccion, Reparacion, Empleado, Permiso, Falta, Confeccion, OrdenProduccion, InsumoCortado
 
 admin.site.register(Reparacion)
 admin.site.register(Empleado)
@@ -10,69 +7,72 @@ admin.site.register(Permiso)
 admin.site.register(Falta)
 admin.site.register(Confeccion)
 
-@admin.register(Categoria)
-class CategoriaAdmin(admin.ModelAdmin):
-    list_display = ['nombre']
-    search_fields = ['nombre']
+@admin.register(PrendaInventario)
+class PrendaInventarioAdmin(admin.ModelAdmin):
+    list_display = ['codigo', 'nombre', 'tipo', 'talla', 'color', 'condicion', 'cantidad', 'precio', 'estado']
+    list_filter  = ['tipo', 'condicion', 'estado']
+    search_fields = ['codigo', 'nombre', 'color', 'talla', 'codigo_referencia']
     list_per_page = 20
+    readonly_fields = ['codigo', 'veces_alquilado']
 
-@admin.register(Inventario)
-class InventarioAdmin(admin.ModelAdmin):
-    list_display = ['codigo', 'articulo', 'cantidad', 'costo', 'precio', 'categoria', 'estado', 'fecha_ingreso', 'fecha_baja', 'ultima_modificacion', 'ver_bajas']
-    list_filter = ['categoria', 'estado', 'fecha_ingreso', 'fecha_baja']
-    search_fields = ['codigo', 'articulo', 'motivo_baja']
+@admin.register(Insumo)
+class InsumoAdmin(admin.ModelAdmin):
+    list_display  = ['codigo', 'articulo', 'tipo_material', 'coleccion', 'color', 'cantidad', 'unidad_medida', 'estado']
+    list_filter   = ['tipo_material', 'estado']
+    search_fields = ['codigo', 'articulo', 'coleccion', 'color', 'codigo_referencia']
     list_per_page = 20
-    readonly_fields = ['ultima_modificacion', 'estado']
-    fieldsets = (
-        (None, {
-            'fields': ('codigo', 'articulo', 'categoria', 'estado')
-        }),
-        ('Detalles', {
-            'fields': ('cantidad', 'costo', 'precio', 'fecha_ingreso', 'ultima_modificacion')
-        }),
-        ('Baja', {
-            'fields': ('fecha_baja', 'motivo_baja')
-        }),
-    )
-
-    def ver_bajas(self, obj):
-        count = obj.bajas.count()
-        url = reverse('admin:misastreria_bajainventario_changelist') + f'?inventario__id__exact={obj.id}'
-        return format_html('<a href="{}">{} baja(s)</a>', url, count)
-    ver_bajas.short_description = "Bajas"
+    readonly_fields = ['codigo']
 
 @admin.register(Cliente)
 class ClienteAdmin(admin.ModelAdmin):
-    list_display = ['codigo', 'nombres', 'apellido_paterno', 'apellido_materno', 'celular', 'email']
+    list_display  = ['codigo', 'nombres', 'apellido_paterno', 'apellido_materno', 'celular', 'email']
     search_fields = ['codigo', 'nombres', 'apellido_paterno', 'apellido_materno', 'email']
     list_per_page = 20
 
+class VentaItemInline(admin.TabularInline):
+    model = VentaItem
+    extra = 1
+    readonly_fields = ['subtotal']
+
 @admin.register(Venta)
 class VentaAdmin(admin.ModelAdmin):
-    list_display = ['codigo', 'fecha_venta', 'articulo', 'cantidad', 'precio_unitario', 'precio_total', 'cliente']
-    list_filter = ['fecha_venta', 'articulo', 'cliente']
-    search_fields = ['codigo', 'articulo__articulo', 'cliente__nombres', 'cliente__apellido_paterno']
-    readonly_fields = ['precio_unitario', 'precio_total']
-    autocomplete_fields = ['articulo', 'cliente'] if 'dal' in settings.INSTALLED_APPS else []
-
-@admin.register(BajaInventario)
-class BajaInventarioAdmin(admin.ModelAdmin):
-    list_display = ['inventario', 'cantidad', 'fecha_baja', 'motivo_baja', 'creado_en']
-    list_filter = ['fecha_baja', 'inventario']
-    search_fields = ['inventario__articulo', 'motivo_baja']
+    list_display  = ['codigo', 'fecha_venta', 'cliente', 'empleado', 'total']
+    list_filter   = ['fecha_venta']
+    search_fields = ['codigo', 'cliente__nombres', 'cliente__apellido_paterno']
+    readonly_fields = ['subtotal', 'total']
     list_per_page = 20
-    readonly_fields = ['creado_en']
+    inlines = [VentaItemInline]
+
+class AlquilerItemInline(admin.TabularInline):
+    model = AlquilerItem
+    extra = 1
+    readonly_fields = ['subtotal']
 
 @admin.register(Alquiler)
 class AlquilerAdmin(admin.ModelAdmin):
-    list_display = ['codigo', 'fecha_alquiler', 'articulo', 'cantidad', 'costo_alquiler', 'fecha_devolucion', 'estado', 'cliente']
-    list_filter = ['fecha_alquiler', 'estado']
-    search_fields = ['codigo', 'articulo__articulo', 'cliente__nombres']
+    list_display  = ['codigo', 'fecha_alquiler', 'cliente', 'total', 'fecha_devolucion', 'estado']
+    list_filter   = ['fecha_alquiler', 'estado']
+    search_fields = ['codigo', 'cliente__nombres']
     list_per_page = 20
+    inlines       = [AlquilerItemInline]
+    readonly_fields = ['subtotal', 'total']
 
 @admin.register(Transaccion)
 class TransaccionAdmin(admin.ModelAdmin):
-    list_display = ['codigo', 'descripcion', 'tipo_servicio', 'fecha', 'cantidad', 'monto']
-    list_filter = ['tipo_servicio', 'fecha']
+    list_display  = ['codigo', 'descripcion', 'tipo_servicio', 'fecha', 'cantidad', 'monto']
+    list_filter   = ['tipo_servicio', 'fecha']
     search_fields = ['codigo', 'descripcion']
     list_per_page = 20
+
+class InsumoCortadoInline(admin.TabularInline):
+    model = InsumoCortado
+    extra = 1
+
+@admin.register(OrdenProduccion)
+class OrdenProduccionAdmin(admin.ModelAdmin):
+    list_display  = ['codigo', 'descripcion', 'estado', 'empleado', 'fecha_inicio', 'fecha_estimada']
+    list_filter   = ['estado', 'fecha_inicio']
+    search_fields = ['codigo', 'descripcion', 'empleado__nombres']
+    readonly_fields = ['codigo']
+    list_per_page = 20
+    inlines = [InsumoCortadoInline]

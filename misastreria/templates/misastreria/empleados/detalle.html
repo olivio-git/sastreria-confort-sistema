@@ -1,0 +1,160 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Detalle Empleado{% endblock %}
+{% block contenido %}
+
+<div class="page-header">
+  <h1 class="page-title"><i class="bi bi-person-badge me-2"></i>{{ empleado }}</h1>
+  <a href="{% url 'lista_empleados' %}" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-arrow-left me-1"></i>Volver
+  </a>
+</div>
+
+<!-- Info del empleado -->
+<div class="card mb-4">
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-sm-6 col-md-3">
+        <span class="text-muted small d-block">CI</span>
+        <span class="fw-semibold">{{ empleado.ci|default:"—" }}</span>
+      </div>
+      <div class="col-sm-6 col-md-3">
+        <span class="text-muted small d-block">Código</span>
+        <span class="fw-semibold">{{ empleado.codigo }}</span>
+      </div>
+      <div class="col-sm-6 col-md-3">
+        <span class="text-muted small d-block">Celular</span>
+        <span class="fw-semibold">{{ empleado.celular }}</span>
+      </div>
+      <div class="col-sm-6 col-md-3">
+        <span class="text-muted small d-block">Tipo de Contrato</span>
+        <span class="fw-semibold">{{ empleado.get_tipo_contrato_display }}</span>
+      </div>
+      <div class="col-sm-6 col-md-3">
+        <span class="text-muted small d-block">Fecha de Ingreso</span>
+        <span class="fw-semibold">{{ empleado.fecha_ingreso }}</span>
+      </div>
+      <div class="col-sm-6 col-md-3">
+        <span class="text-muted small d-block">Fecha de Baja</span>
+        <span class="fw-semibold">{{ empleado.fecha_baja|default:"—" }}</span>
+      </div>
+      <div class="col-sm-6 col-md-3">
+        <span class="text-muted small d-block">Estado</span>
+        {% if empleado.activo %}
+          <span class="badge-estado badge-activo">Activo</span>
+        {% else %}
+          <span class="badge-estado badge-inactivo">Inactivo</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="mt-3 d-flex gap-2">
+      <a href="{% url 'editar_empleado' empleado.id %}" class="btn btn-sm btn-outline-primary">
+        <i class="bi bi-pencil me-1"></i>Editar datos
+      </a>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+
+  <!-- Permisos -->
+  <div class="col-lg-6">
+    <div class="table-wrapper">
+      <div class="d-flex align-items-center justify-content-between px-1 mb-2">
+        <h2 class="page-title fs-5 mb-0"><i class="bi bi-calendar-check me-2"></i>Permisos</h2>
+        <a href="{% url 'crear_permiso' empleado.id %}" class="btn btn-success btn-sm">
+          <i class="bi bi-plus-lg me-1"></i>Añadir
+        </a>
+      </div>
+      <table class="table table-hover">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Motivo</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in permisos %}
+          <tr>
+            <td>{{ p.fecha_permiso }}</td>
+            <td>{{ p.motivo|default:"—" }}</td>
+            <td>
+              <form method="post" action="{% url 'eliminar_permiso' p.id %}"
+                    onsubmit="return confirm('¿Eliminar este permiso?')">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm btn-outline-danger" title="Eliminar">
+                  <i class="bi bi-trash"></i>
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="3">
+              <div class="empty-state">
+                <i class="bi bi-calendar-check d-block"></i>
+                Sin permisos registrados.
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div class="pagination-bar">
+        <span>{{ permisos.count }} permiso{{ permisos.count|pluralize }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Faltas -->
+  <div class="col-lg-6">
+    <div class="table-wrapper">
+      <div class="d-flex align-items-center justify-content-between px-1 mb-2">
+        <h2 class="page-title fs-5 mb-0"><i class="bi bi-calendar-x me-2"></i>Faltas</h2>
+        <a href="{% url 'crear_falta' empleado.id %}" class="btn btn-success btn-sm">
+          <i class="bi bi-plus-lg me-1"></i>Añadir
+        </a>
+      </div>
+      <table class="table table-hover">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Motivo</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for f in faltas %}
+          <tr>
+            <td>{{ f.fecha_falta }}</td>
+            <td>{{ f.motivo|default:"—" }}</td>
+            <td>
+              <form method="post" action="{% url 'eliminar_falta' f.id %}"
+                    onsubmit="return confirm('¿Eliminar esta falta?')">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm btn-outline-danger" title="Eliminar">
+                  <i class="bi bi-trash"></i>
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="3">
+              <div class="empty-state">
+                <i class="bi bi-calendar-x d-block"></i>
+                Sin faltas registradas.
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div class="pagination-bar">
+        <span>{{ faltas.count }} falta{{ faltas.count|pluralize }}</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

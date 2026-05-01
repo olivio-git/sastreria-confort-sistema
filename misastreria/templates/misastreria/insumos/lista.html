@@ -1,0 +1,120 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Insumos{% endblock %}
+{% block contenido %}
+
+<div class="page-header">
+  <h1 class="page-title"><i class="bi bi-scissors me-2"></i>Insumos</h1>
+  <a href="{% url 'crear_insumo' %}" class="btn btn-success btn-sm">
+    <i class="bi bi-plus-lg me-1"></i>Nuevo Insumo
+  </a>
+</div>
+
+<form method="get" class="filter-bar" id="filterForm">
+  <div class="filter-group" style="flex:1;min-width:180px">
+    <label>Buscar</label>
+    <input type="text" name="q" class="form-control"
+           placeholder="Código, artículo, colección, color…" value="{{ q }}" data-debounce="400">
+  </div>
+
+  <div class="filter-group">
+    <label>Tipo</label>
+    <select name="tipo_material" class="form-select" data-debounce="0">
+      <option value="">Todos</option>
+      {% for val, label in tipo_material_choices %}
+        <option value="{{ val }}" {% if tipo_material == val %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="filter-group">
+    <label>Estado</label>
+    <select name="estado" class="form-select" data-debounce="0">
+      <option value="">Todos</option>
+      {% for val, label in estado_choices %}
+        <option value="{{ val }}" {% if estado == val %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="filter-group justify-content-end">
+    <label class="invisible">.</label>
+    <a href="{% url 'lista_insumos' %}" class="btn btn-outline-secondary">Limpiar</a>
+  </div>
+</form>
+
+<div class="table-wrapper">
+  <table class="table table-hover">
+    <thead>
+      <tr>
+        <th>Código</th>
+        <th>Artículo</th>
+        <th>Tipo</th>
+        <th>Colección</th>
+        <th>Color</th>
+        <th class="text-center">Cantidad</th>
+        <th>Unidad</th>
+        <th>Estado</th>
+        <th class="text-center">Acciones</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for insumo in page_obj %}
+      <tr>
+        <td><code>{{ insumo.codigo }}</code></td>
+        <td>
+          {{ insumo.articulo }}
+          {% if insumo.tipo_tela %}<small class="text-muted d-block">{{ insumo.tipo_tela }}</small>{% endif %}
+        </td>
+        <td>{{ insumo.get_tipo_material_display }}</td>
+        <td>{{ insumo.coleccion|default:"—" }}</td>
+        <td>{{ insumo.color|default:"—" }}</td>
+        <td class="text-center">
+          {% if insumo.stock_minimo and insumo.cantidad <= insumo.stock_minimo %}
+            <span class="text-danger fw-semibold">{{ insumo.cantidad }}</span>
+          {% else %}
+            {{ insumo.cantidad }}
+          {% endif %}
+        </td>
+        <td>{{ insumo.get_unidad_medida_display }}</td>
+        <td><span class="badge-estado {% if insumo.estado == 'ACT' %}badge-entregado{% else %}badge-inactivo{% endif %}">{{ insumo.get_estado_display }}</span></td>
+        <td>
+          <div class="btn-actions">
+            <a href="{% url 'editar_insumo' insumo.id %}" class="btn btn-sm btn-outline-primary" title="Editar"><i class="bi bi-pencil"></i></a>
+            <a href="{% url 'eliminar_insumo' insumo.id %}" class="btn btn-sm btn-outline-danger" title="Eliminar"><i class="bi bi-trash"></i></a>
+          </div>
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="9">
+          <div class="empty-state">
+            <i class="bi bi-scissors d-block"></i>
+            No hay insumos registrados.
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="pagination-bar">
+    <span>{{ total }} insumo{{ total|pluralize }}</span>
+    <nav>
+      <ul class="pagination pagination-sm mb-0">
+        {% if page_obj.has_previous %}
+          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&tipo_material={{ tipo_material }}&estado={{ estado }}">«</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&tipo_material={{ tipo_material }}&estado={{ estado }}">‹</a></li>
+        {% endif %}
+        <li class="page-item active">
+          <span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+        </li>
+        {% if page_obj.has_next %}
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&tipo_material={{ tipo_material }}&estado={{ estado }}">›</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&tipo_material={{ tipo_material }}&estado={{ estado }}">»</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+  </div>
+</div>
+
+{% endblock %}

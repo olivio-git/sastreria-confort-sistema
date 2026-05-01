@@ -1,128 +1,190 @@
 {% extends 'misastreria/base.html' %}
-{% block titulo %}Dashboard - Sistema Financiero{% endblock %}
+{% block titulo %}Dashboard{% endblock %}
 {% block contenido %}
-<div class="container py-4" style="background-color: #f1f5f9;">
-    <div class="card text-white mb-4" style="background-color: #1e3a8a;">
-        <div class="card-body text-center">
-            <h2 class="card-title">Sistema Financiero</h2>
-            <p class="card-text">Bienvenido, {{ user.username }}. Gestiona todas las operaciones de la sastrería desde aquí.</p>
-        </div>
-    </div>
-    <div class="row row-cols-1 row-cols-md-3 g-4">
-        <div class="col">
-            <div class="card h-100 shadow-sm" style="background-color: #f8fafc;">
-                <div class="card-body text-center">
-                    <i class="bi bi-people-fill" style="font-size: 2rem; color: #2563eb;"></i>
-                    <h5 class="card-title mt-2">Empleados</h5>
-                    <p class="card-text">Gestiona la información de los empleados.</p>
-                    <a href="{% url 'lista_empleados' %}" class="btn btn-primary" style="background-color: #2563eb; border-color: #2563eb;">Ir a Empleados</a>
-                </div>
-            </div>
-        </div>
-        <div class="col">
-            <div class="card h-100 shadow-sm" style="background-color: #f8fafc;">
-                <div class="card-body text-center">
-                    <i class="bi bi-person-lines-fill" style="font-size: 2rem; color: #2563eb;"></i>
-                    <h5 class="card-title mt-2">Clientes</h5>
-                    <p class="card-text">Administra los datos de los clientes.</p>
-                    <a href="{% url 'lista_clientes' %}" class="btn btn-primary" style="background-color: #2563eb; border-color: #2563eb;">Ir a Clientes</a>
-                </div>
-            </div>
-        </div>
-        <div class="col">
-            <div class="card h-100 shadow-sm" style="background-color: #f8fafc;">
-                <div class="card-body text-center">
-                    <i class="bi bi-tools" style="font-size: 2rem; color: #2563eb;"></i>
-                    <h5 class="card-title mt-2">Reparaciones</h5>
-                    <p class="card-text">Registra y gestiona reparaciones de prendas.</p>
-                    <a href="{% url 'lista_reparaciones' %}" class="btn btn-primary" style="background-color: #2563eb; border-color: #2563eb;">Ir a Reparaciones</a>
-                </div>
-            </div>
-        </div>
-        <div class="col">
-            <div class="card h-100 shadow-sm" style="background-color: #f8fafc;">
-                <div class="card-body text-center">
-                    <i class="bi bi-cart-fill" style="font-size: 2rem; color: #2563eb;"></i>
-                    <h5 class="card-title mt-2">Ventas</h5>
-                    <p class="card-text">Registra las ventas realizadas.</p>
-                    <a href="{% url 'lista_ventas' %}" class="btn btn-primary" style="background-color: #2563eb; border-color: #2563eb;">Ir a Ventas</a>
-                </div>
-            </div>
-        </div>
-        <div class="col">
-            <div class="card h-100 shadow-sm" style="background-color: #f8fafc;">
-                <div class="card-body text-center">
-                    <i class="bi bi-scissors" style="font-size: 2rem; color: #2563eb;"></i>
-                    <h5 class="card-title mt-2">Confecciones</h5>
-                    <p class="card-text">Gestiona las confecciones de prendas.</p>
-                    <a href="{% url 'lista_confecciones' %}" class="btn btn-primary" style="background-color: #2563eb; border-color: #2563eb;">Ir a Confecciones</a>
-                </div>
-            </div>
-        </div>
-        <div class="col">
-            <div class="card h-100 shadow-sm" style="background-color: #f8fafc;">
-                <div class="card-body text-center">
-                    <i class="bi bi-bag-fill" style="font-size: 2rem; color: #2563eb;"></i>
-                    <h5 class="card-title mt-2">Alquileres</h5>
-                    <p class="card-text">Administra los alquileres de prendas.</p>
-                    <a href="{% url 'lista_alquileres' %}" class="btn btn-primary" style="background-color: #2563eb; border-color: #2563eb;">Ir a Alquileres</a>
-                </div>
-            </div>
-        </div>
-        <div class="col">
-            <div class="card h-100 shadow-sm" style="background-color: #f8fafc;">
-                <div class="card-body text-center">
-                    <i class="bi bi-currency-dollar" style="font-size: 2rem; color: #2563eb;"></i>
-                    <h5 class="card-title mt-2">Transacciones</h5>
-                    <p class="card-text">Registra las transacciones del negocio.</p>
-                    <a href="{% url 'lista_transacciones' %}" class="btn btn-primary" style="background-color: #2563eb; border-color: #2563eb;">Ir a Transacciones</a>
-                </div>
-            </div>
-        </div>
-        <div class="col">
-            <div class="card h-100 shadow-sm" style="background-color: #f8fafc;">
-                <div class="card-body text-center">
-                    <i class="bi bi-box-seam" style="font-size: 2rem; color: #2563eb;"></i>
-                    <h5 class="card-title mt-2">Inventario</h5>
-                    <p class="card-text">Controla el inventario de artículos.</p>
-                    <a href="{% url 'lista_inventario' %}" class="btn btn-primary" style="background-color: #2563eb; border-color: #2563eb;">Ir a Inventario</a>
-                </div>
-            </div>
-        </div>
-        <div class="col">
-            <div class="card h-100 shadow-sm" style="background-color: #f8fafc;">
-                <div class="card-body text-center">
-                    <i class="bi bi-bar-chart-fill" style="font-size: 2rem; color: #2563eb;"></i>
-                    <h5 class="card-title mt-2">Reportes</h5>
-                    <p class="card-text">Consulta reportes de empleados, clientes, artículos, stock e ingresos.</p>
-                    <div class="dropdown">
-                        <button class="btn btn-primary dropdown-toggle" type="button" id="reportesMenu" data-bs-toggle="dropdown" aria-expanded="false" style="background-color: #2563eb; border-color: #2563eb;">
-                            Ver Reportes
-                        </button>
-                        <ul class="dropdown-menu" aria-labelledby="reportesMenu">
-                            <li><a class="dropdown-item" href="{% url 'reporte_empleados' %}">Empleados</a></li>
-                            <li><a class="dropdown-item" href="{% url 'reporte_clientes' %}">Clientes</a></li>
-                            <li><a class="dropdown-item" href="{% url 'reporte_articulos' %}">Artículos</a></li>
-                            <li><a class="dropdown-item" href="{% url 'reporte_stock' %}">Stock</a></li>
-                            <li><a class="dropdown-item" href="{% url 'reporte_ingresos' %}">Ingresos</a></li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
+
+<div class="page-header">
+  <h1 class="page-title"><i class="bi bi-grid me-2"></i>Dashboard</h1>
+  <span class="text-muted">Bienvenido, {{ user.username }}</span>
 </div>
-<style>
-    .card {
-        transition: transform 0.2s;
-    }
-    .card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
-    }
-    .btn-primary:hover {
-        background-color: #1e40af;
-        border-color: #1e40af;
-    }
-</style>
+
+<!-- Resumen rápido -->
+<div class="row g-3 mb-4">
+  <div class="col-sm-6 col-md-4">
+    <a href="{% url 'lista_reparaciones' %}?estado=pendiente" class="text-decoration-none">
+      <div class="form-card d-flex align-items-center gap-3">
+        <div style="font-size:2rem;color:var(--warning)"><i class="bi bi-tools"></i></div>
+        <div>
+          <div class="fw-semibold fs-4">{{ reparaciones_pendientes }}</div>
+          <div class="text-muted small">Reparaciones pendientes</div>
+        </div>
+      </div>
+    </a>
+  </div>
+  <div class="col-sm-6 col-md-4">
+    <a href="{% url 'lista_alquileres' %}?estado=alquilado" class="text-decoration-none">
+      <div class="form-card d-flex align-items-center gap-3">
+        <div style="font-size:2rem;color:var(--primary)"><i class="bi bi-bag"></i></div>
+        <div>
+          <div class="fw-semibold fs-4">{{ alquileres_activos }}</div>
+          <div class="text-muted small">Alquileres activos</div>
+        </div>
+      </div>
+    </a>
+  </div>
+  <div class="col-sm-6 col-md-4">
+    <a href="{% url 'lista_ordenes' %}" class="text-decoration-none">
+      <div class="form-card d-flex align-items-center gap-3">
+        <div style="font-size:2rem;color:var(--info)"><i class="bi bi-gear"></i></div>
+        <div>
+          <div class="fw-semibold fs-4">{{ ordenes_activas }}</div>
+          <div class="text-muted small">Órdenes en producción</div>
+        </div>
+      </div>
+    </a>
+  </div>
+</div>
+
+<!-- Alertas de stock -->
+{% if prendas_alerta or insumos_alerta %}
+<div class="form-card mb-4" style="border-left:4px solid var(--warning)">
+  <h6 class="fw-semibold mb-3" style="color:var(--warning)">
+    <i class="bi bi-exclamation-triangle me-2"></i>Alertas de stock mínimo
+  </h6>
+  <div class="row g-3">
+    {% if prendas_alerta %}
+    <div class="col-md-6">
+      <p class="text-muted small mb-2 fw-semibold">Prendas bajo mínimo</p>
+      <div class="table-responsive">
+        <table class="table table-sm">
+          <thead><tr><th>Prenda</th><th>Stock</th><th>Mínimo</th></tr></thead>
+          <tbody>
+            {% for p in prendas_alerta %}
+            <tr>
+              <td><a href="{% url 'editar_prenda' p.id %}" class="text-decoration-none">{{ p.nombre }}</a></td>
+              <td class="fw-semibold" style="color:var(--danger)">{{ p.cantidad }}</td>
+              <td class="text-muted">{{ p.stock_minimo }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+    {% if insumos_alerta %}
+    <div class="col-md-6">
+      <p class="text-muted small mb-2 fw-semibold">Insumos bajo mínimo</p>
+      <div class="table-responsive">
+        <table class="table table-sm">
+          <thead><tr><th>Insumo</th><th>Stock</th><th>Mínimo</th></tr></thead>
+          <tbody>
+            {% for ins in insumos_alerta %}
+            <tr>
+              <td><a href="{% url 'editar_insumo' ins.id %}" class="text-decoration-none">{{ ins.articulo }}</a></td>
+              <td class="fw-semibold" style="color:var(--danger)">{{ ins.cantidad }}</td>
+              <td class="text-muted">{{ ins.stock_minimo }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<!-- Accesos rápidos -->
+<div class="row g-3">
+  {% with accesos=accesos_rapidos %}
+  <div class="col-6 col-sm-4 col-md-3">
+    <a href="{% url 'lista_empleados' %}" class="text-decoration-none">
+      <div class="form-card text-center py-3">
+        <i class="bi bi-people-fill d-block mb-2" style="font-size:1.6rem;color:var(--primary)"></i>
+        <span class="small fw-semibold">Empleados</span>
+      </div>
+    </a>
+  </div>
+  <div class="col-6 col-sm-4 col-md-3">
+    <a href="{% url 'lista_clientes' %}" class="text-decoration-none">
+      <div class="form-card text-center py-3">
+        <i class="bi bi-person-lines-fill d-block mb-2" style="font-size:1.6rem;color:var(--primary)"></i>
+        <span class="small fw-semibold">Clientes</span>
+      </div>
+    </a>
+  </div>
+  <div class="col-6 col-sm-4 col-md-3">
+    <a href="{% url 'lista_reparaciones' %}" class="text-decoration-none">
+      <div class="form-card text-center py-3">
+        <i class="bi bi-tools d-block mb-2" style="font-size:1.6rem;color:var(--primary)"></i>
+        <span class="small fw-semibold">Reparaciones</span>
+      </div>
+    </a>
+  </div>
+  <div class="col-6 col-sm-4 col-md-3">
+    <a href="{% url 'lista_ventas' %}" class="text-decoration-none">
+      <div class="form-card text-center py-3">
+        <i class="bi bi-cart-fill d-block mb-2" style="font-size:1.6rem;color:var(--primary)"></i>
+        <span class="small fw-semibold">Ventas</span>
+      </div>
+    </a>
+  </div>
+  <div class="col-6 col-sm-4 col-md-3">
+    <a href="{% url 'lista_confecciones' %}" class="text-decoration-none">
+      <div class="form-card text-center py-3">
+        <i class="bi bi-scissors d-block mb-2" style="font-size:1.6rem;color:var(--primary)"></i>
+        <span class="small fw-semibold">Confecciones</span>
+      </div>
+    </a>
+  </div>
+  <div class="col-6 col-sm-4 col-md-3">
+    <a href="{% url 'lista_alquileres' %}" class="text-decoration-none">
+      <div class="form-card text-center py-3">
+        <i class="bi bi-bag-fill d-block mb-2" style="font-size:1.6rem;color:var(--primary)"></i>
+        <span class="small fw-semibold">Alquileres</span>
+      </div>
+    </a>
+  </div>
+  <div class="col-6 col-sm-4 col-md-3">
+    <a href="{% url 'lista_ordenes' %}" class="text-decoration-none">
+      <div class="form-card text-center py-3">
+        <i class="bi bi-gear d-block mb-2" style="font-size:1.6rem;color:var(--primary)"></i>
+        <span class="small fw-semibold">Producción</span>
+      </div>
+    </a>
+  </div>
+  <div class="col-6 col-sm-4 col-md-3">
+    <a href="{% url 'lista_prendas' %}" class="text-decoration-none">
+      <div class="form-card text-center py-3">
+        <i class="bi bi-box-seam d-block mb-2" style="font-size:1.6rem;color:var(--primary)"></i>
+        <span class="small fw-semibold">Prendas</span>
+      </div>
+    </a>
+  </div>
+  <div class="col-6 col-sm-4 col-md-3">
+    <a href="{% url 'lista_insumos' %}" class="text-decoration-none">
+      <div class="form-card text-center py-3">
+        <i class="bi bi-box d-block mb-2" style="font-size:1.6rem;color:var(--primary)"></i>
+        <span class="small fw-semibold">Insumos</span>
+      </div>
+    </a>
+  </div>
+  <div class="col-6 col-sm-4 col-md-3">
+    <a href="{% url 'lista_transacciones' %}" class="text-decoration-none">
+      <div class="form-card text-center py-3">
+        <i class="bi bi-currency-dollar d-block mb-2" style="font-size:1.6rem;color:var(--primary)"></i>
+        <span class="small fw-semibold">Transacciones</span>
+      </div>
+    </a>
+  </div>
+  <div class="col-6 col-sm-4 col-md-3">
+    <a href="{% url 'reporte_ventas' %}" class="text-decoration-none">
+      <div class="form-card text-center py-3">
+        <i class="bi bi-bar-chart-fill d-block mb-2" style="font-size:1.6rem;color:var(--primary)"></i>
+        <span class="small fw-semibold">Reportes</span>
+      </div>
+    </a>
+  </div>
+  {% endwith %}
+</div>
+
 {% endblock %}

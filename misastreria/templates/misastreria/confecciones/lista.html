@@ -3,12 +3,18 @@
 {% block contenido %}
 <div class="page-header">
   <h1 class="page-title"><i class="bi bi-scissors me-2"></i>Confecciones</h1>
-  <a href="{% url 'crear_confeccion' %}" class="btn btn-success btn-sm">
-    <i class="bi bi-plus-lg me-1"></i>Nueva Confección
-  </a>
+  <div class="d-flex gap-2">
+    <button class="btn btn-outline-secondary btn-sm" data-col-toggle="tablaConfecciones">
+      <i class="bi bi-layout-three-columns me-1"></i>Columnas
+    </button>
+    <a href="{% url 'crear_confeccion' %}" class="btn btn-success btn-sm">
+      <i class="bi bi-plus-lg me-1"></i>Nueva Confección
+    </a>
+  </div>
 </div>
 
 <form method="get" class="filter-bar" id="filterForm">
+  <input type="hidden" name="periodo" value="{{ periodo }}">
   <div class="filter-group" style="flex:1;min-width:180px">
     <label>Buscar</label>
     <input type="text" name="q" class="form-control" placeholder="Código, cliente, CI…"
@@ -46,15 +52,24 @@
       <div class="date-shortcuts">
         <a href="?periodo=semana" class="btn btn-outline-secondary {% if periodo == 'semana' %}active{% endif %}">Semana</a>
         <a href="?periodo=mes" class="btn btn-outline-secondary {% if periodo == 'mes' %}active{% endif %}">Mes</a>
-        <a href="?periodo=3meses" class="btn btn-outline-secondary {% if periodo == '3meses' or not periodo %}active{% endif %}">3 meses</a>
+        <a href="?periodo=3meses" class="btn btn-outline-secondary {% if periodo == '3meses' %}active{% endif %}">3 meses</a>
       </div>
+      <button type="submit" class="btn btn-primary btn-sm" data-filter-btn><i class="bi bi-search me-1"></i>Filtrar</button>
       <a href="{% url 'lista_confecciones' %}" class="btn btn-outline-secondary">Limpiar</a>
     </div>
   </div>
+  <input type="hidden" name="orden" value="{{ orden }}">
 </form>
 
+<div class="d-flex justify-content-end mb-2">
+  <a href="{{ orden_toggle_url }}" class="btn btn-outline-secondary btn-sm" title="Cambiar orden">
+    {% if orden == 'desc' %}<i class="bi bi-sort-down me-1"></i>Más reciente primero
+    {% else %}<i class="bi bi-sort-up me-1"></i>Más antiguo primero{% endif %}
+  </a>
+</div>
+
 <div class="table-wrapper">
-  <table class="table table-hover">
+  <table class="table table-hover" id="tablaConfecciones">
     <thead>
       <tr>
         <th>Código</th>
@@ -66,7 +81,7 @@
         <th>Entrega</th>
         <th>Empleado</th>
         <th>Estado</th>
-        <th>Acciones</th>
+        <th data-no-toggle>Acciones</th>
       </tr>
     </thead>
     <tbody>
@@ -78,7 +93,7 @@
             <a href="{% url 'historial_cliente' c.cliente.id %}" class="text-decoration-none">{{ c.cliente }}</a>
           {% else %}—{% endif %}
         </td>
-        <td>{{ c.get_tipo_prenda_display }}</td>
+        <td>{{ c.tipos_prenda_display|default:"—" }}</td>
         <td>{{ c.color }}</td>
         <td>{{ c.precio|floatformat:2 }}</td>
         <td>{{ c.saldo|floatformat:2 }}</td>
@@ -113,13 +128,13 @@
     <nav>
       <ul class="pagination pagination-sm mb-0">
         {% if page_obj.has_previous %}
-          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&tipo_prenda={{ tipo_prenda }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}">«</a></li>
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&tipo_prenda={{ tipo_prenda }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}">‹</a></li>
+          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&tipo_prenda={{ tipo_prenda }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}&orden={{ orden }}">«</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&tipo_prenda={{ tipo_prenda }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}&orden={{ orden }}">‹</a></li>
         {% endif %}
         <li class="page-item active"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
         {% if page_obj.has_next %}
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&tipo_prenda={{ tipo_prenda }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}">›</a></li>
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&tipo_prenda={{ tipo_prenda }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}">»</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&tipo_prenda={{ tipo_prenda }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}&orden={{ orden }}">›</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&tipo_prenda={{ tipo_prenda }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}&orden={{ orden }}">»</a></li>
         {% endif %}
       </ul>
     </nav>

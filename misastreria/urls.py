@@ -17,8 +17,11 @@ urlpatterns = [
     path('empleados/crear/', views.crear_empleado, name='crear_empleado'),
     path('empleados/editar/<int:id>/', views.editar_empleado, name='editar_empleado'),
     path('empleados/eliminar/<int:id>/', views.eliminar_empleado, name='eliminar_empleado'),
+    path('empleados/<int:id>/detalle/', views.detalle_empleado, name='detalle_empleado'),
     path('empleados/permiso/<int:empleado_id>/', views.crear_permiso, name='crear_permiso'),
     path('empleados/falta/<int:empleado_id>/', views.crear_falta, name='crear_falta'),
+    path('empleados/permiso/eliminar/<int:id>/', views.eliminar_permiso, name='eliminar_permiso'),
+    path('empleados/falta/eliminar/<int:id>/', views.eliminar_falta, name='eliminar_falta'),
     path('empleados/reporte/dias_trabajados/', views.reporte_dias_trabajados, name='reporte_dias_trabajados'),
     # Clientes
     path('clientes/', views.lista_clientes, name='lista_clientes'),
@@ -55,12 +58,22 @@ urlpatterns = [
     path('alquileres/eliminar/<int:id>/', views.eliminar_alquiler, name='eliminar_alquiler'),
     path('alquileres/devolver/<int:id>/', views.devolver_alquiler, name='devolver_alquiler'),
     path('alquileres/comprobante/pdf/<int:id>/', views.exportar_comprobante_alquiler_pdf, name='exportar_comprobante_alquiler_pdf'),
-    # Inventario
-    path('inventario/', views.lista_inventario, name='lista_inventario'),
-    path('inventario/crear/', views.crear_inventario, name='crear_inventario'),
-    path('inventario/editar/<int:id>/', views.editar_inventario, name='editar_inventario'),
-    path('inventario/eliminar/<int:id>/', views.eliminar_inventario, name='eliminar_inventario'),
-    path('inventario/baja/<int:id>/', views.dar_baja_inventario, name='dar_baja_inventario'),
+    # Prendas
+    path('prendas/', views.lista_prendas, name='lista_prendas'),
+    path('prendas/crear/', views.crear_prenda, name='crear_prenda'),
+    path('prendas/editar/<int:id>/', views.editar_prenda, name='editar_prenda'),
+    path('prendas/eliminar/<int:id>/', views.eliminar_prenda, name='eliminar_prenda'),
+    # Insumos
+    path('insumos/', views.lista_insumos, name='lista_insumos'),
+    path('insumos/crear/', views.crear_insumo, name='crear_insumo'),
+    path('insumos/editar/<int:id>/', views.editar_insumo, name='editar_insumo'),
+    path('insumos/eliminar/<int:id>/', views.eliminar_insumo, name='eliminar_insumo'),
+    # Producción
+    path('produccion/', views.lista_ordenes, name='lista_ordenes'),
+    path('produccion/crear/', views.crear_orden, name='crear_orden'),
+    path('produccion/editar/<int:id>/', views.editar_orden, name='editar_orden'),
+    path('produccion/eliminar/<int:id>/', views.eliminar_orden, name='eliminar_orden'),
+    path('produccion/avanzar/<int:id>/', views.avanzar_estado_orden, name='avanzar_estado_orden'),
     # Transacciones
     path('transacciones/', views.lista_transacciones, name='lista_transacciones'),
     path('transacciones/crear/', views.crear_transaccion, name='crear_transaccion'),

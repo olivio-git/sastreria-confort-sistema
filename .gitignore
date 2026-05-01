@@ -38,3 +38,4 @@ passenger_wsgi.py
 Procfile
 stderr.log
 tmp/
+.claude

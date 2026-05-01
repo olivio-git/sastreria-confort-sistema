@@ -1,172 +1,237 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}{{ titulo }}{% endblock %}
+
+{% block extra_head %}
+<style>
+  .item-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+    background: var(--surface);
+  }
+  .medida-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .medida-cell label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    cursor: help;
+    margin-bottom: 0.15rem;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .medida-input {
+    width: 5.5rem;
+    text-align: right;
+  }
+  input[id$="-DELETE"] { display: none; }
+</style>
+{% endblock %}
+
 {% block contenido %}
-<h1>{{ titulo }}</h1>
-<form method="post">
-    {% csrf_token %}
-    <div class="card mb-3">
-        <div class="card-header">Información General</div>
-        <div class="card-body">
-            <div class="row">
-                <div class="col-md-4 mb-3">{{ form.codigo.label_tag }} {{ form.codigo }}</div>
-                <div class="col-md-4 mb-3">{{ form.fecha_inicio.label_tag }} {{ form.fecha_inicio }}</div>
-                <div class="col-md-4 mb-3">{{ form.tipo_prenda.label_tag }} {{ form.tipo_prenda }}</div>
-            </div>
-            <div class="row">
-                <div class="col-md-4 mb-3">{{ form.color.label_tag }} {{ form.color }}</div>
-                <div class="col-md-4 mb-3">{{ form.modelo.label_tag }} {{ form.modelo }}</div>
-                <div class="col-md-4 mb-3">{{ form.cliente.label_tag }} {{ form.cliente }}</div>
-            </div>
-            <div class="row">
-                <div class="col-md-4 mb-3">{{ form.empleado.label_tag }} {{ form.empleado }}</div>
-                <div class="col-md-8 mb-3">{{ form.observaciones.label_tag }} {{ form.observaciones }}</div>
-            </div>
+<div class="form-container">
+
+<div class="page-header">
+  <h1 class="page-title"><i class="bi bi-scissors me-2"></i>{{ titulo }}</h1>
+  <a href="{% url 'lista_confecciones' %}" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-arrow-left me-1"></i>Volver
+  </a>
+</div>
+
+<form method="post" id="confeccion-form">
+  {% csrf_token %}
+
+  <!-- Información General -->
+  <div class="form-card mb-3">
+    <h6 class="fw-semibold text-muted border-bottom pb-2 mb-3">Información General</h6>
+    <div class="row g-3">
+      <div class="col-md-4">
+        <label class="form-label">{{ form.fecha_inicio.label }}</label>
+        {{ form.fecha_inicio }}
+        {% if form.fecha_inicio.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.fecha_inicio.errors }}</div>{% endif %}
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">{{ form.color.label }}</label>
+        {{ form.color }}
+        {% if form.color.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.color.errors }}</div>{% endif %}
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">{{ form.modelo.label }}</label>
+        {{ form.modelo }}
+        {% if form.modelo.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.modelo.errors }}</div>{% endif %}
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">{{ form.cliente.label }}</label>
+        <div style="position:relative">
+          <input type="text"
+                 data-cliente-search="id_cliente"
+                 data-endpoint="{% url 'buscar_clientes' %}"
+                 class="form-control"
+                 placeholder="Buscar por CI o nombre…"
+                 value="{% if form.instance.pk and form.instance.cliente %}{{ form.instance.cliente }}{% endif %}"
+                 autocomplete="off">
+          <input type="hidden" name="cliente" id="id_cliente" value="{{ form.cliente.value|default:'' }}">
         </div>
+        {% if form.cliente.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.cliente.errors }}</div>{% endif %}
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">{{ form.empleado.label }}</label>
+        {{ form.empleado }}
+        {% if form.empleado.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.empleado.errors }}</div>{% endif %}
+      </div>
+      <div class="col-12">
+        <label class="form-label">{{ form.observaciones.label }}</label>
+        {{ form.observaciones }}
+        {% if form.observaciones.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.observaciones.errors }}</div>{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Prendas y Medidas -->
+  <div class="form-card mb-3">
+    <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+      <h6 class="fw-semibold text-muted mb-0">Prendas y Medidas</h6>
+      <button type="button" id="add-item-btn" class="btn btn-outline-success btn-sm">
+        <i class="bi bi-plus-lg me-1"></i>Agregar prenda
+      </button>
     </div>
 
-    <!-- Medidas -->
-    <div class="card mb-3">
-        <div class="card-header">Medidas</div>
-        <div class="card-body">
-            <!-- Pantalón -->
-            <div class="medidas-section" id="medidas-pantalon" style="display: none;">
-                <h5>Pantalón</h5>
-                <div class="row">
-                    <div class="col-md-4 mb-3">{{ form.pantalon_largo_total.label_tag }} {{ form.pantalon_largo_total }}</div>
-                    <div class="col-md-4 mb-3">{{ form.pantalon_contorno_cintura.label_tag }} {{ form.pantalon_contorno_cintura }}</div>
-                    <div class="col-md-4 mb-3">{{ form.pantalon_contorno_cadera.label_tag }} {{ form.pantalon_contorno_cadera }}</div>
-                </div>
-                <div class="row">
-                    <div class="col-md-4 mb-3">{{ form.pantalon_largo_entrepierna.label_tag }} {{ form.pantalon_largo_entrepierna }}</div>
-                    <div class="col-md-4 mb-3">{{ form.pantalon_contorno_pierna.label_tag }} {{ form.pantalon_contorno_pierna }}</div>
-                    <div class="col-md-4 mb-3">{{ form.pantalon_contorno_rodilla.label_tag }} {{ form.pantalon_contorno_rodilla }}</div>
-                </div>
-                <div class="row">
-                    <div class="col-md-4 mb-3">{{ form.pantalon_contorno_bota.label_tag }} {{ form.pantalon_contorno_bota }}</div>
-                    <div class="col-md-4 mb-3">{{ form.pantalon_tiro_delantero.label_tag }} {{ form.pantalon_tiro_delantero }}</div>
-                    <div class="col-md-4 mb-3">{{ form.pantalon_tiro_trasero.label_tag }} {{ form.pantalon_tiro_trasero }}</div>
-                </div>
-            </div>
-            <!-- Chaleco -->
-            <div class="medidas-section" id="medidas-chaleco" style="display: none;">
-                <h5>Chaleco</h5>
-                <div class="row">
-                    <div class="col-md-4 mb-3">{{ form.chaleco_contorno_busto.label_tag }} {{ form.chaleco_contorno_busto }}</div>
-                    <div class="col-md-4 mb-3">{{ form.chaleco_contorno_cintura.label_tag }} {{ form.chaleco_contorno_cintura }}</div>
-                    <div class="col-md-4 mb-3">{{ form.chaleco_contorno_cadera.label_tag }} {{ form.chaleco_contorno_cadera }}</div>
-                </div>
-                <div class="row">
-                    <div class="col-md-4 mb-3">{{ form.chaleco_largo_talle.label_tag }} {{ form.chaleco_largo_talle }}</div>
-                    <div class="col-md-4 mb-3">{{ form.chaleco_largo_total.label_tag }} {{ form.chaleco_largo_total }}</div>
-                    <div class="col-md-4 mb-3">{{ form.chaleco_altura_botones.label_tag }} {{ form.chaleco_altura_botones }}</div>
-                </div>
-            </div>
-            <!-- Saco -->
-            <div class="medidas-section" id="medidas-saco" style="display: none;">
-                <h5>Saco</h5>
-                <div class="row">
-                    <div class="col-md-4 mb-3">{{ form.saco_contorno_busto.label_tag }} {{ form.saco_contorno_busto }}</div>
-                    <div class="col-md-4 mb-3">{{ form.saco_contorno_cintura.label_tag }} {{ form.saco_contorno_cintura }}</div>
-                    <div class="col-md-4 mb-3">{{ form.saco_contorno_cadera.label_tag }} {{ form.saco_contorno_cadera }}</div>
-                </div>
-                <div class="row">
-                    <div class="col-md-4 mb-3">{{ form.saco_largo_talle.label_tag }} {{ form.saco_largo_talle }}</div>
-                    <div class="col-md-4 mb-3">{{ form.saco_largo_total.label_tag }} {{ form.saco_largo_total }}</div>
-                    <div class="col-md-4 mb-3">{{ form.saco_ancho_hombros.label_tag }} {{ form.saco_ancho_hombros }}</div>
-                </div>
-                <div class="row">
-                    <div class="col-md-4 mb-3">{{ form.saco_ancho_espalda.label_tag }} {{ form.saco_ancho_espalda }}</div>
-                    <div class="col-md-4 mb-3">{{ form.saco_contorno_brazo.label_tag }} {{ form.saco_contorno_brazo }}</div>
-                    <div class="col-md-4 mb-3">{{ form.saco_largo_manga.label_tag }} {{ form.saco_largo_manga }}</div>
-                </div>
-                <div class="row">
-                    <div class="col-md-4 mb-3">{{ form.saco_contorno_puno.label_tag }} {{ form.saco_contorno_puno }}</div>
-                </div>
-            </div>
-            <!-- Saco – Mujer -->
-            <div class="medidas-section" id="medidas-saco_mujer" style="display: none;">
-                <h5>Saco – Mujer</h5>
-                <div class="row">
-                    <div class="col-md-4 mb-3">{{ form.saco_mujer_contorno_busto.label_tag }} {{ form.saco_mujer_contorno_busto }}</div>
-                    <div class="col-md-4 mb-3">{{ form.saco_mujer_contorno_cintura.label_tag }} {{ form.saco_mujer_contorno_cintura }}</div>
-                    <div class="col-md-4 mb-3">{{ form.saco_mujer_contorno_cadera.label_tag }} {{ form.saco_mujer_contorno_cadera }}</div>
-                </div>
-                <div class="row">
-                    <div class="col-md-4 mb-3">{{ form.saco_mujer_ancho_hombros.label_tag }} {{ form.saco_mujer_ancho_hombros }}</div>
-                    <div class="col-md-4 mb-3">{{ form.saco_mujer_ancho_espalda.label_tag }} {{ form.saco_mujer_ancho_espalda }}</div>
-                    <div class="col-md-4 mb-3">{{ form.saco_mujer_largo_talle.label_tag }} {{ form.saco_mujer_largo_talle }}</div>
-                </div>
-                <div class="row">
-                    <div class="col-md-4 mb-3">{{ form.saco_mujer_largo_total.label_tag }} {{ form.saco_mujer_largo_total }}</div>
-                    <div class="col-md-4 mb-3">{{ form.saco_mujer_altura_busto.label_tag }} {{ form.saco_mujer_altura_busto }}</div>
-                    <div class="col-md-4 mb-3">{{ form.saco_mujer_separacion_busto.label_tag }} {{ form.saco_mujer_separacion_busto }}</div>
-                </div>
-                <div class="row">
-                    <div class="col-md-4 mb-3">{{ form.saco_mujer_dif_talle.label_tag }} {{ form.saco_mujer_dif_talle }}</div>
-                </div>
-            </div>
-            <!-- Chaleco – Mujer -->
-            <div class="medidas-section" id="medidas-chaleco_mujer" style="display: none;">
-                <h5>Chaleco – Mujer</h5>
-                <div class="row">
-                    <div class="col-md-4 mb-3">{{ form.chaleco_mujer_contorno_busto.label_tag }} {{ form.chaleco_mujer_contorno_busto }}</div>
-                    <div class="col-md-4 mb-3">{{ form.chaleco_mujer_contorno_cintura.label_tag }} {{ form.chaleco_mujer_contorno_cintura }}</div>
-                    <div class="col-md-4 mb-3">{{ form.chaleco_mujer_contorno_cadera.label_tag }} {{ form.chaleco_mujer_contorno_cadera }}</div>
-                </div>
-                <div class="row">
-                    <div class="col-md-4 mb-3">{{ form.chaleco_mujer_largo_talle.label_tag }} {{ form.chaleco_mujer_largo_talle }}</div>
-                    <div class="col-md-4 mb-3">{{ form.chaleco_mujer_largo_total.label_tag }} {{ form.chaleco_mujer_largo_total }}</div>
-                    <div class="col-md-4 mb-3">{{ form.chaleco_mujer_altura_busto.label_tag }} {{ form.chaleco_mujer_altura_busto }}</div>
-                </div>
-                <div class="row">
-                    <div class="col-md-4 mb-3">{{ form.chaleco_mujer_separacion_busto.label_tag }} {{ form.chaleco_mujer_separacion_busto }}</div>
-                    <div class="col-md-4 mb-3">{{ form.chaleco_mujer_largo_delantero.label_tag }} {{ form.chaleco_mujer_largo_delantero }}</div>
-                </div>
-            </div>
-        </div>
-    </div>
+    {{ formset.management_form }}
+    {% if formset.non_form_errors %}
+    <div class="alert alert-danger py-1 mb-2">{{ formset.non_form_errors }}</div>
+    {% endif %}
 
-    <!-- Pagos y Fechas -->
-    <div class="card mb-3">
-        <div class="card-header">Pagos y Fechas</div>
-        <div class="card-body">
-            <div class="row">
-                <div class="col-md-4 mb-3">{{ form.precio.label_tag }} {{ form.precio }}</div>
-                <div class="col-md-4 mb-3">{{ form.adelanto.label_tag }} {{ form.adelanto }}</div>
-                <div class="col-md-4 mb-3">{{ form.saldo.label_tag }} {{ form.saldo }}</div>
-            </div>
-            <div class="row">
-                <div class="col-md-4 mb-3">{{ form.fecha_prueba.label_tag }} {{ form.fecha_prueba }}</div>
-                <div class="col-md-4 mb-3">{{ form.fecha_entrega.label_tag }} {{ form.fecha_entrega }}</div>
-                <div class="col-md-4 mb-3">{{ form.estado.label_tag }} {{ form.estado }}</div>
-            </div>
-        </div>
+    <div id="items-container">
+      {% for item_form in formset %}
+      {% include 'misastreria/confecciones/_item_form.html' with item_form=item_form %}
+      {% endfor %}
     </div>
+  </div>
 
-    <button type="submit" class="btn btn-primary">Guardar</button>
-    <a href="{% url 'lista_confecciones' %}" class="btn btn-secondary">Cancelar</a>
+  <!-- Pagos y Fechas -->
+  <div class="form-card mb-3">
+    <h6 class="fw-semibold text-muted border-bottom pb-2 mb-3">Pagos y Fechas</h6>
+    <div class="row g-3">
+      <div class="col-md-4">
+        <label class="form-label">{{ form.precio.label }}</label>
+        {{ form.precio }}
+        {% if form.precio.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.precio.errors }}</div>{% endif %}
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">{{ form.adelanto.label }}</label>
+        {{ form.adelanto }}
+        {% if form.adelanto.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.adelanto.errors }}</div>{% endif %}
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">{{ form.saldo.label }}</label>
+        {{ form.saldo }}
+        <div class="form-text">Se calcula automáticamente.</div>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">{{ form.fecha_prueba.label }}</label>
+        {{ form.fecha_prueba }}
+        {% if form.fecha_prueba.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.fecha_prueba.errors }}</div>{% endif %}
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">{{ form.fecha_entrega.label }}</label>
+        {{ form.fecha_entrega }}
+        {% if form.fecha_entrega.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.fecha_entrega.errors }}</div>{% endif %}
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">{{ form.estado.label }}</label>
+        {{ form.estado }}
+        {% if form.estado.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.estado.errors }}</div>{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Guardar</button>
+    <a href="{% url 'lista_confecciones' %}" class="btn btn-outline-secondary">Cancelar</a>
+  </div>
 </form>
+</div>
 
+<!-- Template oculto para el botón "Agregar prenda" -->
+<div id="empty-item-template" style="display:none">
+  {% include 'misastreria/confecciones/_item_form.html' with item_form=formset.empty_form %}
+</div>
+
+{% block extra_js %}
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    const tipoPrendaSelect = document.getElementById('id_tipo_prenda');
-    const medidasSections = document.querySelectorAll('.medidas-section');
+(function () {
+  const container = document.getElementById('items-container');
+  const totalInput = document.getElementById('id_items-TOTAL_FORMS');
+  const emptyTpl = document.getElementById('empty-item-template');
+  let formCount = parseInt(totalInput.value);
 
-    function toggleMedidas() {
-        const tipoPrenda = tipoPrendaSelect.value;
-        medidasSections.forEach(section => {
-            section.style.display = section.id === `medidas-${tipoPrenda}` ? 'block' : 'none';
-            // Limpiar campos de medidas no visibles
-            if (section.style.display === 'none') {
-                section.querySelectorAll('input').forEach(input => {
-                    input.value = '';
-                });
-            }
-        });
+  function toggleMedidas(card) {
+    const sel = card.querySelector('.tipo-prenda-select');
+    if (!sel) return;
+    const tipo = sel.value;
+    card.querySelectorAll('.medidas-block').forEach(function (block) {
+      const show = block.dataset.tipo === tipo;
+      block.style.display = show ? 'flex' : 'none';
+      if (!show) block.querySelectorAll('input').forEach(function (i) { i.value = ''; });
+    });
+  }
+
+  function initCard(card) {
+    const sel = card.querySelector('.tipo-prenda-select');
+    if (sel) {
+      sel.addEventListener('change', function () { toggleMedidas(card); });
+      toggleMedidas(card);
     }
+    const removeBtn = card.querySelector('.remove-item');
+    if (removeBtn) {
+      removeBtn.addEventListener('click', function () {
+        const del = card.querySelector('input[type="checkbox"][id$="-DELETE"]');
+        if (del) del.checked = true;
+        card.style.display = 'none';
+      });
+    }
+    card.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
+      new bootstrap.Tooltip(el);
+    });
+  }
 
-    tipoPrendaSelect.addEventListener('change', toggleMedidas);
-    toggleMedidas(); // Inicializar al cargar
-});
+  // init existing cards
+  container.querySelectorAll('.item-card').forEach(initCard);
+
+  // add new card
+  document.getElementById('add-item-btn').addEventListener('click', function () {
+    const html = emptyTpl.innerHTML.replace(/__prefix__/g, String(formCount));
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+    const card = temp.querySelector('.item-card');
+    container.appendChild(card);
+    formCount++;
+    totalInput.value = String(formCount);
+    initCard(card);
+  });
+
+  // saldo automático
+  const precioInput = document.getElementById('id_precio');
+  const adelantoInput = document.getElementById('id_adelanto');
+  const saldoInput = document.getElementById('id_saldo');
+
+  function calcSaldo() {
+    const p = parseFloat(precioInput.value) || 0;
+    const a = parseFloat(adelantoInput.value) || 0;
+    saldoInput.value = Math.max(0, p - a).toFixed(2);
+  }
+
+  if (precioInput && adelantoInput && saldoInput) {
+    precioInput.addEventListener('input', calcSaldo);
+    adelantoInput.addEventListener('input', calcSaldo);
+    calcSaldo();
+  }
+})();
 </script>
+{% endblock %}
+
 {% endblock %}

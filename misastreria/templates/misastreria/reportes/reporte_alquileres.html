@@ -77,33 +77,59 @@
                 <table class="table table-bordered table-striped" width="100%" cellspacing="0">
                     <thead class="bg-light">
                         <tr>
-                            <th>Código Alq.</th>
-                            <th>Fecha Alquiler</th>
+                            <th>Código</th>
+                            <th>Fecha Alq.</th>
                             <th>Cliente</th>
-                            <th>Artículo</th>
-                            <th>Cantidad</th>
-                            <th>Fecha Devolución</th>
+                            <th>F. Dev.</th>
                             <th>Estado</th>
-                            <th>Costo (Bs.)</th>
+                            <th>Prenda</th>
+                            <th class="text-center">Cant.</th>
+                            <th class="text-end">P.Unit. (Bs.)</th>
+                            <th class="text-end">Subtotal (Bs.)</th>
+                            <th class="text-end">Total (Bs.)</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for alquiler in alquileres %}
+                        {% with items=alquiler.items.all %}
+                        {% for item in items %}
+                        <tr>
+                            {% if forloop.first %}
+                            <td rowspan="{{ items|length }}">{{ alquiler.codigo }}</td>
+                            <td rowspan="{{ items|length }}">{{ alquiler.fecha_alquiler|date:"d/m/Y" }}</td>
+                            <td rowspan="{{ items|length }}">
+                                {% if alquiler.cliente %}{{ alquiler.cliente.nombres }} {{ alquiler.cliente.apellido_paterno }}{% else %}N/A{% endif %}
+                            </td>
+                            <td rowspan="{{ items|length }}">{{ alquiler.fecha_devolucion|date:"d/m/Y" }}</td>
+                            <td rowspan="{{ items|length }}">
+                                <span class="badge-estado badge-{{ alquiler.estado }}">{{ alquiler.get_estado_display }}</span>
+                            </td>
+                            {% endif %}
+                            <td>{{ item.articulo }}</td>
+                            <td class="text-center">{{ item.cantidad }}</td>
+                            <td class="text-end">{{ item.precio_unitario|floatformat:2 }}</td>
+                            <td class="text-end">{{ item.subtotal|floatformat:2 }}</td>
+                            {% if forloop.last %}
+                            <td class="text-end fw-bold" rowspan="{{ items|length }}" style="vertical-align:middle">{{ alquiler.total|floatformat:2 }}</td>
+                            {% endif %}
+                        </tr>
+                        {% empty %}
                         <tr>
                             <td>{{ alquiler.codigo }}</td>
                             <td>{{ alquiler.fecha_alquiler|date:"d/m/Y" }}</td>
-                            <td>{{ alquiler.cliente.nombres }} {{ alquiler.cliente.apellido_paterno }} {{ alquiler.cliente.apellido_materno }}</td>
-                            <td>{{ alquiler.articulo.articulo }}</td>
-                            <td>{{ alquiler.cantidad }}</td>
+                            <td>{% if alquiler.cliente %}{{ alquiler.cliente.nombres }} {{ alquiler.cliente.apellido_paterno }}{% else %}N/A{% endif %}</td>
                             <td>{{ alquiler.fecha_devolucion|date:"d/m/Y" }}</td>
-                            <td>{{ alquiler.get_estado_display }}</td>
-                            <td>{{ alquiler.costo_alquiler|floatformat:2 }}</td>
+                            <td><span class="badge-estado badge-{{ alquiler.estado }}">{{ alquiler.get_estado_display }}</span></td>
+                            <td colspan="3" class="text-muted">Sin artículos</td>
+                            <td class="text-end fw-bold">{{ alquiler.total|floatformat:2 }}</td>
                         </tr>
+                        {% endfor %}
+                        {% endwith %}
                         {% endfor %}
                     </tbody>
                     <tfoot>
                         <tr>
-                            <th colspan="7" class="text-end text-primary">Total General:</th> {# Ajustado el colspan a 7 para 8 columnas en total #}
+                            <th colspan="9" class="text-end text-primary">Total General:</th>
                             <th class="text-success">Bs. {{ total_alquileres|floatformat:2 }}</th>
                         </tr>
                     </tfoot>

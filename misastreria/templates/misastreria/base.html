@@ -47,7 +47,13 @@
           <a class="nav-link" href="{% url 'lista_transacciones' %}"><i class="bi bi-currency-dollar me-1"></i>Transacciones</a>
         </li>
         <li class="nav-item">
-          <a class="nav-link" href="{% url 'lista_inventario' %}"><i class="bi bi-box-seam me-1"></i>Inventario</a>
+          <a class="nav-link" href="{% url 'lista_prendas' %}"><i class="bi bi-box-seam me-1"></i>Prendas</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="{% url 'lista_insumos' %}"><i class="bi bi-scissors me-1"></i>Insumos</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="{% url 'lista_ordenes' %}"><i class="bi bi-gear me-1"></i>Producción</a>
         </li>
         <li class="nav-item dropdown">
           <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
@@ -66,7 +72,17 @@
           </ul>
         </li>
       </ul>
-      <ul class="navbar-nav ms-auto">
+      <ul class="navbar-nav ms-auto align-items-center gap-2">
+        <li class="nav-item">
+          <div class="form-check form-switch m-0">
+            <input class="form-check-input" type="checkbox" id="toggleAutoBuscar">
+            <label class="form-check-label small" for="toggleAutoBuscar" style="color:inherit;opacity:.8">Auto buscar</label>
+          </div>
+          <script>
+            if (localStorage.getItem('auto_buscar') !== 'false')
+              document.getElementById('toggleAutoBuscar').checked = true;
+          </script>
+        </li>
         <li class="nav-item">
           <form action="{% url 'logout' %}" method="post" class="d-inline">
             {% csrf_token %}

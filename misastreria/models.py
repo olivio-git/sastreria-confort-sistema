@@ -1,8 +1,6 @@
 from django.db import models
 from django.core.validators import EmailValidator, RegexValidator, MinValueValidator
 from django.utils import timezone
-from django.contrib.contenttypes.models import ContentType
-from django.contrib.contenttypes.fields import GenericForeignKey
 from django.core.exceptions import ValidationError
 
 class Empleado(models.Model):
@@ -12,7 +10,7 @@ class Empleado(models.Model):
         ('porcentaje', 'Porcentaje'),
     ]
 
-    codigo = models.CharField(max_length=10, unique=True, verbose_name="Código")
+    codigo = models.CharField(max_length=10, unique=True, blank=True, verbose_name="Código")
     ci = models.CharField(max_length=20, unique=True, null=True, blank=True, verbose_name="CI")
     nombres = models.CharField(max_length=100, verbose_name="Nombres")
     apellido_paterno = models.CharField(max_length=100, verbose_name="Apellido Paterno")
@@ -26,7 +24,11 @@ class Empleado(models.Model):
     creado = models.DateTimeField(auto_now_add=True, verbose_name="Fecha de Creación")
 
     def save(self, *args, **kwargs):
-        # Capitalizar nombres, apellido_paterno, apellido_materno
+        if not self.codigo:
+            last = Empleado.objects.order_by('id').last()
+            numero = (int(last.codigo.split('-')[1]) + 1) if last and last.codigo and '-' in last.codigo else 1
+            self.codigo = f"EMP-{numero:03d}"
+        self.activo = self.fecha_baja is None
         self.nombres = ' '.join(word.capitalize() for word in self.nombres.split())
         self.apellido_paterno = self.apellido_paterno.capitalize()
         self.apellido_materno = self.apellido_materno.capitalize()
@@ -40,6 +42,7 @@ class Empleado(models.Model):
     def __str__(self):
         return f"{self.nombres} {self.apellido_paterno} {self.apellido_materno}".strip()
 
+
 class Permiso(models.Model):
     empleado = models.ForeignKey(Empleado, on_delete=models.CASCADE, related_name='permisos')
     fecha_permiso = models.DateField(verbose_name="Fecha de Permiso")
@@ -49,6 +52,7 @@ class Permiso(models.Model):
     def __str__(self):
         return f"Permiso de {self.empleado} el {self.fecha_permiso}"
 
+
 class Falta(models.Model):
     empleado = models.ForeignKey(Empleado, on_delete=models.CASCADE, related_name='faltas')
     fecha_falta = models.DateField(verbose_name="Fecha de Falta")
@@ -57,6 +61,7 @@ class Falta(models.Model):
 
     def __str__(self):
         return f"Falta de {self.empleado} el {self.fecha_falta}"
+
 
 class Cliente(models.Model):
     codigo = models.CharField(max_length=10, unique=True, verbose_name="Código de Cliente")
@@ -69,6 +74,7 @@ class Cliente(models.Model):
     email = models.EmailField(null=True, blank=True, verbose_name="Correo Electrónico")
     fecha_registro = models.DateField(default=timezone.now, verbose_name="Fecha de Registro")
     notas = models.TextField(blank=True, verbose_name="Notas")
+    creado = models.DateTimeField(auto_now_add=True, verbose_name="Fecha de Creación")
 
     def save(self, *args, **kwargs):
         if not self.codigo:
@@ -84,10 +90,11 @@ class Cliente(models.Model):
     class Meta:
         verbose_name = "Cliente"
         verbose_name_plural = "Clientes"
-        ordering = ['nombres', 'apellido_paterno']
+        ordering = ['-creado']
 
     def __str__(self):
         return f"{self.nombres} {self.apellido_paterno} {self.apellido_materno}".strip()
+
 
 class Servicio(models.Model):
     TIPO_SERVICIO_CHOICES = [
@@ -96,12 +103,13 @@ class Servicio(models.Model):
         ('ventas', 'Ventas'),
         ('alquiler', 'Alquiler'),
     ]
-    
+
     tipo = models.CharField(max_length=20, choices=TIPO_SERVICIO_CHOICES, verbose_name="Tipo de Servicio")
     creado = models.DateTimeField(auto_now_add=True, verbose_name="Fecha de Creación")
 
     class Meta:
         abstract = True
+
 
 class Reparacion(models.Model):
     TIPO_PRENDA_CHOICES = [
@@ -127,7 +135,7 @@ class Reparacion(models.Model):
         ('entregado', 'Entregado'),
     ]
 
-    codigo = models.CharField(max_length=10, unique=True, verbose_name="Código")
+    codigo = models.CharField(max_length=10, unique=True, blank=True, verbose_name="Código")
     tipo_prenda = models.CharField(max_length=20, choices=TIPO_PRENDA_CHOICES, verbose_name="Tipo de Prenda")
     otro_prenda = models.CharField(max_length=100, blank=True, null=True, verbose_name="Otra Prenda")
     tipo_reparacion = models.CharField(max_length=20, choices=TIPO_REPARACION_CHOICES, verbose_name="Tipo de Reparación")
@@ -145,108 +153,148 @@ class Reparacion(models.Model):
         verbose_name_plural = "Reparaciones"
         ordering = ['-creado']
 
+    def save(self, *args, **kwargs):
+        if not self.codigo:
+            last = Reparacion.objects.order_by('-id').first()
+            numero = int(last.codigo.split('-')[1]) + 1 if last and last.codigo and '-' in last.codigo else 1
+            self.codigo = f"REP-{numero:03d}"
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f"Reparación {self.codigo} - {self.tipo_prenda} ({self.tipo_reparacion})"
-class Categoria(models.Model):
-    nombre = models.CharField(max_length=50, unique=True, verbose_name="Nombre")
-    
-    class Meta:
-        verbose_name = "Categoría"
-        verbose_name_plural = "Categorías"
-        ordering = ['nombre']
 
-    def __str__(self):
-        return self.nombre
 
-class Inventario(models.Model):
+class PrendaInventario(models.Model):
+    TIPO_CHOICES = [
+        ('venta', 'Para Venta'),
+        ('alquiler', 'Para Alquiler'),
+    ]
+    CONDICION_CHOICES = [
+        ('nueva', 'Nueva'),
+        ('usada', 'Usada'),
+        ('remate', 'Remate'),
+    ]
     ESTADO_OPCIONES = [
         ('ACT', 'Activo'),
         ('BAJ', 'Baja'),
     ]
-    
-    codigo = models.CharField(max_length=20, unique=True, verbose_name="Código", help_text="Formato: INV-001")
-    articulo = models.CharField(max_length=100, verbose_name="Artículo")
-    cantidad = models.PositiveIntegerField(verbose_name="Cantidad")
-    costo = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name="Costo")
-    precio = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0.01)], verbose_name="Precio")
-    fecha_ingreso = models.DateField(default=timezone.now, verbose_name="Fecha de Ingreso")
-    categoria = models.ForeignKey(Categoria, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Categoría")
-    ultima_modificacion = models.DateTimeField(auto_now=True, verbose_name="Última Modificación")
-    fecha_baja = models.DateField(null=True, blank=True, verbose_name="Fecha de Baja")
-    motivo_baja = models.TextField(blank=True, verbose_name="Motivo de Baja")
+
+    codigo = models.CharField(max_length=20, unique=True, blank=True, verbose_name="Código")
+    tipo = models.CharField(max_length=10, choices=TIPO_CHOICES, verbose_name="Tipo")
+    nombre = models.CharField(max_length=100, verbose_name="Nombre")
+    modelo = models.CharField(max_length=100, blank=True, verbose_name="Modelo / Línea")
+    talla = models.CharField(max_length=20, blank=True, verbose_name="Talla")
+    color = models.CharField(max_length=50, blank=True, verbose_name="Color")
+    codigo_referencia = models.CharField(max_length=100, blank=True, verbose_name="Código de Referencia")
+    condicion = models.CharField(
+        max_length=10, choices=CONDICION_CHOICES, default='nueva',
+        blank=True, verbose_name="Condición",
+        help_text="Solo aplica a prendas de alquiler"
+    )
+    veces_alquilado = models.PositiveIntegerField(default=0, verbose_name="Veces Alquilado")
+    cantidad = models.PositiveIntegerField(default=1, verbose_name="Cantidad en Stock")
+    stock_minimo = models.PositiveIntegerField(null=True, blank=True, verbose_name="Stock Mínimo")
+    precio = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        validators=[MinValueValidator(0.01)], verbose_name="Precio"
+    )
     estado = models.CharField(max_length=3, choices=ESTADO_OPCIONES, default='ACT', verbose_name="Estado")
+    notas = models.TextField(blank=True, verbose_name="Notas")
+    creado = models.DateTimeField(auto_now_add=True, verbose_name="Fecha de Ingreso")
 
     class Meta:
-        verbose_name = "Inventario"
-        verbose_name_plural = "Inventarios"
-        ordering = ['-fecha_ingreso']
-
-    def clean(self):
-        if self.cantidad < 0:
-            raise ValidationError("La cantidad no puede ser negativa.")
-        if self.costo is not None and self.costo < 0:
-            raise ValidationError("El costo no puede ser negativo.")
-        if self.fecha_baja and self.fecha_ingreso and self.fecha_baja < self.fecha_ingreso:
-            raise ValidationError("La fecha de baja no puede ser anterior a la fecha de ingreso.")
-        if self.estado == 'BAJ' and self.cantidad != 0:
-            raise ValidationError("Un artículo dado de baja debe tener cantidad 0.")
+        verbose_name = "Prenda"
+        verbose_name_plural = "Prendas"
+        ordering = ['nombre', 'talla']
 
     def save(self, *args, **kwargs):
-        self.full_clean()  # Ejecuta clean() antes de guardar
         if not self.codigo:
-            last = Inventario.objects.order_by('-id').first()
-            numero = int(last.codigo.split('-')[1]) + 1 if last else 1
-            self.codigo = f"INV-{numero:03d}"
+            last = PrendaInventario.objects.order_by('-id').first()
+            numero = int(last.codigo.split('-')[1]) + 1 if last and last.codigo and '-' in last.codigo else 1
+            self.codigo = f"PRN-{numero:03d}"
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return self.articulo
+        parts = [self.nombre]
+        if self.codigo_referencia:
+            parts.append(self.codigo_referencia)
+        if self.color:
+            parts.append(self.color)
+        if self.talla:
+            parts.append(f"T{self.talla}")
+        return ' / '.join(parts)
 
-class BajaInventario(models.Model):
-    inventario = models.ForeignKey(Inventario, on_delete=models.PROTECT, related_name='bajas', verbose_name="Artículo")
-    cantidad = models.PositiveIntegerField(verbose_name="Cantidad Dada de Baja")
-    fecha_baja = models.DateField(default=timezone.now, verbose_name="Fecha de Baja")
-    motivo_baja = models.TextField(verbose_name="Motivo de Baja")
-    creado_en = models.DateTimeField(auto_now_add=True, verbose_name="Creado En")
+
+class Insumo(models.Model):
+    TIPO_MATERIAL_CHOICES = [
+        ('tela', 'Tela'),
+        ('hilo', 'Hilo'),
+        ('accesorio', 'Accesorio'),
+        ('entretela', 'Entretela'),
+        ('otro', 'Otro'),
+    ]
+    UNIDAD_MEDIDA_CHOICES = [
+        ('metro', 'Metro'),
+        ('kg', 'Kilogramo'),
+        ('unidad', 'Unidad'),
+        ('rollo', 'Rollo'),
+    ]
+    ESTADO_OPCIONES = [
+        ('ACT', 'Activo'),
+        ('BAJ', 'Baja'),
+    ]
+
+    codigo = models.CharField(max_length=20, unique=True, blank=True, verbose_name="Código")
+    tipo_material = models.CharField(max_length=20, choices=TIPO_MATERIAL_CHOICES, verbose_name="Tipo de Material")
+    articulo = models.CharField(max_length=100, verbose_name="Artículo")
+    coleccion = models.CharField(max_length=100, blank=True, verbose_name="Colección / Cuaderno")
+    color = models.CharField(max_length=50, blank=True, verbose_name="Color")
+    codigo_referencia = models.CharField(max_length=100, blank=True, verbose_name="Código de Referencia")
+    tipo_tela = models.CharField(max_length=50, blank=True, verbose_name="Tipo de Tela")
+    unidad_medida = models.CharField(max_length=10, choices=UNIDAD_MEDIDA_CHOICES, default='metro', verbose_name="Unidad de Medida")
+    cantidad = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="Cantidad")
+    stock_minimo = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name="Stock Mínimo")
+    precio_costo = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name="Precio de Costo")
+    estado = models.CharField(max_length=3, choices=ESTADO_OPCIONES, default='ACT', verbose_name="Estado")
+    proveedor = models.CharField(max_length=100, blank=True, verbose_name="Proveedor")
+    notas = models.TextField(blank=True, verbose_name="Notas")
+    creado = models.DateTimeField(auto_now_add=True, verbose_name="Fecha de Ingreso")
 
     class Meta:
-        verbose_name = "Baja de Inventario"
-        verbose_name_plural = "Bajas de Inventario"
-        ordering = ['-fecha_baja']
-
-    def clean(self):
-        if self.cantidad <= 0:
-            raise ValidationError("La cantidad dada de baja debe ser mayor que cero.")
-        if not self.motivo_baja:
-            raise ValidationError("El motivo de baja es obligatorio.")
-        # La validación de cantidad disponible se mueve a la vista
+        verbose_name = "Insumo"
+        verbose_name_plural = "Insumos"
+        ordering = ['tipo_material', 'articulo']
 
     def save(self, *args, **kwargs):
-        self.full_clean()
+        if not self.codigo:
+            last = Insumo.objects.order_by('-id').first()
+            numero = int(last.codigo.split('-')[1]) + 1 if last and last.codigo and '-' in last.codigo else 1
+            self.codigo = f"INS-{numero:03d}"
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"Baja de {self.cantidad} unidades de {self.inventario} el {self.fecha_baja}"
+        if self.coleccion and self.color:
+            return f"{self.coleccion} / {self.color}"
+        if self.codigo_referencia:
+            return f"{self.articulo} {self.codigo_referencia}"
+        parts = [p for p in [self.tipo_tela, self.articulo, self.color] if p]
+        return ' '.join(parts) if parts else self.articulo
+
 
 class Venta(Servicio):
-    codigo = models.CharField(max_length=10, unique=True, verbose_name="Código")
+    codigo = models.CharField(max_length=10, unique=True, blank=True, verbose_name="Código")
     fecha_venta = models.DateField(default=timezone.now, verbose_name="Fecha de Venta")
-    articulo = models.ForeignKey(Inventario, on_delete=models.PROTECT, verbose_name="Artículo")
-    cantidad = models.PositiveIntegerField(verbose_name="Cantidad")
-    precio_unitario = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Precio Unitario")
-    precio_total = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Precio Total")
-    cliente = models.ForeignKey(Cliente, on_delete=models.SET_NULL, null=True, related_name='ventas', verbose_name="Cliente")
+    cliente = models.ForeignKey(Cliente, on_delete=models.SET_NULL, null=True, blank=True, related_name='ventas', verbose_name="Cliente")
+    empleado = models.ForeignKey('Empleado', on_delete=models.SET_NULL, null=True, blank=True, related_name='ventas', verbose_name="Empleado")
+    descuento = models.DecimalField(max_digits=5, decimal_places=2, default=0, verbose_name="Descuento (%)")
+    subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="Subtotal")
+    total = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="Total")
+    notas = models.TextField(blank=True, verbose_name="Notas")
 
     class Meta:
         verbose_name = "Venta"
         verbose_name_plural = "Ventas"
         ordering = ['-fecha_venta']
-
-    def clean(self):
-        if self.articulo and self.cantidad > self.articulo.cantidad:
-            raise ValidationError(f"No hay suficiente stock para {self.articulo}. Stock disponible: {self.articulo.cantidad}")
-        if self.cantidad <= 0:
-            raise ValidationError("La cantidad debe ser mayor que cero.")
 
     def save(self, *args, **kwargs):
         self.tipo = 'ventas'
@@ -254,192 +302,172 @@ class Venta(Servicio):
             last = Venta.objects.order_by('-id').first()
             numero = int(last.codigo.split('-')[1]) + 1 if last else 1
             self.codigo = f"VEN-{numero:03d}"
-        # Establecer precio_unitario desde Inventario
-        self.precio_unitario = self.articulo.precio
-        # Calcular precio_total
-        self.precio_total = self.cantidad * self.precio_unitario
-        self.clean()
-        if self.pk:  # Edición
-            original = Venta.objects.get(pk=self.pk)
-            diferencia = self.cantidad - original.cantidad
-            if diferencia != 0:
-                self.articulo.cantidad -= diferencia
-                self.articulo.save()
-        else:  # Creación
-            self.articulo.cantidad -= self.cantidad
-            self.articulo.save()
+        super().save(*args, **kwargs)
+
+    def recalcular_totales(self):
+        from decimal import Decimal
+        self.subtotal = sum(item.subtotal for item in self.items.all())
+        self.total = self.subtotal * (1 - self.descuento / Decimal('100'))
+        Venta.objects.filter(pk=self.pk).update(subtotal=self.subtotal, total=self.total)
+
+    def __str__(self):
+        return f"Venta {self.codigo}"
+
+
+class VentaItem(models.Model):
+    venta = models.ForeignKey(Venta, on_delete=models.CASCADE, related_name='items')
+    articulo = models.ForeignKey(PrendaInventario, on_delete=models.PROTECT, verbose_name="Prenda")
+    cantidad = models.PositiveIntegerField(default=1, verbose_name="Cantidad")
+    precio_unitario = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Precio Unitario")
+    subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="Subtotal")
+
+    class Meta:
+        verbose_name = "Ítem de Venta"
+        verbose_name_plural = "Ítems de Venta"
+
+    def save(self, *args, **kwargs):
+        self.subtotal = self.cantidad * self.precio_unitario
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"Venta {self.codigo} - {self.articulo}"
+        return f"{self.articulo} × {self.cantidad}"
+
+
 class Confeccion(models.Model):
     TIPO_PRENDA_CHOICES = [
-        ('pantalon', 'Pantalón'),
-        ('chaleco', 'Chaleco'),
-        ('saco', 'Saco'),
-        ('saco_mujer', 'Saco – Mujer'),
-        ('chaleco_mujer', 'Chaleco – Mujer'),
+        ('pantalon',     'Pantalón'),
+        ('chaleco',      'Chaleco'),
+        ('saco',         'Saco'),
+        ('saco_mujer',   'Saco – Mujer'),
+        ('chaleco_mujer','Chaleco – Mujer'),
     ]
-    
     ESTADO_CHOICES = [
-        ('pendiente', 'Pendiente'),
+        ('pendiente',  'Pendiente'),
         ('en_proceso', 'En Proceso'),
-        ('entregado', 'Entregado'),
+        ('entregado',  'Entregado'),
     ]
-    
-    codigo = models.CharField(max_length=20, unique=True)
+
+    codigo       = models.CharField(max_length=20, unique=True, blank=True)
     fecha_inicio = models.DateField(default=timezone.now)
-    tipo_prenda = models.CharField(max_length=20, choices=TIPO_PRENDA_CHOICES)
-    color = models.CharField(max_length=50)
-    modelo = models.CharField(max_length=100)
-    cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, null=True, blank=True)
-    empleado = models.ForeignKey(Empleado, on_delete=models.PROTECT, null=True, blank=True)
-    observaciones = models.TextField(blank=True)
-    
-    # Medidas para Pantalón
-    pantalon_largo_total = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    pantalon_contorno_cintura = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    pantalon_contorno_cadera = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    pantalon_largo_entrepierna = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    pantalon_contorno_pierna = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    pantalon_contorno_rodilla = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    pantalon_contorno_bota = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    pantalon_tiro_delantero = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    pantalon_tiro_trasero = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    
-    # Medidas para Chaleco
-    chaleco_contorno_busto = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    chaleco_contorno_cintura = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    chaleco_contorno_cadera = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    chaleco_largo_talle = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    chaleco_largo_total = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    chaleco_altura_botones = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    
-    # Medidas para Saco
-    saco_contorno_busto = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    saco_contorno_cintura = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    saco_contorno_cadera = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    saco_largo_talle = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    saco_largo_total = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    saco_ancho_hombros = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    saco_ancho_espalda = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    saco_contorno_brazo = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    saco_largo_manga = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    saco_contorno_puno = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    
-    # Medidas para Saco – Mujer
-    saco_mujer_contorno_busto = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    saco_mujer_contorno_cintura = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    saco_mujer_contorno_cadera = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    saco_mujer_ancho_hombros = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    saco_mujer_ancho_espalda = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    saco_mujer_largo_talle = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    saco_mujer_largo_total = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    saco_mujer_altura_busto = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    saco_mujer_separacion_busto = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    saco_mujer_dif_talle = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    
-    # Medidas para Chaleco – Mujer
-    chaleco_mujer_contorno_busto = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    chaleco_mujer_contorno_cintura = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    chaleco_mujer_contorno_cadera = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    chaleco_mujer_largo_talle = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    chaleco_mujer_largo_total = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    chaleco_mujer_altura_busto = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    chaleco_mujer_separacion_busto = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    chaleco_mujer_largo_delantero = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    
-    # Pagos y Fechas
-    precio = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    adelanto = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    saldo = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    color        = models.CharField(max_length=50)
+    modelo       = models.CharField(max_length=100)
+    cliente      = models.ForeignKey(Cliente, on_delete=models.PROTECT, null=True, blank=True)
+    empleado     = models.ForeignKey(Empleado, on_delete=models.PROTECT, null=True, blank=True)
+    observaciones= models.TextField(blank=True)
+    precio       = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    adelanto     = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    saldo        = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     fecha_prueba = models.DateField(null=True, blank=True)
-    fecha_entrega = models.DateField(null=True, blank=True)
-    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='pendiente')
-    
-    def clean(self):
-        if self.adelanto > self.precio:
-            raise ValidationError("El adelanto no puede ser mayor que el precio.")
-        if self.saldo != self.precio - self.adelanto:
-            raise ValidationError("El saldo debe ser igual al precio menos el adelanto.")
-        if self.fecha_prueba and self.fecha_inicio and self.fecha_prueba < self.fecha_inicio:
-            raise ValidationError("La fecha de prueba no puede ser anterior a la fecha de confección.")
-        if self.fecha_entrega and self.fecha_prueba and self.fecha_entrega < self.fecha_prueba:
-            raise ValidationError("La fecha de entrega no puede ser anterior a la fecha de prueba.")
-        
-        # Validar medidas según tipo_prenda
-        medidas_requeridas = {
-            'pantalon': [
-                'pantalon_largo_total', 'pantalon_contorno_cintura', 'pantalon_contorno_cadera',
-                'pantalon_largo_entrepierna', 'pantalon_contorno_pierna', 'pantalon_contorno_rodilla',
-                'pantalon_contorno_bota', 'pantalon_tiro_delantero', 'pantalon_tiro_trasero'
-            ],
-            'chaleco': [
-                'chaleco_contorno_busto', 'chaleco_contorno_cintura', 'chaleco_contorno_cadera',
-                'chaleco_largo_talle', 'chaleco_largo_total', 'chaleco_altura_botones'
-            ],
-            'saco': [
-                'saco_contorno_busto', 'saco_contorno_cintura', 'saco_contorno_cadera',
-                'saco_largo_talle', 'saco_largo_total', 'saco_ancho_hombros',
-                'saco_ancho_espalda', 'saco_contorno_brazo', 'saco_largo_manga', 'saco_contorno_puno'
-            ],
-            'saco_mujer': [
-                'saco_mujer_contorno_busto', 'saco_mujer_contorno_cintura', 'saco_mujer_contorno_cadera',
-                'saco_mujer_ancho_hombros', 'saco_mujer_ancho_espalda', 'saco_mujer_largo_talle',
-                'saco_mujer_largo_total', 'saco_mujer_altura_busto', 'saco_mujer_separacion_busto',
-                'saco_mujer_dif_talle'
-            ],
-            'chaleco_mujer': [
-                'chaleco_mujer_contorno_busto', 'chaleco_mujer_contorno_cintura', 'chaleco_mujer_contorno_cadera',
-                'chaleco_mujer_largo_talle', 'chaleco_mujer_largo_total', 'chaleco_mujer_altura_busto',
-                'chaleco_mujer_separacion_busto', 'chaleco_mujer_largo_delantero'
-            ]
-        }
-        
-        for tipo, campos in medidas_requeridas.items():
-            if self.tipo_prenda == tipo:
-                for campo in campos:
-                    if getattr(self, campo) is None:
-                        raise ValidationError(f"El campo {campo} es requerido para {tipo}.")
-            else:
-                for campo in campos:
-                    if getattr(self, campo) is not None:
-                        raise ValidationError(f"El campo {campo} no debe estar lleno para {self.tipo_prenda}.")
-    
+    fecha_entrega= models.DateField(null=True, blank=True)
+    estado       = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='pendiente')
+    creado       = models.DateTimeField(auto_now_add=True, verbose_name="Fecha de Creación")
+
+    class Meta:
+        verbose_name = "Confección"
+        verbose_name_plural = "Confecciones"
+        ordering = ['-creado']
+
+    @property
+    def tipos_prenda_display(self):
+        return ', '.join(item.get_tipo_prenda_display() for item in self.items.all())
+
+    def save(self, *args, **kwargs):
+        if not self.codigo:
+            last = Confeccion.objects.order_by('-id').first()
+            numero = int(last.codigo.split('-')[1]) + 1 if last and last.codigo and '-' in last.codigo else 1
+            self.codigo = f"CONF-{numero:03d}"
+        self.saldo = self.precio - self.adelanto
+        super().save(*args, **kwargs)
+
     def __str__(self):
-        return f"{self.codigo} - {self.get_tipo_prenda_display()}"
-    
+        return f"{self.codigo} - {self.cliente or 'Sin cliente'}"
+
+
+class ConfeccionItem(models.Model):
+    TIPO_PRENDA_CHOICES = Confeccion.TIPO_PRENDA_CHOICES
+
+    confeccion = models.ForeignKey(Confeccion, on_delete=models.CASCADE, related_name='items')
+    tipo_prenda = models.CharField(max_length=20, choices=TIPO_PRENDA_CHOICES)
+
+    # Pantalón
+    pantalon_largo_total        = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    pantalon_contorno_cintura   = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    pantalon_contorno_cadera    = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    pantalon_largo_entrepierna  = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    pantalon_contorno_pierna    = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    pantalon_contorno_rodilla   = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    pantalon_contorno_bota      = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    pantalon_tiro_delantero     = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    pantalon_tiro_trasero       = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+
+    # Chaleco
+    chaleco_contorno_busto   = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    chaleco_contorno_cintura = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    chaleco_contorno_cadera  = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    chaleco_largo_talle      = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    chaleco_largo_total      = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    chaleco_altura_botones   = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+
+    # Saco
+    saco_contorno_busto   = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    saco_contorno_cintura = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    saco_contorno_cadera  = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    saco_largo_talle      = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    saco_largo_total      = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    saco_ancho_hombros    = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    saco_ancho_espalda    = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    saco_contorno_brazo   = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    saco_largo_manga      = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    saco_contorno_puno    = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+
+    # Saco – Mujer
+    saco_mujer_contorno_busto    = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    saco_mujer_contorno_cintura  = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    saco_mujer_contorno_cadera   = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    saco_mujer_ancho_hombros     = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    saco_mujer_ancho_espalda     = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    saco_mujer_largo_talle       = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    saco_mujer_largo_total       = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    saco_mujer_altura_busto      = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    saco_mujer_separacion_busto  = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    saco_mujer_dif_talle         = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+
+    # Chaleco – Mujer
+    chaleco_mujer_contorno_busto   = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    chaleco_mujer_contorno_cintura = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    chaleco_mujer_contorno_cadera  = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    chaleco_mujer_largo_talle      = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    chaleco_mujer_largo_total      = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    chaleco_mujer_altura_busto     = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    chaleco_mujer_separacion_busto = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    chaleco_mujer_largo_delantero  = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+
+    def __str__(self):
+        return self.get_tipo_prenda_display()
+
+
 class Alquiler(Servicio):
     ESTADO_OPCIONES = [
         ('alquilado', 'Alquilado'),
         ('devuelto', 'Devuelto'),
     ]
-    
-    codigo = models.CharField(max_length=20, unique=True, verbose_name="Código", help_text="Formato: ALQ-001")
+
+    codigo = models.CharField(max_length=20, unique=True, blank=True, verbose_name="Código")
     fecha_alquiler = models.DateField(default=timezone.now, verbose_name="Fecha de Alquiler")
-    articulo = models.ForeignKey(Inventario, on_delete=models.PROTECT, verbose_name="Artículo")
-    cantidad = models.PositiveIntegerField(verbose_name="Cantidad")
-    costo_alquiler = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0.01)], verbose_name="Costo de Alquiler")
     fecha_devolucion = models.DateField(verbose_name="Fecha de Devolución")
     estado = models.CharField(max_length=20, choices=ESTADO_OPCIONES, default='alquilado', verbose_name="Estado")
-    cliente = models.ForeignKey(Cliente, on_delete=models.SET_NULL, null=True, related_name='alquileres', verbose_name="Cliente")
+    cliente = models.ForeignKey(Cliente, on_delete=models.SET_NULL, null=True, blank=True, related_name='alquileres', verbose_name="Cliente")
+    empleado = models.ForeignKey(Empleado, on_delete=models.SET_NULL, null=True, blank=True, related_name='alquileres', verbose_name="Empleado")
+    descuento = models.DecimalField(max_digits=5, decimal_places=2, default=0, verbose_name="Descuento (%)")
+    subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="Subtotal")
+    total = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="Total")
     garantia = models.TextField(blank=True, verbose_name="Garantía")
+    notas = models.TextField(blank=True, verbose_name="Notas")
 
     class Meta:
         verbose_name = "Alquiler"
         verbose_name_plural = "Alquileres"
         ordering = ['-fecha_alquiler']
-
-    def clean(self):
-        if self.cantidad <= 0:
-            raise ValidationError("La cantidad debe ser mayor que cero.")
-        if self.fecha_devolucion <= self.fecha_alquiler:
-            raise ValidationError("La fecha de devolución debe ser posterior a la fecha de alquiler.")
-        if self.articulo:
-            if self.articulo.estado == 'BAJ':
-                raise ValidationError(f"El artículo {self.articulo} está dado de baja y no puede alquilarse.")
-            if self.cantidad > self.articulo.cantidad:
-                raise ValidationError(f"No hay suficiente stock para {self.articulo}. Stock disponible: {self.articulo.cantidad}")
 
     def save(self, *args, **kwargs):
         self.tipo = 'alquiler'
@@ -447,42 +475,49 @@ class Alquiler(Servicio):
             last = Alquiler.objects.order_by('-id').first()
             numero = int(last.codigo.split('-')[1]) + 1 if last else 1
             self.codigo = f"ALQ-{numero:03d}"
-        self.clean()
-        if self.pk:  # Edición
-            original = Alquiler.objects.get(pk=self.pk)
-            if original.estado != self.estado:
-                if self.estado == 'devuelto':
-                    self.articulo.cantidad += self.cantidad
-                    self.articulo.save()
-                elif original.estado == 'devuelto' and self.estado == 'alquilado':
-                    self.articulo.cantidad -= self.cantidad
-                    self.articulo.save()
-            else:
-                diferencia = self.cantidad - original.cantidad
-                if diferencia != 0 and self.estado == 'alquilado':
-                    self.articulo.cantidad -= diferencia
-                    self.articulo.save()
-        else:  # Creación
-            if self.estado == 'alquilado':
-                self.articulo.cantidad -= self.cantidad
-                self.articulo.save()
+        super().save(*args, **kwargs)
+
+    def recalcular_totales(self):
+        from decimal import Decimal
+        self.subtotal = sum(item.subtotal for item in self.items.all())
+        self.total = self.subtotal * (1 - self.descuento / Decimal('100'))
+        Alquiler.objects.filter(pk=self.pk).update(subtotal=self.subtotal, total=self.total)
+
+    def __str__(self):
+        return f"Alquiler {self.codigo}"
+
+
+class AlquilerItem(models.Model):
+    alquiler = models.ForeignKey(Alquiler, on_delete=models.CASCADE, related_name='items')
+    articulo = models.ForeignKey(PrendaInventario, on_delete=models.PROTECT, verbose_name="Prenda")
+    cantidad = models.PositiveIntegerField(default=1, verbose_name="Cantidad")
+    precio_unitario = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Precio Unitario")
+    subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="Subtotal")
+
+    class Meta:
+        verbose_name = "Ítem de Alquiler"
+        verbose_name_plural = "Ítems de Alquiler"
+
+    def save(self, *args, **kwargs):
+        self.subtotal = self.cantidad * self.precio_unitario
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"Alquiler {self.codigo} - {self.articulo}"
+        return f"{self.articulo} × {self.cantidad}"
+
 
 class Transaccion(models.Model):
     TIPO_TRANSACCION_CHOICES = [
         ('ingreso', 'Ingreso'),
         ('gasto', 'Gasto'),
     ]
-    
+
     TIPO_SERVICIO_CHOICES = [
         ('servicio_basico', 'Servicio Básico'),
         ('caja_chica', 'Caja Chica'),
         ('otros', 'Otros'),
     ]
-    
+
     codigo = models.CharField(max_length=20, unique=True, verbose_name="Código", help_text="Formato: TXN-001")
     tipo_transaccion = models.CharField(max_length=10, choices=TIPO_TRANSACCION_CHOICES, default='ingreso', verbose_name="Tipo de Transacción")
     descripcion = models.TextField(verbose_name="Descripción")
@@ -490,11 +525,12 @@ class Transaccion(models.Model):
     fecha = models.DateField(default=timezone.now, verbose_name="Fecha")
     cantidad = models.PositiveIntegerField(verbose_name="Cantidad")
     monto = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0.01)], verbose_name="Monto")
+    creado = models.DateTimeField(auto_now_add=True, verbose_name="Fecha de Creación")
 
     class Meta:
         verbose_name = "Transacción"
         verbose_name_plural = "Transacciones"
-        ordering = ['-fecha']
+        ordering = ['-creado']
 
     def clean(self):
         if not self.descripcion:
@@ -514,3 +550,57 @@ class Transaccion(models.Model):
 
     def __str__(self):
         return f"Transacción {self.codigo} - {self.descripcion[:50]}"
+
+
+class OrdenProduccion(models.Model):
+    ESTADO_CHOICES = [
+        ('corte',     'En Corte'),
+        ('costura',   'En Costura'),
+        ('terminado', 'Terminado'),
+    ]
+
+    codigo = models.CharField(max_length=20, unique=True, blank=True, verbose_name="Código")
+    descripcion = models.TextField(verbose_name="Descripción")
+    confeccion = models.ForeignKey(
+        Confeccion, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='ordenes_produccion', verbose_name="Confección asociada",
+    )
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='corte', verbose_name="Estado")
+    fecha_inicio = models.DateField(default=timezone.now, verbose_name="Fecha de Inicio")
+    fecha_estimada = models.DateField(null=True, blank=True, verbose_name="Fecha Estimada")
+    empleado = models.ForeignKey(
+        Empleado, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='ordenes_produccion', verbose_name="Responsable",
+    )
+    notas = models.TextField(blank=True, verbose_name="Notas")
+    creado = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Orden de Producción"
+        verbose_name_plural = "Órdenes de Producción"
+        ordering = ['-creado']
+
+    ESTADO_SIGUIENTE = {'corte': 'costura', 'costura': 'terminado'}
+
+    def save(self, *args, **kwargs):
+        if not self.codigo:
+            last = OrdenProduccion.objects.order_by('-id').first()
+            numero = int(last.codigo.split('-')[1]) + 1 if last else 1
+            self.codigo = f"PROD-{numero:03d}"
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Orden {self.codigo}"
+
+
+class InsumoCortado(models.Model):
+    orden = models.ForeignKey(OrdenProduccion, on_delete=models.CASCADE, related_name='insumos')
+    insumo = models.ForeignKey(Insumo, on_delete=models.PROTECT, verbose_name="Insumo")
+    cantidad = models.DecimalField(max_digits=10, decimal_places=3, verbose_name="Cantidad usada")
+
+    class Meta:
+        verbose_name = "Insumo Utilizado"
+        verbose_name_plural = "Insumos Utilizados"
+
+    def __str__(self):
+        return f"{self.insumo} × {self.cantidad}"

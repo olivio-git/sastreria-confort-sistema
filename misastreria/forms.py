@@ -1,30 +1,55 @@
 from django import forms
-from .models import Empleado, Cliente, Reparacion, Venta, Confeccion, Alquiler, Transaccion, Inventario, Permiso, Falta, BajaInventario
-from django.forms import DateInput
-import re
+from django.utils.safestring import mark_safe
+from .models import Empleado, Cliente, Reparacion, Venta, VentaItem, Confeccion, ConfeccionItem, Alquiler, AlquilerItem, Transaccion, PrendaInventario, Insumo, Permiso, Falta, OrdenProduccion, InsumoCortado
+from django.forms import DateInput, inlineformset_factory
+
+
+class BolivianPhoneWidget(forms.TextInput):
+    def render(self, name, value, attrs=None, renderer=None):
+        if value and str(value).startswith('+591'):
+            value = str(value)[4:]
+        attrs = attrs or {}
+        attrs.setdefault('class', 'form-control')
+        attrs.setdefault('placeholder', '71234567')
+        attrs.setdefault('inputmode', 'numeric')
+        attrs.setdefault('pattern', '[0-9]+')
+        input_html = super().render(name, value, attrs, renderer)
+        return mark_safe(f'<div class="input-group"><span class="input-group-text">+591</span>{input_html}</div>')
+
+
 class EmpleadoForm(forms.ModelForm):
     class Meta:
         model = Empleado
-        fields = ['codigo', 'ci', 'nombres', 'apellido_paterno', 'apellido_materno', 'celular', 'tipo_contrato', 'fecha_ingreso', 'fecha_baja', 'activo']
+        fields = ['ci', 'nombres', 'apellido_paterno', 'apellido_materno', 'celular', 'tipo_contrato', 'fecha_ingreso', 'fecha_baja']
         widgets = {
-            'codigo': forms.TextInput(attrs={'class': 'form-control'}),
             'ci': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Ej: 12345678'}),
             'nombres': forms.TextInput(attrs={'class': 'form-control'}),
             'apellido_paterno': forms.TextInput(attrs={'class': 'form-control'}),
             'apellido_materno': forms.TextInput(attrs={'class': 'form-control'}),
-            'celular': forms.TextInput(attrs={'class': 'form-control'}),
+            'celular': BolivianPhoneWidget(),
             'tipo_contrato': forms.Select(attrs={'class': 'form-select'}),
-            'fecha_ingreso': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
-            'fecha_baja': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
-            'activo': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'fecha_ingreso': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}, format='%Y-%m-%d'),
+            'fecha_baja': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}, format='%Y-%m-%d'),
         }
+        labels = {
+            'fecha_baja': 'Fecha de Despido / Baja',
+        }
+        help_texts = {
+            'fecha_baja': 'Completar solo si el empleado ya no trabaja aquí. Deja en blanco si sigue activo.',
+        }
+
+    def clean_celular(self):
+        celular = self.cleaned_data.get('celular', '').strip()
+        if celular and not celular.startswith('+'):
+            celular = '+591' + celular
+        return celular
 
 class PermisoForm(forms.ModelForm):
     class Meta:
         model = Permiso
         fields = ['fecha_permiso', 'motivo']
         widgets = {
-            'fecha_permiso': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
+            'fecha_permiso': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}, format='%Y-%m-%d'),
             'motivo': forms.TextInput(attrs={'class': 'form-control'}),
         }
 
@@ -33,7 +58,7 @@ class FaltaForm(forms.ModelForm):
         model = Falta
         fields = ['fecha_falta', 'motivo']
         widgets = {
-            'fecha_falta': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
+            'fecha_falta': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}, format='%Y-%m-%d'),
             'motivo': forms.TextInput(attrs={'class': 'form-control'}),
         }
 
@@ -54,24 +79,29 @@ class ClienteForm(forms.ModelForm):
             'nombres': forms.TextInput(attrs={'class': 'form-control'}),
             'apellido_paterno': forms.TextInput(attrs={'class': 'form-control'}),
             'apellido_materno': forms.TextInput(attrs={'class': 'form-control'}),
-            'celular': forms.TextInput(attrs={'class': 'form-control'}),
+            'celular': BolivianPhoneWidget(),
             'notas': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
         }
+
+    def clean_celular(self):
+        celular = self.cleaned_data.get('celular', '').strip()
+        if celular and not celular.startswith('+'):
+            celular = '+591' + celular
+        return celular
 
 class ReparacionForm(forms.ModelForm):
     class Meta:
         model = Reparacion
         fields = [
-            'codigo', 'tipo_prenda', 'otro_prenda', 'tipo_reparacion', 'otro_reparacion',
+            'tipo_prenda', 'otro_prenda', 'tipo_reparacion', 'otro_reparacion',
             'costo', 'detalles', 'fecha_entrega', 'empleado', 'cliente', 'estado'
         ]
         widgets = {
-            'fecha_entrega': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}),
+            'fecha_entrega': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
             'detalles': forms.Textarea(attrs={'rows': 3, 'class': 'form-control'}),
             'tipo_prenda': forms.Select(attrs={'class': 'form-control'}),
             'tipo_reparacion': forms.Select(attrs={'class': 'form-control'}),
             'estado': forms.Select(attrs={'class': 'form-control'}),
-            'codigo': forms.TextInput(attrs={'class': 'form-control'}),
             'otro_prenda': forms.TextInput(attrs={'class': 'form-control'}),
             'otro_reparacion': forms.TextInput(attrs={'class': 'form-control'}),
             'costo': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
@@ -110,40 +140,67 @@ class ReparacionForm(forms.ModelForm):
 class VentaForm(forms.ModelForm):
     class Meta:
         model = Venta
-        fields = ['codigo', 'fecha_venta', 'articulo', 'cantidad', 'cliente']
-        labels = {
-            'codigo': 'Código',
-            'fecha_venta': 'Fecha de Venta',
-            'articulo': 'Artículo',
-            'cantidad': 'Cantidad',
-            'cliente': 'Cliente',
-        }
+        fields = ['fecha_venta', 'cliente', 'empleado', 'descuento', 'notas']
         widgets = {
-            'fecha_venta': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}),
-            'articulo': forms.Select(attrs={'class': 'form-control'}),
-            'cantidad': forms.NumberInput(attrs={'class': 'form-control', 'min': '1'}),
-            'cliente': forms.Select(attrs={'class': 'form-control'}),
+            'fecha_venta': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
+            'descuento': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'min': '0', 'max': '100'}),
+            'notas': forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name, field in self.fields.items():
+            if 'class' not in field.widget.attrs:
+                is_select = isinstance(field.widget, (forms.Select, forms.SelectMultiple))
+                field.widget.attrs['class'] = 'form-select' if is_select else 'form-control'
 
     def clean(self):
         cleaned_data = super().clean()
-        cantidad = cleaned_data.get('cantidad')
-        articulo = cleaned_data.get('articulo')
-        codigo = cleaned_data.get('codigo')
-        if cantidad and cantidad <= 0:
-            self.add_error('cantidad', "La cantidad debe ser mayor que cero.")
-        if articulo and cantidad and cantidad > articulo.cantidad:
-            self.add_error('cantidad', f"No hay suficiente stock. Stock disponible: {articulo.cantidad}")
-        if codigo and not codigo.startswith('VEN-'):
-            self.add_error('codigo', "El código debe comenzar con 'VEN-'.")
+        descuento = cleaned_data.get('descuento')
+        if descuento is not None and not (0 <= descuento <= 100):
+            self.add_error('descuento', "El descuento debe estar entre 0 y 100.")
         return cleaned_data
+
+
+class VentaItemForm(forms.ModelForm):
+    class Meta:
+        model = VentaItem
+        fields = ['articulo', 'cantidad', 'precio_unitario']
+        widgets = {
+            'articulo':        forms.Select(attrs={'class': 'form-select item-articulo'}),
+            'cantidad':        forms.NumberInput(attrs={'class': 'form-control item-cantidad', 'min': '1'}),
+            'precio_unitario': forms.NumberInput(attrs={'class': 'form-control item-precio', 'step': '0.01', 'min': '0'}),
+        }
 
 
 class ConfeccionForm(forms.ModelForm):
     class Meta:
         model = Confeccion
         fields = [
-            'codigo', 'fecha_inicio', 'tipo_prenda', 'color', 'modelo', 'cliente', 'empleado', 'observaciones',
+            'fecha_inicio', 'color', 'modelo', 'cliente', 'empleado', 'observaciones',
+            'precio', 'adelanto', 'saldo', 'fecha_prueba', 'fecha_entrega', 'estado',
+        ]
+        widgets = {
+            'fecha_inicio': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
+            'fecha_prueba': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
+            'fecha_entrega': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
+            'observaciones': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
+            'saldo': forms.NumberInput(attrs={'class': 'form-control', 'readonly': 'readonly'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name, field in self.fields.items():
+            if 'class' not in field.widget.attrs:
+                is_select = isinstance(field.widget, (forms.Select, forms.SelectMultiple))
+                field.widget.attrs['class'] = 'form-select' if is_select else 'form-control'
+
+
+class ConfeccionItemForm(forms.ModelForm):
+    class Meta:
+        model = ConfeccionItem
+        fields = [
+            'tipo_prenda',
             'pantalon_largo_total', 'pantalon_contorno_cintura', 'pantalon_contorno_cadera',
             'pantalon_largo_entrepierna', 'pantalon_contorno_pierna', 'pantalon_contorno_rodilla',
             'pantalon_contorno_bota', 'pantalon_tiro_delantero', 'pantalon_tiro_trasero',
@@ -159,70 +216,84 @@ class ConfeccionForm(forms.ModelForm):
             'chaleco_mujer_contorno_busto', 'chaleco_mujer_contorno_cintura', 'chaleco_mujer_contorno_cadera',
             'chaleco_mujer_largo_talle', 'chaleco_mujer_largo_total', 'chaleco_mujer_altura_busto',
             'chaleco_mujer_separacion_busto', 'chaleco_mujer_largo_delantero',
-            'precio', 'adelanto', 'saldo', 'fecha_prueba', 'fecha_entrega', 'estado'
         ]
-        widgets = {
-            'fecha_inicio': forms.DateInput(attrs={'type': 'date'}),
-            'fecha_prueba': forms.DateInput(attrs={'type': 'date'}),
-            'fecha_entrega': forms.DateInput(attrs={'type': 'date'}),
-            'observaciones': forms.Textarea(attrs={'rows': 4}),
-        }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if not self.instance.pk:
-            ultimo = Confeccion.objects.order_by('-id').first()
-            numero = (ultimo.id + 1) if ultimo else 1
-            self.initial['codigo'] = f"CONF-{numero:03d}"
+        tp = self.fields['tipo_prenda']
+        tp.widget.attrs.update({'class': 'form-select form-select-sm tipo-prenda-select'})
+        tp.choices = [('', '— Tipo de prenda —')] + list(ConfeccionItem.TIPO_PRENDA_CHOICES)
+        tp.required = False
+        for name in list(self.fields.keys()):
+            if name == 'tipo_prenda':
+                continue
+            self.fields[name].widget = forms.NumberInput(attrs={
+                'class': 'form-control form-control-sm medida-input',
+                'step': '0.01',
+                'style': 'width:5.5rem',
+            })
+            self.fields[name].required = False
 
-    def clean_codigo(self):
-        codigo = self.cleaned_data['codigo']
-        if not re.match(r'^CONF-\d{3}$', codigo):
-            raise forms.ValidationError("El código debe tener el formato CONF-XXX (tres dígitos).")
-        return codigo
 
+ConfeccionItemFormSet = inlineformset_factory(
+    Confeccion, ConfeccionItem,
+    form=ConfeccionItemForm,
+    extra=1,
+    can_delete=True,
+)
 
 class AlquilerForm(forms.ModelForm):
     class Meta:
         model = Alquiler
-        fields = ['codigo', 'fecha_alquiler', 'articulo', 'cantidad', 'costo_alquiler', 'fecha_devolucion', 'estado', 'cliente', 'garantia']
-        labels = {
-            'codigo': 'Código',
-            'fecha_alquiler': 'Fecha de Alquiler',
-            'articulo': 'Artículo',
-            'cantidad': 'Cantidad',
-            'costo_alquiler': 'Costo de Alquiler',
-            'fecha_devolucion': 'Fecha de Devolución',
-            'estado': 'Estado',
-            'cliente': 'Cliente',
-            'garantia': 'Garantía',
-        }
+        fields = ['fecha_alquiler', 'fecha_devolucion', 'estado', 'cliente', 'empleado', 'descuento', 'garantia', 'notas']
         widgets = {
-            'codigo': forms.TextInput(attrs={'class': 'form-control', 'readonly': 'readonly'}),
-            'fecha_alquiler': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}),
-            'articulo': forms.Select(attrs={'class': 'form-control'}),
-            'cantidad': forms.NumberInput(attrs={'class': 'form-control', 'min': 1}),
-            'costo_alquiler': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
-            'fecha_devolucion': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}),
-            'estado': forms.Select(attrs={'class': 'form-control'}),
-            'cliente': forms.Select(attrs={'class': 'form-control'}),
-            'garantia': forms.Textarea(attrs={'class': 'form-control', 'rows': 4}),
+            'fecha_alquiler':   forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
+            'fecha_devolucion': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
+            'estado':    forms.Select(attrs={'class': 'form-select'}),
+            'descuento': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'min': '0', 'max': '100'}),
+            'garantia': forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+            'notas':    forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
         }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields['articulo'].queryset = Inventario.objects.filter(estado='ACT', cantidad__gt=0)
-        if not self.instance.pk:
-            last = Alquiler.objects.order_by('-id').first()
-            numero = int(last.codigo.split('-')[1]) + 1 if last else 1
-            self.initial['codigo'] = f"ALQ-{numero:03d}"
+        for name, field in self.fields.items():
+            if 'class' not in field.widget.attrs:
+                is_select = isinstance(field.widget, (forms.Select, forms.SelectMultiple))
+                field.widget.attrs['class'] = 'form-select' if is_select else 'form-control'
+
+    def clean(self):
+        cleaned_data = super().clean()
+        fecha_alquiler   = cleaned_data.get('fecha_alquiler')
+        fecha_devolucion = cleaned_data.get('fecha_devolucion')
+        if fecha_alquiler and fecha_devolucion and fecha_devolucion <= fecha_alquiler:
+            self.add_error('fecha_devolucion', "La fecha de devolución debe ser posterior a la fecha de alquiler.")
+        descuento = cleaned_data.get('descuento')
+        if descuento is not None and not (0 <= descuento <= 100):
+            self.add_error('descuento', "El descuento debe estar entre 0 y 100.")
+        return cleaned_data
+
+
+class AlquilerItemForm(forms.ModelForm):
+    class Meta:
+        model = AlquilerItem
+        fields = ['articulo', 'cantidad', 'precio_unitario']
+        widgets = {
+            'articulo':       forms.Select(attrs={'class': 'form-select item-articulo'}),
+            'cantidad':       forms.NumberInput(attrs={'class': 'form-control item-cantidad', 'min': '1'}),
+            'precio_unitario':forms.NumberInput(attrs={'class': 'form-control item-precio', 'step': '0.01', 'min': '0'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['articulo'].queryset = PrendaInventario.objects.filter(tipo='alquiler', estado='ACT')
+        self.fields['articulo'].empty_label = '— Seleccionar prenda —'
 
 class TransaccionForm(forms.ModelForm):
     class Meta:
         model = Transaccion
-        fields = ['codigo', 'tipo_transaccion', 'descripcion', 'tipo_servicio', 'fecha', 'cantidad', 'monto']
+        fields = ['tipo_transaccion', 'descripcion', 'tipo_servicio', 'fecha', 'cantidad', 'monto']
         labels = {
-            'codigo': 'Código',
             'tipo_transaccion': 'Tipo de Transacción',
             'descripcion': 'Descripción',
             'tipo_servicio': 'Tipo de Servicio',
@@ -231,46 +302,45 @@ class TransaccionForm(forms.ModelForm):
             'monto': 'Monto',
         }
         widgets = {
-            'codigo': forms.TextInput(attrs={'class': 'form-control', 'readonly': 'readonly'}),
             'tipo_transaccion': forms.Select(attrs={'class': 'form-control'}),
             'descripcion': forms.Textarea(attrs={'class': 'form-control', 'rows': 4}),
             'tipo_servicio': forms.Select(attrs={'class': 'form-control'}),
-            'fecha': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}),
+            'fecha': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
             'cantidad': forms.NumberInput(attrs={'class': 'form-control', 'min': 1}),
             'monto': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
         }
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if not self.instance.pk:
-            last = Transaccion.objects.order_by('-id').first()
-            numero = int(last.codigo.split('-')[1]) + 1 if last else 1
-            self.initial['codigo'] = f"TXN-{numero:03d}"
-
-class InventarioForm(forms.ModelForm):
+class PrendaInventarioForm(forms.ModelForm):
     class Meta:
-        model = Inventario
-        fields = ['codigo', 'articulo', 'cantidad', 'costo', 'precio', 'fecha_ingreso', 'categoria', 'estado']
+        model = PrendaInventario
+        fields = [
+            'tipo', 'nombre', 'modelo', 'talla', 'color', 'codigo_referencia',
+            'condicion', 'cantidad', 'stock_minimo', 'precio', 'estado', 'notas',
+        ]
         labels = {
-            'codigo': 'Código',
-            'articulo': 'Artículo',
-            'cantidad': 'Cantidad',
-            'costo': 'Costo (Opcional)',
+            'tipo': 'Tipo',
+            'nombre': 'Nombre',
+            'modelo': 'Modelo / Línea',
+            'talla': 'Talla',
+            'color': 'Color',
+            'codigo_referencia': 'Código de Referencia',
+            'condicion': 'Condición',
+            'cantidad': 'Cantidad en Stock',
+            'stock_minimo': 'Stock Mínimo',
             'precio': 'Precio',
-            'fecha_ingreso': 'Fecha de Ingreso',
-            'categoria': 'Categoría',
             'estado': 'Estado',
+            'notas': 'Notas',
         }
         widgets = {
-            'fecha_ingreso': forms.DateInput(attrs={'type': 'date'}),
-            'codigo': forms.TextInput(attrs={'class': 'form-control'}),
-            'articulo': forms.TextInput(attrs={'class': 'form-control'}),
-            'cantidad': forms.NumberInput(attrs={'class': 'form-control'}),
-            'costo': forms.NumberInput(attrs={'class': 'form-control'}),
-            'precio': forms.NumberInput(attrs={'class': 'form-control'}),
-            'categoria': forms.Select(attrs={'class': 'form-control'}),
-            'estado': forms.TextInput(attrs={'class': 'form-control', 'readonly': 'readonly'}),
+            'notas': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name, field in self.fields.items():
+            if 'class' not in field.widget.attrs:
+                is_select = isinstance(field.widget, (forms.Select, forms.SelectMultiple))
+                field.widget.attrs['class'] = 'form-select' if is_select else 'form-control'
 
     def clean(self):
         cleaned_data = super().clean()
@@ -280,35 +350,39 @@ class InventarioForm(forms.ModelForm):
         return cleaned_data
 
 
-
-
-class BajaInventarioForm(forms.ModelForm):
+class InsumoForm(forms.ModelForm):
     class Meta:
-        model = BajaInventario
-        fields = ['cantidad', 'fecha_baja', 'motivo_baja']
+        model = Insumo
+        fields = [
+            'tipo_material', 'articulo', 'coleccion', 'color', 'codigo_referencia',
+            'tipo_tela', 'unidad_medida', 'cantidad', 'stock_minimo',
+            'precio_costo', 'estado', 'proveedor', 'notas',
+        ]
         labels = {
-            'cantidad': 'Cantidad a Dar de Baja',
-            'fecha_baja': 'Fecha de Baja',
-            'motivo_baja': 'Motivo de Baja',
+            'tipo_material': 'Tipo de Material',
+            'articulo': 'Artículo',
+            'coleccion': 'Colección / Cuaderno',
+            'color': 'Color',
+            'codigo_referencia': 'Código de Referencia',
+            'tipo_tela': 'Tipo de Tela',
+            'unidad_medida': 'Unidad de Medida',
+            'cantidad': 'Cantidad',
+            'stock_minimo': 'Stock Mínimo',
+            'precio_costo': 'Precio de Costo',
+            'estado': 'Estado',
+            'proveedor': 'Proveedor',
+            'notas': 'Notas',
         }
         widgets = {
-            'cantidad': forms.NumberInput(attrs={'class': 'form-control', 'min': 1}),
-            'fecha_baja': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}),
-            'motivo_baja': forms.Textarea(attrs={'class': 'form-control', 'rows': 4}),
+            'notas': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
         }
 
-    def clean(self):
-        cleaned_data = super().clean()
-        cantidad = cleaned_data.get('cantidad')
-        fecha_baja = cleaned_data.get('fecha_baja')
-        motivo_baja = cleaned_data.get('motivo_baja')
-        if not cantidad:
-            self.add_error('cantidad', "La cantidad a dar de baja es obligatoria.")
-        if not fecha_baja:
-            self.add_error('fecha_baja', "La fecha de baja es obligatoria.")
-        if not motivo_baja:
-            self.add_error('motivo_baja', "El motivo de baja es obligatorio.")
-        return cleaned_data
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name, field in self.fields.items():
+            if 'class' not in field.widget.attrs:
+                is_select = isinstance(field.widget, (forms.Select, forms.SelectMultiple))
+                field.widget.attrs['class'] = 'form-select' if is_select else 'form-control'
 
 class EmpleadoReporteForm(forms.Form):
     fecha_inicio = forms.DateField(required=False, label="Desde", widget=forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}))
@@ -382,3 +456,35 @@ class ReparacionReporteForm(forms.Form):
         required=False,
         widget=forms.Select(attrs={'class': 'form-select'}) # Usando form-select
     )
+
+
+class OrdenProduccionForm(forms.ModelForm):
+    class Meta:
+        model = OrdenProduccion
+        fields = ['descripcion', 'confeccion', 'fecha_inicio', 'fecha_estimada', 'empleado', 'notas']
+        widgets = {
+            'descripcion':    forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+            'fecha_inicio':   forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
+            'fecha_estimada': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
+            'notas':          forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name, field in self.fields.items():
+            if 'class' not in field.widget.attrs:
+                is_select = isinstance(field.widget, (forms.Select, forms.SelectMultiple))
+                field.widget.attrs['class'] = 'form-select' if is_select else 'form-control'
+        self.fields['confeccion'].required = False
+        self.fields['fecha_estimada'].required = False
+        self.fields['empleado'].required = False
+
+
+class InsumoCortadoForm(forms.ModelForm):
+    class Meta:
+        model = InsumoCortado
+        fields = ['insumo', 'cantidad']
+        widgets = {
+            'insumo':   forms.Select(attrs={'class': 'form-select item-insumo'}),
+            'cantidad': forms.NumberInput(attrs={'class': 'form-control item-cantidad', 'step': '0.001', 'min': '0.001'}),
+        }

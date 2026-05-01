@@ -28,6 +28,11 @@ DEBUG = False
 
 ALLOWED_HOSTS = ['sastreriaconfort.com', 'www.sastreriaconfort.com']
 
+CSRF_TRUSTED_ORIGINS = [
+    'https://sastreriaconfort.com',
+    'https://www.sastreriaconfort.com',
+]
+
 
 # Application definition
 
