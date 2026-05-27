@@ -1,57 +1,86 @@
 {% extends 'misastreria/base.html' %}
-{% block titulo %}Reporte de Días Trabajados{% endblock %}
+{% block titulo %}Reporte Días Trabajados{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'lista_empleados' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left"></i>Volver
+      </a>
+    </div>
+    <div class="col">
+      <h2 class="page-title"><i data-lucide="calendar" class="me-2 text-muted"></i>Reporte — Días Trabajados</h2>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
 {% block contenido %}
-<div class="container py-4" style="background-color: #f1f5f9;">
-    <h2 class="mb-4">Reporte de Días Trabajados - {{ month }}/{{ year }}</h2>
-    <form method="get" class="mb-4">
-        <div class="row">
-            <div class="col-md-3">
-                <label for="month" class="form-label">Mes</label>
-                <select name="month" id="month" class="form-control">
-                    {% for mes in meses %}
-                    <option value="{{ mes.valor }}" {% if mes.valor == month %}selected{% endif %}>{{ mes.nombre }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md-3">
-                <label for="year" class="form-label">Año</label>
-                <select name="year" id="year" class="form-control">
-                    {% for ano in anos %}
-                    <option value="{{ ano }}" {% if ano == year %}selected{% endif %}>{{ ano }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md-3 align-self-end">
-                <button type="submit" class="btn btn-primary" style="background-color: #2563eb; border-color: #2563eb;">Filtrar</button>
-            </div>
-        </div>
+<!-- Filtros -->
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <form method="get" class="row g-2 align-items-end">
+      <div class="col-12 col-sm-6 col-lg-3">
+        <label class="small mb-1 fw-semibold text-muted">Mes</label>
+        <select name="month" id="month" class="form-select form-select-sm">
+          {% for mes in meses %}
+          <option value="{{ mes.valor }}" {% if mes.valor == month %}selected{% endif %}>{{ mes.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-sm-6 col-lg-3">
+        <label class="small mb-1 fw-semibold text-muted">Año</label>
+        <select name="year" id="year" class="form-select form-select-sm">
+          {% for ano in anos %}
+          <option value="{{ ano }}" {% if ano == year %}selected{% endif %}>{{ ano }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-auto">
+        <button type="submit" class="btn btn-primary">
+          <i data-lucide="search"></i>Filtrar
+        </button>
+      </div>
     </form>
-    <table class="table table-striped">
-        <thead>
-            <tr>
-                <th>Empleado</th>
-                <th>Permisos</th>
-                <th>Faltas</th>
-                <th>Días Laborables</th>
-                <th>Días Trabajados</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for reporte in reportes %}
-            <tr>
-                <td>{{ reporte.empleado }}</td>
-                <td>{{ reporte.permisos }}</td>
-                <td>{{ reporte.faltas }}</td>
-                <td>{{ reporte.dias_laborables }}</td>
-                <td>{{ reporte.dias_trabajados }}</td>
-            </tr>
-            {% empty %}
-            <tr>
-                <td colspan="5">No hay empleados activos registrados.</td>
-            </tr>
-            {% endfor %}
-        </tbody>
+  </div>
+</div>
+
+<!-- Tabla de resultados -->
+<div class="card">
+  <div class="card-header d-flex align-items-center">
+    <span class="text-muted small">{{ month }}/{{ year }}</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table">
+      <thead>
+        <tr>
+          <th>Empleado</th>
+          <th class="text-center">Permisos</th>
+          <th class="text-center">Faltas</th>
+          <th class="text-center">Días Laborables</th>
+          <th class="text-center">Días Trabajados</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for reporte in reportes %}
+        <tr>
+          <td>{{ reporte.empleado }}</td>
+          <td class="text-center">{{ reporte.permisos }}</td>
+          <td class="text-center">{{ reporte.faltas }}</td>
+          <td class="text-center">{{ reporte.dias_laborables }}</td>
+          <td class="text-center"><strong>{{ reporte.dias_trabajados }}</strong></td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="5" class="text-center text-muted py-4">
+            <i data-lucide="users" style="width:2rem;height:2rem;opacity:.4" class="d-block mx-auto mb-2"></i>
+            No hay empleados activos registrados.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
     </table>
-    <a href="{% url 'lista_empleados' %}" class="btn btn-secondary mt-3">Volver a Lista de Empleados</a>
+  </div>
 </div>
 {% endblock %}

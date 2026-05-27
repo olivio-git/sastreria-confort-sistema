@@ -1,0 +1,336 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Kardex Financiero{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <div class="page-pretitle">Kardex Financiero</div>
+      <h2 class="page-title">
+        <i data-lucide="book-open" class="me-2 text-muted"></i>
+        Libro de Ingresos y Gastos
+      </h2>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+
+<!-- Filtros -->
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <form method="GET" action="{% url 'kardex_financiero' %}" class="row g-2 align-items-end">
+      <div class="col-12 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Desde</label>
+        <input type="date" name="desde" class="form-control form-control-sm" value="{{ desde }}">
+      </div>
+      <div class="col-12 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Hasta</label>
+        <input type="date" name="hasta" class="form-control form-control-sm" value="{{ hasta }}">
+      </div>
+      <div class="col-auto ms-auto d-flex gap-2 align-items-end">
+        <a href="{% url 'kardex_financiero' %}" class="btn btn-outline-secondary btn-sm">Limpiar</a>
+        <button type="submit" class="btn btn-primary btn-sm">
+          <i data-lucide="search" class="me-1"></i>Filtrar
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Banner informativo de migración -->
+<div class="alert alert-info mb-3">
+  <i data-lucide="info" class="me-2"></i>
+  Mostrando movimientos de caja desde <strong>{{ fecha_migracion|date:"d/m/Y" }}</strong>.
+  Los registros anteriores a esta fecha figuran en el historial de servicios.
+  <a href="{% url 'lista_movimientos_caja' %}?desde={{ desde }}&hasta={{ hasta }}" class="alert-link ms-2">
+    Ver movimientos en módulo de Caja
+  </a>
+</div>
+
+<!-- Totales -->
+<div class="card mb-3">
+  <div class="card-header">
+    <h3 class="card-title"><i data-lucide="calculator" class="me-2"></i>Resumen de totales</h3>
+  </div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-12 col-md-6 col-lg-4">
+        <div class="datagrid">
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Total Ingresos</div>
+            <div class="datagrid-content">
+              <span class="text-success fw-semibold">+ Bs. {{ total_ingresos|floatformat:2 }}</span>
+            </div>
+          </div>
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Total Egresos</div>
+            <div class="datagrid-content">
+              <span class="text-danger fw-semibold">− Bs. {{ total_egresos|floatformat:2 }}</span>
+            </div>
+          </div>
+          <div class="datagrid-item" style="border-top:2px solid var(--border);padding-top:.75rem">
+            <div class="datagrid-title fw-bold">Saldo Neto</div>
+            <div class="datagrid-content">
+              <span class="fw-bold {% if saldo >= 0 %}text-success{% else %}text-danger{% endif %}" style="font-size:1.1rem">
+                {% if saldo >= 0 %}+{% else %}−{% endif %} Bs. {{ saldo|floatformat:2 }}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Analytics charts -->
+{{ chart_daily|json_script:"chart-daily-data" }}
+{{ chart_donut_kardex|json_script:"chart-donut-kardex-data" }}
+
+<div class="row g-3 mb-3">
+  <div class="col-lg-8">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header border-0 pb-0">
+        <h6 class="card-title mb-0 fw-semibold text-muted">Flujo de caja por período</h6>
+      </div>
+      <div class="card-body">
+        {% if chart_daily %}
+          <div style="position:relative;height:200px">
+            <canvas id="dailyChart"></canvas>
+          </div>
+        {% else %}
+          <div class="d-flex align-items-center justify-content-center" style="height:200px">
+            <p class="text-muted mb-0"><i class="bi bi-bar-chart me-2"></i>Sin datos para el período</p>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header border-0 pb-0">
+        <h6 class="card-title mb-0 fw-semibold text-muted">Ingresos por concepto</h6>
+      </div>
+      <div class="card-body">
+        {% if chart_donut_kardex %}
+          <div style="position:relative;height:200px">
+            <canvas id="donutKardexChart"></canvas>
+          </div>
+        {% else %}
+          <div class="d-flex align-items-center justify-content-center" style="height:200px">
+            <p class="text-muted mb-0"><i class="bi bi-pie-chart me-2"></i>Sin datos</p>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Desglose por concepto -->
+{% if breakdown %}
+<div class="card mb-3">
+  <div class="card-header">
+    <h3 class="card-title">Desglose por Concepto</h3>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table">
+      <thead>
+        <tr>
+          <th>Concepto</th>
+          <th>Tipo</th>
+          <th class="text-end">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in breakdown %}
+        <tr class="{% if row.tipo == 'ingreso' %}table-success{% else %}table-danger{% endif %}" style="--bs-table-bg:{% if row.tipo == 'ingreso' %}rgba(16,185,129,.07){% else %}rgba(239,68,68,.07){% endif %}">
+          <td>{{ row.label }}</td>
+          <td>
+            <span class="badge-estado {% if row.tipo == 'ingreso' %}badge-entregado{% else %}badge-inactivo{% endif %}">
+              {{ row.tipo|capfirst }}
+            </span>
+          </td>
+          <td class="text-end fw-semibold {% if row.tipo == 'ingreso' %}text-success{% else %}text-danger{% endif %}">
+            Bs. {{ row.total|floatformat:2 }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<!-- Referencia de servicios (display only) -->
+<div class="row g-3">
+  <!-- Alquileres -->
+  {% if alquileres %}
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Alquileres del período</h3>
+        <span class="ms-auto text-muted small">{{ alquileres|length }} registro{{ alquileres|length|pluralize }}</span>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-vcenter card-table">
+          <thead>
+            <tr>
+              <th>Código</th>
+              <th>Cliente</th>
+              <th class="text-end">Total</th>
+              <th>Fecha</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for a in alquileres %}
+            <tr>
+              <td>
+                <a href="{% url 'editar_alquiler' a.pk %}" class="text-decoration-none">{{ a.codigo }}</a>
+              </td>
+              <td>{{ a.cliente|default:"—" }}</td>
+              <td class="text-end">Bs. {{ a.total|floatformat:2 }}</td>
+              <td>{{ a.fecha_alquiler|date:"d/m/Y" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Ventas -->
+  {% if ventas %}
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Ventas del período</h3>
+        <span class="ms-auto text-muted small">{{ ventas|length }} registro{{ ventas|length|pluralize }}</span>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-vcenter card-table">
+          <thead>
+            <tr>
+              <th>Código</th>
+              <th>Cliente</th>
+              <th class="text-end">Total</th>
+              <th>Fecha</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for v in ventas %}
+            <tr>
+              <td>
+                <a href="{% url 'editar_venta' v.pk %}" class="text-decoration-none">{{ v.codigo }}</a>
+              </td>
+              <td>{{ v.cliente|default:"—" }}</td>
+              <td class="text-end">Bs. {{ v.total|floatformat:2 }}</td>
+              <td>{{ v.fecha_venta|date:"d/m/Y" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Transacciones / Gastos Varios -->
+  {% if transacciones %}
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Gastos Varios del período</h3>
+        <span class="ms-auto text-muted small">{{ transacciones|length }} registro{{ transacciones|length|pluralize }}</span>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-vcenter card-table">
+          <thead>
+            <tr>
+              <th>Código</th>
+              <th>Tipo</th>
+              <th>Descripción</th>
+              <th class="text-end">Monto</th>
+              <th>Fecha</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for t in transacciones %}
+            <tr>
+              <td>{{ t.codigo }}</td>
+              <td>
+                <span class="badge-estado {% if t.tipo_transaccion == 'ingreso' %}badge-entregado{% else %}badge-pendiente{% endif %}">
+                  {{ t.get_tipo_transaccion_display }}
+                </span>
+              </td>
+              <td class="text-muted">{{ t.descripcion|truncatechars:60 }}</td>
+              <td class="text-end">Bs. {{ t.monto|floatformat:2 }}</td>
+              <td>{{ t.fecha|date:"d/m/Y" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+{% load static %}
+<script src="{% static 'js/chart.min.js' %}"></script>
+<script>
+// Hex values match CSS vars: --success #10b981, --danger #ef4444, --primary #2563eb
+// --warning #f59e0b, --info #06b6d4
+const dailyData = JSON.parse(document.getElementById('chart-daily-data').textContent);
+const donutKardexData = JSON.parse(document.getElementById('chart-donut-kardex-data').textContent);
+
+if (dailyData.length > 0) {
+  new Chart(document.getElementById('dailyChart'), {
+    type: 'bar',
+    data: {
+      labels: dailyData.map(d => d.label),
+      datasets: [
+        {
+          label: 'Ingresos',
+          data: dailyData.map(d => d.ingresos),
+          backgroundColor: '#10b981'
+        },
+        {
+          label: 'Egresos',
+          data: dailyData.map(d => d.egresos),
+          backgroundColor: '#ef4444'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'top' } },
+      scales: { y: { beginAtZero: true } }
+    }
+  });
+}
+
+if (donutKardexData.length > 0) {
+  new Chart(document.getElementById('donutKardexChart'), {
+    type: 'doughnut',
+    data: {
+      labels: donutKardexData.map(d => d.label),
+      datasets: [{
+        data: donutKardexData.map(d => d.value),
+        backgroundColor: ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#06b6d4']
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom' } }
+    }
+  });
+}
+</script>
+{% endblock %}

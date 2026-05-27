@@ -1,0 +1,179 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Kardex — {{ item.codigo_item }}{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'detalle_prenda' prenda.id %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Volver
+      </a>
+    </div>
+    <div class="col">
+      <div class="page-pretitle">Kardex de Item</div>
+      <h2 class="page-title">
+        <i class="bi bi-clock-history me-2 text-muted"></i>
+        <code>{{ item.codigo_item }}</code>
+      </h2>
+      <div class="text-muted small mt-1">
+        {{ prenda.nombre }}
+        {% if prenda.talla %}&nbsp;·&nbsp; T{{ prenda.talla }}{% endif %}
+        {% if prenda.color %}&nbsp;·&nbsp; {{ prenda.color }}{% endif %}
+      </div>
+    </div>
+    <div class="col-auto ms-auto d-flex gap-2 align-items-center">
+      {% if item.estado == 'disponible' %}
+        <span class="badge-estado badge-devuelto">Disponible</span>
+      {% elif item.estado == 'alquilado' %}
+        <span class="badge-estado badge-alquilado">Alquilado</span>
+      {% else %}
+        <span class="badge-estado badge-inactivo">Baja</span>
+      {% endif %}
+      {% if item.tipo == 'alquiler' %}
+        <span class="badge-estado badge-alquilado">Alquiler</span>
+      {% else %}
+        <span class="badge-estado badge-entregado">Venta</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+
+<!-- Resumen del item -->
+<div class="card mb-3">
+  <div class="card-header">
+    <h3 class="card-title"><i class="bi bi-info-circle me-2"></i>Resumen del item</h3>
+  </div>
+  <div class="card-body">
+    <div class="datagrid">
+      <div class="datagrid-item">
+        <div class="datagrid-title">Tipo</div>
+        <div class="datagrid-content">{{ item.get_tipo_display }}</div>
+      </div>
+      <div class="datagrid-item">
+        <div class="datagrid-title">Condición</div>
+        <div class="datagrid-content">{{ item.get_condicion_display }}</div>
+      </div>
+      <div class="datagrid-item">
+        <div class="datagrid-title">Estado</div>
+        <div class="datagrid-content">
+          {% if item.estado == 'disponible' %}
+            <span class="badge-estado badge-devuelto">Disponible</span>
+          {% elif item.estado == 'alquilado' %}
+            <span class="badge-estado badge-alquilado">Alquilado</span>
+          {% else %}
+            <span class="badge-estado badge-inactivo">Baja</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="datagrid-item">
+        <div class="datagrid-title">Total alquileres</div>
+        <div class="datagrid-content">{{ metricas.total_alquileres }}</div>
+      </div>
+      <div class="datagrid-item">
+        <div class="datagrid-title">Total ventas</div>
+        <div class="datagrid-content">{{ metricas.total_ventas }}</div>
+      </div>
+      <div class="datagrid-item">
+        <div class="datagrid-title">Ingreso acumulado</div>
+        <div class="datagrid-content fw-semibold">Bs. {{ metricas.ingreso_acumulado|floatformat:2 }}</div>
+      </div>
+      <div class="datagrid-item">
+        <div class="datagrid-title">Ubicación</div>
+        <div class="datagrid-content">{{ item.ubicacion|default:"—" }}</div>
+      </div>
+      <div class="datagrid-item">
+        <div class="datagrid-title">Fecha de alta</div>
+        <div class="datagrid-content">{{ item.creado|date:"d M Y" }}</div>
+      </div>
+      <div class="datagrid-item">
+        <div class="datagrid-title">Fecha de baja</div>
+        <div class="datagrid-content">
+          {% if item.fecha_baja %}
+            {{ item.fecha_baja|date:"d M Y" }}
+          {% else %}
+            —
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Historial cronológico -->
+<div class="card">
+  <div class="card-header">
+    <h3 class="card-title"><i class="bi bi-clock-history me-2"></i>Historial cronológico</h3>
+    <span class="ms-auto text-muted small">{{ eventos|length }} evento{{ eventos|length|pluralize }}</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table">
+      <thead>
+        <tr>
+          <th style="white-space:nowrap">Fecha</th>
+          <th>Tipo</th>
+          <th>Descripción</th>
+          <th>Cliente</th>
+          <th class="text-end">Monto</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ev in eventos %}
+        <tr>
+          <td style="white-space:nowrap">
+            {{ ev.timestamp|date:"d M Y" }}
+            {% if "(aprox.)" in ev.descripcion %}
+              <span class="badge bg-warning text-dark ms-1" title="Fecha aproximada basada en última actualización">
+                <i class="bi bi-exclamation-triangle-fill"></i> aprox.
+              </span>
+            {% endif %}
+          </td>
+          <td>
+            {% if ev.tipo == 'ingreso' %}
+              <span class="badge-estado badge-en_proceso">Ingreso</span>
+            {% elif ev.tipo == 'alquiler' %}
+              <span class="badge-estado badge-alquilado">Alquiler</span>
+            {% elif ev.tipo == 'devolucion' %}
+              <span class="badge-estado badge-devuelto">Devolución</span>
+            {% elif ev.tipo == 'venta' %}
+              <span class="badge-estado badge-entregado">Venta</span>
+            {% elif ev.tipo == 'baja' %}
+              <span class="badge-estado badge-inactivo">Baja</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if ev.alquiler %}
+              <a href="{% url 'editar_alquiler' ev.alquiler.id %}">{{ ev.descripcion }}</a>
+            {% elif ev.venta %}
+              <a href="{% url 'editar_venta' ev.venta.id %}">{{ ev.descripcion }}</a>
+            {% else %}
+              {{ ev.descripcion }}
+            {% endif %}
+          </td>
+          <td>{{ ev.cliente|default:"—" }}</td>
+          <td class="text-end">
+            {% if ev.monto %}
+              Bs. {{ ev.monto|floatformat:2 }}
+            {% else %}
+              —
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="5">
+            <div class="empty-state">
+              <i class="bi bi-clock-history d-block" style="font-size:2.5rem;opacity:.3;text-align:center;margin-bottom:.75rem"></i>
+              Este item no tiene historial registrado.
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

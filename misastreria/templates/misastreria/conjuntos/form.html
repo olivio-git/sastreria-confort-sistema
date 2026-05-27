@@ -1,0 +1,195 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}{{ titulo }}{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'lista_conjuntos' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left"></i>Volver
+      </a>
+    </div>
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="layers" class="me-2 text-muted"></i>{{ titulo }}
+        {% if conjunto %}<small class="text-muted ms-2 fs-6">{{ conjunto.nombre }}</small>{% endif %}
+      </h2>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+<form method="post" id="conjuntoForm">
+  {% csrf_token %}
+
+  <div class="card mb-3">
+    <div class="card-header"><h3 class="card-title">Datos del conjunto</h3></div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-5">
+          <label class="form-label fw-semibold">{{ form.nombre.label }}</label>
+          {{ form.nombre }}
+          {% if form.nombre.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.nombre.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-2">
+          <label class="form-label fw-semibold">{{ form.tipo.label }}</label>
+          {{ form.tipo }}
+        </div>
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">{{ form.precio_sugerido.label }}</label>
+          <div class="input-group">
+            <span class="input-group-text">Bs.</span>
+            {{ form.precio_sugerido }}
+          </div>
+          {% if form.precio_sugerido.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.precio_sugerido.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-3 d-flex align-items-end">
+          <div class="form-check">
+            {{ form.activo }}
+            <label class="form-check-label fw-semibold" for="{{ form.activo.id_for_label }}">{{ form.activo.label }}</label>
+          </div>
+        </div>
+        <div class="col-12">
+          <label class="form-label fw-semibold">{{ form.descripcion.label }}</label>
+          {{ form.descripcion }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-header d-flex align-items-center">
+      <h3 class="card-title mb-0">Slots de prendas</h3>
+      <button type="button" class="btn btn-outline-primary btn-sm ms-auto" id="btnAgregarSlot">
+        <i data-lucide="plus"></i> Agregar slot
+      </button>
+    </div>
+    <div class="card-body">
+      {{ formset.management_form }}
+      <div class="table-responsive">
+        <table class="table" id="slotsTable">
+          <thead>
+            <tr>
+              <th>Item de prenda</th>
+              <th style="width:110px">Opcional</th>
+              <th style="width:50px"></th>
+            </tr>
+          </thead>
+          <tbody id="slotsBody">
+            {% for slot_form in formset %}
+            <tr class="slot-row {% if slot_form.instance.pk %}existing{% endif %}"
+                {% if slot_form.DELETE.value %}style="display:none"{% endif %}>
+              {% for hidden in slot_form.hidden_fields %}{{ hidden }}{% endfor %}
+              <td>
+                <div style="position:relative">
+                  <input type="text" class="form-control slot-prenda-text"
+                         placeholder="Buscar item por código o nombre…" autocomplete="off">
+                </div>
+              </td>
+              <td class="align-middle">{{ slot_form.opcional }}</td>
+              <td class="align-middle">
+                {% if slot_form.DELETE %}
+                <input type="hidden" name="{{ slot_form.DELETE.html_name }}" value="" class="slot-delete-flag">
+                <button type="button" class="btn btn-sm btn-ghost-danger btn-remove-slot" title="Quitar">
+                  <i data-lucide="x"></i>
+                </button>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div id="sinSlots" class="text-muted text-center py-2" style="display:none">
+        Sin slots. Agrega al menos uno para que el conjunto funcione.
+      </div>
+    </div>
+    <div class="card-footer text-end d-flex justify-content-end gap-2">
+      <a href="{% url 'lista_conjuntos' %}" class="btn btn-outline-secondary">Cancelar</a>
+      <button type="submit" class="btn btn-primary">
+        <i data-lucide="check"></i> Guardar
+      </button>
+    </div>
+  </div>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+{% load static %}
+<script>
+(function() {
+  var PRENDA_ITEM_OPTS = {{ prenda_item_opts|safe }};
+
+  var totalFormsInput = document.getElementById('id_slots-TOTAL_FORMS');
+  var slotsBody = document.getElementById('slotsBody');
+  var sinSlots  = document.getElementById('sinSlots');
+
+  function updateSinSlots() {
+    var visible = slotsBody.querySelectorAll('.slot-row:not([style*="display:none"])').length;
+    sinSlots.style.display = visible ? 'none' : 'block';
+  }
+
+  updateSinSlots();
+
+  function initSlotCombobox(row) {
+    var textInput = row.querySelector('.slot-prenda-text');
+    var hiddenInput = row.querySelector('input[name$="-prenda_item"]');
+    if (textInput && hiddenInput) {
+      makeLocalCombobox(textInput, hiddenInput, PRENDA_ITEM_OPTS);
+    }
+  }
+
+  function getTemplate() {
+    var idx = parseInt(totalFormsInput.value);
+    var prefix = 'slots-' + idx;
+    var tr = document.createElement('tr');
+    tr.className = 'slot-row';
+    tr.innerHTML =
+      '<input type="hidden" name="' + prefix + '-id" value="">' +
+      '<td>' +
+        '<div style="position:relative">' +
+          '<input type="text" class="form-control slot-prenda-text" placeholder="Buscar item por código o nombre…" autocomplete="off">' +
+          '<input type="hidden" name="' + prefix + '-prenda_item" id="id_' + prefix + '-prenda_item">' +
+        '</div>' +
+      '</td>' +
+      '<td class="align-middle"><input type="checkbox" name="' + prefix + '-opcional" class="form-check-input"></td>' +
+      '<td class="align-middle">' +
+        '<input type="hidden" name="' + prefix + '-DELETE" class="slot-delete-flag">' +
+        '<button type="button" class="btn btn-sm btn-outline-danger btn-remove-slot" title="Quitar"><i data-lucide="x"></i></button>' +
+      '</td>';
+    return tr;
+  }
+
+  document.getElementById('btnAgregarSlot').addEventListener('click', function() {
+    var tr = getTemplate();
+    slotsBody.appendChild(tr);
+    totalFormsInput.value = parseInt(totalFormsInput.value) + 1;
+    lucide.createIcons();
+    bindRemove(tr);
+    initSlotCombobox(tr);
+    updateSinSlots();
+  });
+
+  function bindRemove(row) {
+    var btn = row.querySelector('.btn-remove-slot');
+    if (!btn) return;
+    btn.addEventListener('click', function() {
+      var deleteFlag = row.querySelector('.slot-delete-flag');
+      if (deleteFlag) {
+        deleteFlag.value = 'on';
+        row.style.display = 'none';
+      } else {
+        row.remove();
+      }
+      updateSinSlots();
+    });
+  }
+
+  slotsBody.querySelectorAll('.slot-row').forEach(function(row) {
+    bindRemove(row);
+    initSlotCombobox(row);
+  });
+})();
+</script>
+{% endblock %}

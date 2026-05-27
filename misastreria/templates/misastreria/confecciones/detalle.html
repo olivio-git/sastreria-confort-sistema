@@ -1,0 +1,348 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Confección {{ confeccion.codigo }}{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'lista_confecciones' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left"></i>Volver
+      </a>
+    </div>
+    <div class="col">
+      <div class="page-pretitle">Confecciones</div>
+      <h2 class="page-title">
+        <i data-lucide="scissors" class="me-2 text-muted"></i>
+        {{ confeccion.codigo }}
+        <span class="badge-estado badge-{{ confeccion.estado }} ms-2">{{ confeccion.get_estado_display }}</span>
+      </h2>
+    </div>
+    <div class="col-auto ms-auto d-flex gap-2">
+      <a href="{% url 'editar_confeccion' confeccion.id %}" class="btn btn-outline-primary">
+        <i data-lucide="pencil" class="me-1"></i>Editar
+      </a>
+      <a href="{% url 'exportar_recibo_confeccion_pdf' confeccion.id %}" class="btn btn-outline-secondary">
+        <i data-lucide="file-text" class="me-1"></i>PDF
+      </a>
+      {% if confeccion.estado == 'pendiente' %}
+      <form method="post" action="{% url 'confeccion_en_proceso' confeccion.id %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-outline-info">
+          <i data-lucide="play-circle" class="me-1"></i>En Proceso
+        </button>
+      </form>
+      {% endif %}
+      {% if confeccion.estado != 'entregado' %}
+      <a href="{% url 'entregar_confeccion' confeccion.id %}" class="btn btn-success">
+        <i data-lucide="check-circle" class="me-1"></i>Entregar
+      </a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+<div class="row g-3">
+
+  <!-- Columna izquierda: Datos + Medidas -->
+  <div class="col-12 col-lg-7">
+
+    <!-- Datos del pedido -->
+    <div class="card mb-3">
+      <div class="card-header">
+        <h3 class="card-title">Datos del pedido</h3>
+      </div>
+      <div class="card-body">
+        <div class="datagrid">
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Cliente</div>
+            <div class="datagrid-content">
+              {% if confeccion.cliente %}
+                <a href="{% url 'historial_cliente' confeccion.cliente.id %}" class="text-decoration-none">{{ confeccion.cliente }}</a>
+              {% else %}—{% endif %}
+            </div>
+          </div>
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Empleado</div>
+            <div class="datagrid-content">{{ confeccion.empleado|default:"—" }}</div>
+          </div>
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Fecha inicio</div>
+            <div class="datagrid-content">{{ confeccion.fecha_inicio|date:"d/m/Y" }}</div>
+          </div>
+          {% if confeccion.fecha_prueba %}
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Fecha prueba</div>
+            <div class="datagrid-content">{{ confeccion.fecha_prueba|date:"d/m/Y" }}</div>
+          </div>
+          {% endif %}
+          {% if confeccion.fecha_entrega %}
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Fecha entrega</div>
+            <div class="datagrid-content">{{ confeccion.fecha_entrega|date:"d/m/Y" }}</div>
+          </div>
+          {% endif %}
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Modelo</div>
+            <div class="datagrid-content">{{ confeccion.modelo|default:"—" }}</div>
+          </div>
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Color</div>
+            <div class="datagrid-content">{{ confeccion.color|default:"—" }}</div>
+          </div>
+          {% if confeccion.garantia_meses %}
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Garantía</div>
+            <div class="datagrid-content">
+              {{ confeccion.garantia_meses }} mes{{ confeccion.garantia_meses|pluralize:"es" }}
+              {% if confeccion.garantia_hasta %}
+                <small class="text-muted d-block">Hasta {{ confeccion.garantia_hasta|date:"d/m/Y" }}</small>
+              {% endif %}
+            </div>
+          </div>
+          {% endif %}
+          {% if confeccion.observaciones %}
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Observaciones</div>
+            <div class="datagrid-content">{{ confeccion.observaciones }}</div>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Ítems / Prendas -->
+    {% if items %}
+    <div class="card mb-3">
+      <div class="card-header">
+        <h3 class="card-title">Prendas</h3>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+          <thead>
+            <tr>
+              <th>Prenda</th>
+              <th>Talla</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+            <tr>
+              <td>{{ item.tipo_prenda|default:"—" }}</td>
+              <td>{{ item.talla|default:"—" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Medidas -->
+    {% for item in items %}
+    {% with p=item %}
+    {% if p.pantalon_largo_total or p.pantalon_contorno_cintura or p.pantalon_contorno_cadera or p.pantalon_largo_entrepierna or p.pantalon_contorno_pierna or p.pantalon_contorno_rodilla or p.pantalon_contorno_bota or p.pantalon_tiro_delantero or p.pantalon_tiro_trasero or p.chaleco_contorno_busto or p.chaleco_contorno_cintura or p.chaleco_contorno_cadera or p.chaleco_largo_talle or p.chaleco_largo_total or p.chaleco_altura_botones or p.saco_contorno_busto or p.saco_contorno_cintura or p.saco_contorno_cadera or p.saco_largo_talle or p.saco_largo_total or p.saco_ancho_hombros or p.saco_ancho_espalda or p.saco_contorno_brazo or p.saco_largo_manga or p.saco_contorno_puno or p.saco_mujer_contorno_busto or p.saco_mujer_contorno_cintura or p.saco_mujer_contorno_cadera or p.saco_mujer_ancho_hombros or p.saco_mujer_ancho_espalda or p.saco_mujer_largo_talle or p.saco_mujer_largo_total or p.saco_mujer_altura_busto or p.saco_mujer_separacion_busto or p.saco_mujer_dif_talle or p.chaleco_mujer_contorno_busto or p.chaleco_mujer_contorno_cintura or p.chaleco_mujer_contorno_cadera or p.chaleco_mujer_largo_talle or p.chaleco_mujer_largo_total or p.chaleco_mujer_altura_busto or p.chaleco_mujer_separacion_busto or p.chaleco_mujer_largo_delantero %}
+    <div class="card mb-3">
+      <div class="card-header">
+        <h3 class="card-title">Medidas{% if item.tipo_prenda %} — {{ item.tipo_prenda }}{% endif %}</h3>
+      </div>
+      <div class="card-body">
+
+        <!-- Pantalón -->
+        {% if p.pantalon_largo_total or p.pantalon_contorno_cintura or p.pantalon_contorno_cadera or p.pantalon_largo_entrepierna or p.pantalon_contorno_pierna or p.pantalon_contorno_rodilla or p.pantalon_contorno_bota or p.pantalon_tiro_delantero or p.pantalon_tiro_trasero %}
+        <h4 class="fs-6 fw-semibold text-muted mb-2 mt-1">Pantalón</h4>
+        <div class="datagrid mb-3">
+          {% if p.pantalon_largo_total %}<div class="datagrid-item"><div class="datagrid-title text-muted">Largo total</div><div class="datagrid-content">{{ p.pantalon_largo_total }}</div></div>{% endif %}
+          {% if p.pantalon_contorno_cintura %}<div class="datagrid-item"><div class="datagrid-title text-muted">Contorno cintura</div><div class="datagrid-content">{{ p.pantalon_contorno_cintura }}</div></div>{% endif %}
+          {% if p.pantalon_contorno_cadera %}<div class="datagrid-item"><div class="datagrid-title text-muted">Contorno cadera</div><div class="datagrid-content">{{ p.pantalon_contorno_cadera }}</div></div>{% endif %}
+          {% if p.pantalon_largo_entrepierna %}<div class="datagrid-item"><div class="datagrid-title text-muted">Largo entrepierna</div><div class="datagrid-content">{{ p.pantalon_largo_entrepierna }}</div></div>{% endif %}
+          {% if p.pantalon_contorno_pierna %}<div class="datagrid-item"><div class="datagrid-title text-muted">Contorno pierna</div><div class="datagrid-content">{{ p.pantalon_contorno_pierna }}</div></div>{% endif %}
+          {% if p.pantalon_contorno_rodilla %}<div class="datagrid-item"><div class="datagrid-title text-muted">Contorno rodilla</div><div class="datagrid-content">{{ p.pantalon_contorno_rodilla }}</div></div>{% endif %}
+          {% if p.pantalon_contorno_bota %}<div class="datagrid-item"><div class="datagrid-title text-muted">Contorno bota</div><div class="datagrid-content">{{ p.pantalon_contorno_bota }}</div></div>{% endif %}
+          {% if p.pantalon_tiro_delantero %}<div class="datagrid-item"><div class="datagrid-title text-muted">Tiro delantero</div><div class="datagrid-content">{{ p.pantalon_tiro_delantero }}</div></div>{% endif %}
+          {% if p.pantalon_tiro_trasero %}<div class="datagrid-item"><div class="datagrid-title text-muted">Tiro trasero</div><div class="datagrid-content">{{ p.pantalon_tiro_trasero }}</div></div>{% endif %}
+        </div>
+        {% endif %}
+
+        <!-- Chaleco -->
+        {% if p.chaleco_contorno_busto or p.chaleco_contorno_cintura or p.chaleco_contorno_cadera or p.chaleco_largo_talle or p.chaleco_largo_total or p.chaleco_altura_botones %}
+        <h4 class="fs-6 fw-semibold text-muted mb-2 mt-1">Chaleco</h4>
+        <div class="datagrid mb-3">
+          {% if p.chaleco_contorno_busto %}<div class="datagrid-item"><div class="datagrid-title text-muted">Contorno busto</div><div class="datagrid-content">{{ p.chaleco_contorno_busto }}</div></div>{% endif %}
+          {% if p.chaleco_contorno_cintura %}<div class="datagrid-item"><div class="datagrid-title text-muted">Contorno cintura</div><div class="datagrid-content">{{ p.chaleco_contorno_cintura }}</div></div>{% endif %}
+          {% if p.chaleco_contorno_cadera %}<div class="datagrid-item"><div class="datagrid-title text-muted">Contorno cadera</div><div class="datagrid-content">{{ p.chaleco_contorno_cadera }}</div></div>{% endif %}
+          {% if p.chaleco_largo_talle %}<div class="datagrid-item"><div class="datagrid-title text-muted">Largo talle</div><div class="datagrid-content">{{ p.chaleco_largo_talle }}</div></div>{% endif %}
+          {% if p.chaleco_largo_total %}<div class="datagrid-item"><div class="datagrid-title text-muted">Largo total</div><div class="datagrid-content">{{ p.chaleco_largo_total }}</div></div>{% endif %}
+          {% if p.chaleco_altura_botones %}<div class="datagrid-item"><div class="datagrid-title text-muted">Altura botones</div><div class="datagrid-content">{{ p.chaleco_altura_botones }}</div></div>{% endif %}
+        </div>
+        {% endif %}
+
+        <!-- Saco -->
+        {% if p.saco_contorno_busto or p.saco_contorno_cintura or p.saco_contorno_cadera or p.saco_largo_talle or p.saco_largo_total or p.saco_ancho_hombros or p.saco_ancho_espalda or p.saco_contorno_brazo or p.saco_largo_manga or p.saco_contorno_puno %}
+        <h4 class="fs-6 fw-semibold text-muted mb-2 mt-1">Saco</h4>
+        <div class="datagrid mb-3">
+          {% if p.saco_contorno_busto %}<div class="datagrid-item"><div class="datagrid-title text-muted">Contorno busto</div><div class="datagrid-content">{{ p.saco_contorno_busto }}</div></div>{% endif %}
+          {% if p.saco_contorno_cintura %}<div class="datagrid-item"><div class="datagrid-title text-muted">Contorno cintura</div><div class="datagrid-content">{{ p.saco_contorno_cintura }}</div></div>{% endif %}
+          {% if p.saco_contorno_cadera %}<div class="datagrid-item"><div class="datagrid-title text-muted">Contorno cadera</div><div class="datagrid-content">{{ p.saco_contorno_cadera }}</div></div>{% endif %}
+          {% if p.saco_largo_talle %}<div class="datagrid-item"><div class="datagrid-title text-muted">Largo talle</div><div class="datagrid-content">{{ p.saco_largo_talle }}</div></div>{% endif %}
+          {% if p.saco_largo_total %}<div class="datagrid-item"><div class="datagrid-title text-muted">Largo total</div><div class="datagrid-content">{{ p.saco_largo_total }}</div></div>{% endif %}
+          {% if p.saco_ancho_hombros %}<div class="datagrid-item"><div class="datagrid-title text-muted">Ancho hombros</div><div class="datagrid-content">{{ p.saco_ancho_hombros }}</div></div>{% endif %}
+          {% if p.saco_ancho_espalda %}<div class="datagrid-item"><div class="datagrid-title text-muted">Ancho espalda</div><div class="datagrid-content">{{ p.saco_ancho_espalda }}</div></div>{% endif %}
+          {% if p.saco_contorno_brazo %}<div class="datagrid-item"><div class="datagrid-title text-muted">Contorno brazo</div><div class="datagrid-content">{{ p.saco_contorno_brazo }}</div></div>{% endif %}
+          {% if p.saco_largo_manga %}<div class="datagrid-item"><div class="datagrid-title text-muted">Largo manga</div><div class="datagrid-content">{{ p.saco_largo_manga }}</div></div>{% endif %}
+          {% if p.saco_contorno_puno %}<div class="datagrid-item"><div class="datagrid-title text-muted">Contorno puño</div><div class="datagrid-content">{{ p.saco_contorno_puno }}</div></div>{% endif %}
+        </div>
+        {% endif %}
+
+        <!-- Saco Mujer -->
+        {% if p.saco_mujer_contorno_busto or p.saco_mujer_contorno_cintura or p.saco_mujer_contorno_cadera or p.saco_mujer_ancho_hombros or p.saco_mujer_ancho_espalda or p.saco_mujer_largo_talle or p.saco_mujer_largo_total or p.saco_mujer_altura_busto or p.saco_mujer_separacion_busto or p.saco_mujer_dif_talle %}
+        <h4 class="fs-6 fw-semibold text-muted mb-2 mt-1">Saco Mujer</h4>
+        <div class="datagrid mb-3">
+          {% if p.saco_mujer_contorno_busto %}<div class="datagrid-item"><div class="datagrid-title text-muted">Contorno busto</div><div class="datagrid-content">{{ p.saco_mujer_contorno_busto }}</div></div>{% endif %}
+          {% if p.saco_mujer_contorno_cintura %}<div class="datagrid-item"><div class="datagrid-title text-muted">Contorno cintura</div><div class="datagrid-content">{{ p.saco_mujer_contorno_cintura }}</div></div>{% endif %}
+          {% if p.saco_mujer_contorno_cadera %}<div class="datagrid-item"><div class="datagrid-title text-muted">Contorno cadera</div><div class="datagrid-content">{{ p.saco_mujer_contorno_cadera }}</div></div>{% endif %}
+          {% if p.saco_mujer_ancho_hombros %}<div class="datagrid-item"><div class="datagrid-title text-muted">Ancho hombros</div><div class="datagrid-content">{{ p.saco_mujer_ancho_hombros }}</div></div>{% endif %}
+          {% if p.saco_mujer_ancho_espalda %}<div class="datagrid-item"><div class="datagrid-title text-muted">Ancho espalda</div><div class="datagrid-content">{{ p.saco_mujer_ancho_espalda }}</div></div>{% endif %}
+          {% if p.saco_mujer_largo_talle %}<div class="datagrid-item"><div class="datagrid-title text-muted">Largo talle</div><div class="datagrid-content">{{ p.saco_mujer_largo_talle }}</div></div>{% endif %}
+          {% if p.saco_mujer_largo_total %}<div class="datagrid-item"><div class="datagrid-title text-muted">Largo total</div><div class="datagrid-content">{{ p.saco_mujer_largo_total }}</div></div>{% endif %}
+          {% if p.saco_mujer_altura_busto %}<div class="datagrid-item"><div class="datagrid-title text-muted">Altura busto</div><div class="datagrid-content">{{ p.saco_mujer_altura_busto }}</div></div>{% endif %}
+          {% if p.saco_mujer_separacion_busto %}<div class="datagrid-item"><div class="datagrid-title text-muted">Separación busto</div><div class="datagrid-content">{{ p.saco_mujer_separacion_busto }}</div></div>{% endif %}
+          {% if p.saco_mujer_dif_talle %}<div class="datagrid-item"><div class="datagrid-title text-muted">Dif. talle</div><div class="datagrid-content">{{ p.saco_mujer_dif_talle }}</div></div>{% endif %}
+        </div>
+        {% endif %}
+
+        <!-- Chaleco Mujer -->
+        {% if p.chaleco_mujer_contorno_busto or p.chaleco_mujer_contorno_cintura or p.chaleco_mujer_contorno_cadera or p.chaleco_mujer_largo_talle or p.chaleco_mujer_largo_total or p.chaleco_mujer_altura_busto or p.chaleco_mujer_separacion_busto or p.chaleco_mujer_largo_delantero %}
+        <h4 class="fs-6 fw-semibold text-muted mb-2 mt-1">Chaleco Mujer</h4>
+        <div class="datagrid mb-3">
+          {% if p.chaleco_mujer_contorno_busto %}<div class="datagrid-item"><div class="datagrid-title text-muted">Contorno busto</div><div class="datagrid-content">{{ p.chaleco_mujer_contorno_busto }}</div></div>{% endif %}
+          {% if p.chaleco_mujer_contorno_cintura %}<div class="datagrid-item"><div class="datagrid-title text-muted">Contorno cintura</div><div class="datagrid-content">{{ p.chaleco_mujer_contorno_cintura }}</div></div>{% endif %}
+          {% if p.chaleco_mujer_contorno_cadera %}<div class="datagrid-item"><div class="datagrid-title text-muted">Contorno cadera</div><div class="datagrid-content">{{ p.chaleco_mujer_contorno_cadera }}</div></div>{% endif %}
+          {% if p.chaleco_mujer_largo_talle %}<div class="datagrid-item"><div class="datagrid-title text-muted">Largo talle</div><div class="datagrid-content">{{ p.chaleco_mujer_largo_talle }}</div></div>{% endif %}
+          {% if p.chaleco_mujer_largo_total %}<div class="datagrid-item"><div class="datagrid-title text-muted">Largo total</div><div class="datagrid-content">{{ p.chaleco_mujer_largo_total }}</div></div>{% endif %}
+          {% if p.chaleco_mujer_altura_busto %}<div class="datagrid-item"><div class="datagrid-title text-muted">Altura busto</div><div class="datagrid-content">{{ p.chaleco_mujer_altura_busto }}</div></div>{% endif %}
+          {% if p.chaleco_mujer_separacion_busto %}<div class="datagrid-item"><div class="datagrid-title text-muted">Separación busto</div><div class="datagrid-content">{{ p.chaleco_mujer_separacion_busto }}</div></div>{% endif %}
+          {% if p.chaleco_mujer_largo_delantero %}<div class="datagrid-item"><div class="datagrid-title text-muted">Largo delantero</div><div class="datagrid-content">{{ p.chaleco_mujer_largo_delantero }}</div></div>{% endif %}
+        </div>
+        {% endif %}
+
+      </div>
+    </div>
+    {% endif %}
+    {% endwith %}
+    {% endfor %}
+
+  </div>
+
+  <!-- Columna derecha: Pagos -->
+  <div class="col-12 col-lg-5">
+
+    <!-- Widget Precio | Pagado | Saldo -->
+    <div class="card mb-3">
+      <div class="card-body">
+        <div class="row g-3 text-center">
+          <div class="col-4">
+            <div class="text-muted small mb-1">Precio</div>
+            <div class="fw-bold fs-5">Bs. {{ precio|floatformat:2 }}</div>
+          </div>
+          <div class="col-4">
+            <div class="text-muted small mb-1">Pagado</div>
+            <div class="fw-bold fs-5 text-success">Bs. {{ pagado|floatformat:2 }}</div>
+          </div>
+          <div class="col-4">
+            <div class="text-muted small mb-1">Saldo</div>
+            <div class="fw-bold fs-5 {% if saldo > 0 %}text-danger{% else %}text-success{% endif %}">
+              Bs. {{ saldo|floatformat:2 }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Formulario de pago -->
+    {% if saldo > 0 %}
+    <div class="card mb-3">
+      <div class="card-header">
+        <h3 class="card-title">Registrar pago</h3>
+      </div>
+      <div class="card-body">
+        <form method="post" action="{% url 'agregar_pago_confeccion' confeccion.id %}">
+          {% csrf_token %}
+          <div class="mb-3">
+            <label class="form-label fw-semibold">{{ form.monto.label }}</label>
+            {{ form.monto }}
+            {% if form.monto.errors %}
+              <div class="invalid-feedback d-block">{{ form.monto.errors.0 }}</div>
+            {% endif %}
+            <div class="form-text text-muted">Saldo pendiente: <strong>Bs. {{ saldo|floatformat:2 }}</strong></div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">{{ form.forma_pago.label }}</label>
+            {{ form.forma_pago }}
+            {% if form.forma_pago.errors %}
+              <div class="invalid-feedback d-block">{{ form.forma_pago.errors.0 }}</div>
+            {% endif %}
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">{{ form.descripcion.label }}</label>
+            {{ form.descripcion }}
+            {% if form.descripcion.errors %}
+              <div class="invalid-feedback d-block">{{ form.descripcion.errors.0 }}</div>
+            {% endif %}
+          </div>
+          <button type="submit" class="btn btn-success w-100">
+            <i data-lucide="plus-circle" class="me-1"></i>Registrar pago
+          </button>
+        </form>
+      </div>
+    </div>
+    {% else %}
+    <div class="alert alert-success mb-3">
+      <i data-lucide="check-circle" class="me-2"></i>
+      Completamente pagado.
+    </div>
+    {% endif %}
+
+    <!-- Historial de pagos -->
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Historial de pagos</h3>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Forma</th>
+              <th class="text-end">Monto</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for pago in pagos %}
+            <tr>
+              <td>
+                <div>{{ pago.fecha|date:"d/m/Y" }}</div>
+                <small class="text-muted">{{ pago.get_concepto_display }}</small>
+              </td>
+              <td>{{ pago.get_forma_pago_display }}</td>
+              <td class="text-end fw-semibold text-success">Bs. {{ pago.monto|floatformat:2 }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="3">
+                <div class="empty-state">
+                  <i data-lucide="credit-card" class="d-block"></i>
+                  Sin pagos registrados.
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

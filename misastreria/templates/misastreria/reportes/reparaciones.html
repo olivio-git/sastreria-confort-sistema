@@ -1,120 +1,171 @@
-{% extends 'misastreria/base.html' %} {# Asegúrate de que base.html es el correcto #}
-{% load static %} {# Asegúrate de cargar static si usas archivos estáticos #}
+{% extends 'misastreria/base.html' %}
+{% load static %}
 
 {% block titulo %}Reporte de Reparaciones{% endblock %}
 
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="wrench" class="me-2 text-muted"></i>Reporte de Reparaciones
+      </h2>
+    </div>
+    <div class="col-auto ms-auto d-flex gap-2">
+      <button type="button" class="btn btn-outline-secondary" onclick="exportReport('pdf')">
+        <i data-lucide="file-text"></i>PDF
+      </button>
+      <button type="button" class="btn btn-outline-success" onclick="exportReport('excel')">
+        <i data-lucide="file-spreadsheet"></i>Excel
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
 {% block contenido %}
-<div class="container-fluid py-4">
-    <div class="row mb-4">
-        <div class="col-12 text-center">
-            <h1 class="display-6 fw-bold text-primary mb-1">SISTEMA DE GESTION SASTRERIA CONFORT Y MAS</h1>
-            <h2 class="h3 text-secondary">REPORTE DE REPARACIONES</h2>
-        </div>
-    </div>
 
-    <div class="card shadow mb-4">
-        <div class="card-header py-3 bg-gradient-primary text-white">
-            <h6 class="m-0 font-weight-bold">Filtros de Reporte</h6>
-        </div>
-        <div class="card-body">
-            <form method="get" action="{% url 'reporte_reparaciones' %}" id="filter-form">
-                <div class="row g-3 align-items-end">
-                    <div class="col-md-3">
-                        <label for="{{ form.fecha_inicio.id_for_label }}" class="form-label">{{ form.fecha_inicio.label }}:</label>
-                        {{ form.fecha_inicio }}
-                    </div>
-                    <div class="col-md-3">
-                        <label for="{{ form.fecha_fin.id_for_label }}" class="form-label">{{ form.fecha_fin.label }}:</label>
-                        {{ form.fecha_fin }}
-                    </div>
-                    <div class="col-md-3">
-                        <label for="{{ form.cliente.id_for_label }}" class="form-label">{{ form.cliente.label }}:</label>
-                        {{ form.cliente }}
-                    </div>
-                    <div class="col-md-3">
-                        <label for="{{ form.empleado.id_for_label }}" class="form-label">{{ form.empleado.label }}:</label>
-                        {{ form.empleado }}
-                    </div>
-                    <div class="col-md-3">
-                        <label for="{{ form.tipo_prenda.id_for_label }}" class="form-label">{{ form.tipo_prenda.label }}:</label>
-                        {{ form.tipo_prenda }}
-                    </div>
-                    <div class="col-md-3">
-                        <label for="{{ form.estado.id_for_label }}" class="form-label">{{ form.estado.label }}:</label>
-                        {{ form.estado }}
-                    </div>
-                    
-                    <div class="col-md-12 text-end">
-                        <button type="submit" class="btn btn-primary me-2"><i class="bi bi-filter me-1"></i> Filtrar</button>
-                        <a href="{% url 'reporte_reparaciones' %}" class="btn btn-secondary me-2"><i class="bi bi-x-circle me-1"></i> Limpiar Filtros</a>
-                        <button type="button" class="btn btn-danger me-2" onclick="exportReport('pdf')"><i class="bi bi-file-earmark-pdf me-1"></i> Exportar PDF</button>
-                        <button type="button" class="btn btn-success" onclick="exportReport('excel')"><i class="bi bi-file-earmark-excel me-1"></i> Exportar Excel</button>
-                    </div>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <div class="card shadow mb-4">
-        <div class="card-header py-3 bg-gradient-primary text-white">
-            <h6 class="m-0 font-weight-bold">Resultados del Reporte</h6>
-        </div>
-        <div class="card-body">
-            {% if reparaciones %}
-            <div class="table-responsive">
-                <table class="table table-bordered table-striped" width="100%" cellspacing="0">
-                    <thead class="bg-light">
-                        <tr>
-                            <th>Código</th>
-                            <th>Fecha Entrega</th>
-                            <th>Tipo Prenda</th>
-                            <th>Tipo Reparación</th>
-                            <th>Costo (BOB)</th>
-                            <th>Cliente</th>
-                            <th>Empleado</th>
-                            <th>Estado</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for rep in reparaciones %}
-                        <tr>
-                            <td>{{ rep.codigo }}</td>
-                            <td>{{ rep.fecha_entrega|date:"d/m/Y" }}</td>
-                            <td>{{ rep.get_tipo_prenda_display }}</td>
-                            <td>{{ rep.get_tipo_reparacion_display }}</td>
-                            <td>{{ rep.costo|default:"N/A"|floatformat:2 }}</td> {# Muestra 2 decimales y N/A si es None #}
-                            <td>{{ rep.cliente|default:"N/A" }}</td>
-                            <td>{{ rep.empleado|default:"N/A" }}</td>
-                            <td>{{ rep.get_estado_display }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <p class="text-center text-muted">No hay resultados para los filtros aplicados.</p>
-            {% endif %}
-        </div>
-    </div>
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <form method="get" action="{% url 'reporte_reparaciones' %}" class="row g-2 align-items-end" id="filter-form">
+      <div class="col-md-3">
+        <label for="{{ form.fecha_inicio.id_for_label }}" class="form-label small mb-1 fw-semibold text-muted">{{ form.fecha_inicio.label }}:</label>
+        {{ form.fecha_inicio }}
+      </div>
+      <div class="col-md-3">
+        <label for="{{ form.fecha_fin.id_for_label }}" class="form-label small mb-1 fw-semibold text-muted">{{ form.fecha_fin.label }}:</label>
+        {{ form.fecha_fin }}
+      </div>
+      <div class="col-md-3">
+        <label for="{{ form.cliente.id_for_label }}" class="form-label small mb-1 fw-semibold text-muted">{{ form.cliente.label }}:</label>
+        {{ form.cliente }}
+      </div>
+      <div class="col-md-3">
+        <label for="{{ form.empleado.id_for_label }}" class="form-label small mb-1 fw-semibold text-muted">{{ form.empleado.label }}:</label>
+        {{ form.empleado }}
+      </div>
+      <div class="col-md-3">
+        <label for="{{ form.tipo_prenda.id_for_label }}" class="form-label small mb-1 fw-semibold text-muted">{{ form.tipo_prenda.label }}:</label>
+        {{ form.tipo_prenda }}
+      </div>
+      <div class="col-md-3">
+        <label for="{{ form.estado.id_for_label }}" class="form-label small mb-1 fw-semibold text-muted">{{ form.estado.label }}:</label>
+        {{ form.estado }}
+      </div>
+      <div class="col-12 d-flex gap-2 justify-content-end">
+        <button type="submit" class="btn btn-primary">
+          <i data-lucide="filter"></i>Filtrar
+        </button>
+        <a href="{% url 'reporte_reparaciones' %}" class="btn btn-outline-secondary">Limpiar Filtros</a>
+      </div>
+    </form>
+  </div>
 </div>
 
+<!-- KPI Cards — Fase 2 -->
+<div class="row g-3 mb-3">
+  <div class="col-sm-6 col-xl-3">
+    <div class="card h-100 border-0 shadow-sm">
+      <div class="card-body">
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <i class="bi bi-receipt" style="color:var(--primary);font-size:1.25rem"></i>
+          <span class="text-muted small">Total reparaciones</span>
+        </div>
+        <div class="fs-3 fw-semibold">{{ kpis.total }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="card h-100 border-0 shadow-sm">
+      <div class="card-body">
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <i class="bi bi-cash-coin" style="color:var(--success);font-size:1.25rem"></i>
+          <span class="text-muted small">Ingreso total</span>
+        </div>
+        <div class="fs-3 fw-semibold">S/ {{ kpis.ingreso_total|floatformat:2 }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="card h-100 border-0 shadow-sm">
+      <div class="card-body">
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <i class="bi bi-graph-up" style="color:var(--warning);font-size:1.25rem"></i>
+          <span class="text-muted small">Costo promedio</span>
+        </div>
+        <div class="fs-3 fw-semibold">S/ {{ kpis.ticket_promedio|floatformat:2 }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="card h-100 border-0 shadow-sm">
+      <div class="card-body">
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <i class="bi bi-check-circle" style="color:var(--success);font-size:1.25rem"></i>
+          <span class="text-muted small">Entregadas / Pendientes</span>
+        </div>
+        <div class="fs-3 fw-semibold">{{ kpis.entregadas }} / {{ kpis.pendientes }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    {% if reparaciones %}
+    <table class="table table-vcenter card-table">
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Fecha Entrega</th>
+          <th>Tipo Prenda</th>
+          <th>Tipo Reparación</th>
+          <th>Costo (BOB)</th>
+          <th>Cliente</th>
+          <th>Empleado</th>
+          <th>Estado</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for rep in reparaciones %}
+        <tr>
+          <td>{{ rep.codigo }}</td>
+          <td>{{ rep.fecha_entrega|date:"d/m/Y" }}</td>
+          <td>{{ rep.tipo_prenda }}</td>
+          <td>{{ rep.tipo_reparacion }}</td>
+          <td>{{ rep.costo|default:"N/A"|floatformat:2 }}</td>
+          <td>{{ rep.cliente|default:"N/A" }}</td>
+          <td>{{ rep.empleado|default:"N/A" }}</td>
+          <td>{{ rep.get_estado_display }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="card-body">
+      <p class="text-center text-muted">No hay resultados para los filtros aplicados.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
 <script>
     function exportReport(format) {
         const form = document.getElementById('filter-form');
         const originalAction = form.action;
         const originalMethod = form.method;
 
-        // Añade el campo oculto para el formato de exportación
         const exportInput = document.createElement('input');
         exportInput.type = 'hidden';
         exportInput.name = 'export_format';
         exportInput.value = format;
         form.appendChild(exportInput);
 
-        // Envía el formulario
         form.submit();
 
-        // Limpia el campo oculto y restaura la acción original del formulario
         form.removeChild(exportInput);
         form.action = originalAction;
         form.method = originalMethod;

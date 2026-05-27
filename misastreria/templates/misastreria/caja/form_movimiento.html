@@ -1,0 +1,137 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}{{ titulo }}{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="plus-circle" class="me-2 text-muted"></i>{{ titulo }}
+      </h2>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+{% if sesion_activa %}
+<div class="alert alert-info d-flex align-items-center mb-3">
+  <i data-lucide="info" class="me-2"></i>
+  <div>
+    Sesión <strong>#{{ sesion_activa.pk }}</strong> abierta — este movimiento se asignará a esta sesión.
+    <a href="{% url 'detalle_sesion_caja' sesion_activa.pk %}" class="alert-link ms-1">Ver sesión</a>
+  </div>
+</div>
+{% else %}
+<div class="alert alert-warning d-flex align-items-center mb-3">
+  <i data-lucide="triangle-alert" class="me-2"></i>
+  <div>
+    Sin sesión activa — el movimiento quedará sin sesión.
+    <a href="{% url 'abrir_sesion_caja' %}" class="alert-link ms-1">Abrir sesión</a>
+  </div>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-header">
+    <h3 class="card-title">Datos del movimiento</h3>
+  </div>
+  <div class="card-body">
+    <form method="post">
+      {% csrf_token %}
+      {% if next_sesion %}<input type="hidden" name="next_sesion" value="{{ next_sesion }}">{% endif %}
+      {% if form.non_field_errors %}
+      <div class="alert alert-danger">
+        {% for error in form.non_field_errors %}
+          <div>{{ error }}</div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <div class="row g-3">
+        <div class="col-12 col-md-6">
+          <label class="form-label fw-semibold" for="{{ form.concepto.id_for_label }}">
+            Concepto <span class="text-danger">*</span>
+          </label>
+          {{ form.concepto }}
+          {% if form.concepto.errors %}
+            <div class="text-danger small mt-1">{{ form.concepto.errors.0 }}</div>
+          {% endif %}
+        </div>
+
+        <div class="col-12 col-md-3">
+          <label class="form-label fw-semibold" for="{{ form.monto.id_for_label }}">
+            Monto (Bs.) <span class="text-danger">*</span>
+          </label>
+          {{ form.monto }}
+          {% if form.monto.errors %}
+            <div class="text-danger small mt-1">{{ form.monto.errors.0 }}</div>
+          {% endif %}
+        </div>
+
+        <div class="col-12 col-md-3">
+          <label class="form-label fw-semibold" for="{{ form.forma_pago.id_for_label }}">
+            Forma de Pago{% if not form.forma_pago.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}
+          </label>
+          {{ form.forma_pago }}
+          {% if form.forma_pago.errors %}
+            <div class="text-danger small mt-1">{{ form.forma_pago.errors.0 }}</div>
+          {% endif %}
+        </div>
+
+        <div class="col-12 col-md-6" id="tipo_gasto_wrapper">
+          <label class="form-label fw-semibold" for="id_tipo_gasto">
+            Tipo de Gasto <span class="text-danger">*</span>
+          </label>
+          {{ form.tipo_gasto }}
+          {% if form.tipo_gasto.errors %}
+            <div class="text-danger small mt-1">{{ form.tipo_gasto.errors.0 }}</div>
+          {% endif %}
+          <div class="form-text">
+            Subcategoría del gasto.
+            <a href="{% url 'crear_tipo_gasto' %}" target="_blank">+ Nuevo concepto</a>
+          </div>
+        </div>
+
+        <div class="col-12 col-md-6">
+          <label class="form-label fw-semibold" for="{{ form.descripcion.id_for_label }}">
+            Descripción{% if not form.descripcion.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}
+          </label>
+          {{ form.descripcion }}
+          {% if form.descripcion.errors %}
+            <div class="text-danger small mt-1">{{ form.descripcion.errors.0 }}</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="d-flex gap-2 mt-4">
+        <button type="submit" class="btn btn-primary">
+          <i data-lucide="save" class="me-1"></i>Guardar Movimiento
+        </button>
+        {% if next_sesion %}
+        <a href="{% url 'detalle_sesion_caja' next_sesion %}" class="btn btn-outline-secondary">Cancelar</a>
+        {% else %}
+        <a href="{% url 'lista_sesiones_caja' %}" class="btn btn-outline-secondary">Cancelar</a>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const requiereTipoGasto = {{ requiere_tipo_gasto|safe }};
+const conceptoSelect = document.getElementById('id_concepto');
+const tipoGastoWrapper = document.getElementById('tipo_gasto_wrapper');
+function toggleTipoGasto() {
+  if (tipoGastoWrapper) {
+    tipoGastoWrapper.style.display = requiereTipoGasto.includes(conceptoSelect.value) ? '' : 'none';
+  }
+}
+if (conceptoSelect) {
+  conceptoSelect.addEventListener('change', toggleTipoGasto);
+  toggleTipoGasto();
+}
+</script>
+{% endblock %}

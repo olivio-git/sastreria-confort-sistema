@@ -1,20 +1,72 @@
 from django import forms
 from django.utils.safestring import mark_safe
-from .models import Empleado, Cliente, Reparacion, Venta, VentaItem, Confeccion, ConfeccionItem, Alquiler, AlquilerItem, Transaccion, PrendaInventario, Insumo, Permiso, Falta, OrdenProduccion, InsumoCortado
+from .models import (
+    Empleado, TipoContrato, Cliente, Reparacion, ReparacionItem, TipoPrenda, TipoReparacion,
+    Venta, VentaItem, Confeccion, ConfeccionItem, Alquiler, AlquilerItem,
+    Transaccion, PrendaInventario, PrendaItem, Insumo, UnidadMedida,
+    Permiso, Falta, OrdenProduccion, InsumoCortado,
+    TipoGasto, CajaSesion, CajaMovimiento, FORMA_PAGO_CHOICES,
+    Conjunto, ConjuntoSlot,
+)
 from django.forms import DateInput, inlineformset_factory
+from django.core.exceptions import ValidationError
 
 
-class BolivianPhoneWidget(forms.TextInput):
+COUNTRY_CODE_CHOICES = [
+    ('+54',  'AR +54'),    # Argentina
+    ('+501', 'BZ +501'),   # Belice
+    ('+591', 'BO +591'),   # Bolivia
+    ('+55',  'BR +55'),    # Brasil
+    ('+56',  'CL +56'),    # Chile
+    ('+57',  'CO +57'),    # Colombia
+    ('+506', 'CR +506'),   # Costa Rica
+    ('+53',  'CU +53'),    # Cuba
+    ('+593', 'EC +593'),   # Ecuador
+    ('+503', 'SV +503'),   # El Salvador
+    ('+34',  'ES +34'),    # España
+    ('+502', 'GT +502'),   # Guatemala
+    ('+509', 'HT +509'),   # Haití
+    ('+504', 'HN +504'),   # Honduras
+    ('+52',  'MX +52'),    # México
+    ('+505', 'NI +505'),   # Nicaragua
+    ('+507', 'PA +507'),   # Panamá
+    ('+595', 'PY +595'),   # Paraguay
+    ('+51',  'PE +51'),    # Perú
+    ('+1',   'US +1'),     # Estados Unidos
+    ('+598', 'UY +598'),   # Uruguay
+    ('+58',  'VE +58'),    # Venezuela
+]
+
+
+class PhoneWidget(forms.TextInput):
+    def _parse(self, value):
+        if not value:
+            return '+591', ''
+        s = str(value)
+        for code, _ in sorted(COUNTRY_CODE_CHOICES, key=lambda x: -len(x[0])):
+            if s.startswith(code):
+                return code, s[len(code):]
+        return '+591', s
+
     def render(self, name, value, attrs=None, renderer=None):
-        if value and str(value).startswith('+591'):
-            value = str(value)[4:]
-        attrs = attrs or {}
-        attrs.setdefault('class', 'form-control')
+        current_code, number = self._parse(value)
+        attrs = dict(attrs or {})
+        attrs['class'] = 'form-control'
         attrs.setdefault('placeholder', '71234567')
         attrs.setdefault('inputmode', 'numeric')
         attrs.setdefault('pattern', '[0-9]+')
-        input_html = super().render(name, value, attrs, renderer)
-        return mark_safe(f'<div class="input-group"><span class="input-group-text">+591</span>{input_html}</div>')
+        input_html = super().render(name, number, attrs, renderer)
+        options = ''.join(
+            f'<option value="{code}"{" selected" if code == current_code else ""}>{label}</option>'
+            for code, label in COUNTRY_CODE_CHOICES
+        )
+        select_html = f'<select name="{name}_pais" class="form-select" style="max-width:130px">{options}</select>'
+        return mark_safe(f'<div class="input-group">{select_html}{input_html}</div>')
+
+    def value_from_datadict(self, data, files, name):
+        number = (data.get(name) or '').strip()
+        code = (data.get(f'{name}_pais') or '+591').strip()
+        return code + number if number else ''
 
 
 class EmpleadoForm(forms.ModelForm):
@@ -26,8 +78,8 @@ class EmpleadoForm(forms.ModelForm):
             'nombres': forms.TextInput(attrs={'class': 'form-control'}),
             'apellido_paterno': forms.TextInput(attrs={'class': 'form-control'}),
             'apellido_materno': forms.TextInput(attrs={'class': 'form-control'}),
-            'celular': BolivianPhoneWidget(),
-            'tipo_contrato': forms.Select(attrs={'class': 'form-select'}),
+            'celular': PhoneWidget(),
+            'tipo_contrato': forms.HiddenInput(),
             'fecha_ingreso': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}, format='%Y-%m-%d'),
             'fecha_baja': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}, format='%Y-%m-%d'),
         }
@@ -37,6 +89,10 @@ class EmpleadoForm(forms.ModelForm):
         help_texts = {
             'fecha_baja': 'Completar solo si el empleado ya no trabaja aquí. Deja en blanco si sigue activo.',
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['tipo_contrato'].required = False
 
     def clean_celular(self):
         celular = self.cleaned_data.get('celular', '').strip()
@@ -79,7 +135,7 @@ class ClienteForm(forms.ModelForm):
             'nombres': forms.TextInput(attrs={'class': 'form-control'}),
             'apellido_paterno': forms.TextInput(attrs={'class': 'form-control'}),
             'apellido_materno': forms.TextInput(attrs={'class': 'form-control'}),
-            'celular': BolivianPhoneWidget(),
+            'celular': PhoneWidget(),
             'notas': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
         }
 
@@ -92,59 +148,52 @@ class ClienteForm(forms.ModelForm):
 class ReparacionForm(forms.ModelForm):
     class Meta:
         model = Reparacion
-        fields = [
-            'tipo_prenda', 'otro_prenda', 'tipo_reparacion', 'otro_reparacion',
-            'costo', 'detalles', 'fecha_entrega', 'empleado', 'cliente', 'estado'
-        ]
+        fields = ['fecha_entrega', 'empleado', 'cliente', 'estado', 'porcentaje_comision']
+        labels = {
+            'porcentaje_comision': 'Comisión empleado (%)',
+        }
         widgets = {
             'fecha_entrega': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
-            'detalles': forms.Textarea(attrs={'rows': 3, 'class': 'form-control'}),
-            'tipo_prenda': forms.Select(attrs={'class': 'form-control'}),
-            'tipo_reparacion': forms.Select(attrs={'class': 'form-control'}),
-            'estado': forms.Select(attrs={'class': 'form-control'}),
-            'otro_prenda': forms.TextInput(attrs={'class': 'form-control'}),
-            'otro_reparacion': forms.TextInput(attrs={'class': 'form-control'}),
-            'costo': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
-            'empleado': forms.Select(attrs={'class': 'form-control'}),
-            'cliente': forms.Select(attrs={'class': 'form-control'}),
+            'estado':        forms.Select(attrs={'class': 'form-select'}),
+            'empleado':      forms.HiddenInput(),
+            'cliente':       forms.HiddenInput(),
+            'porcentaje_comision': forms.NumberInput(attrs={
+                'class': 'form-control',
+                'step': '0.01',
+                'min': '0',
+                'max': '100',
+                'placeholder': '0–100, ej: 15.50',
+            }),
         }
 
     def clean(self):
         cleaned_data = super().clean()
-        tipo_prenda = cleaned_data.get('tipo_prenda')
-        otro_prenda = cleaned_data.get('otro_prenda')
-        tipo_reparacion = cleaned_data.get('tipo_reparacion')
-        otro_reparacion = cleaned_data.get('otro_reparacion')
-        costo = cleaned_data.get('costo')
-        cliente = cleaned_data.get('cliente')
-
-        if tipo_prenda == 'otro' and not otro_prenda:
-            self.add_error('otro_prenda', "Especifique otra prenda si selecciona 'Otro'.")
-        elif tipo_prenda != 'otro':
-            cleaned_data['otro_prenda'] = ''
-
-        if tipo_reparacion == 'otro' and not otro_reparacion:
-            self.add_error('otro_reparacion', "Especifique otra reparación si selecciona 'Otro'.")
-        elif tipo_reparacion != 'otro':
-            cleaned_data['otro_reparacion'] = ''
-
-        if costo is not None and costo < 0:
-            self.add_error('costo', "El costo no puede ser negativo.")
-        
-        if not cliente:
+        if not cleaned_data.get('cliente'):
             self.add_error('cliente', "Debe seleccionar un cliente.")
-
         return cleaned_data
+
+
+class ReparacionItemForm(forms.ModelForm):
+    class Meta:
+        model = ReparacionItem
+        fields = ['tipo_prenda', 'tipo_reparacion', 'costo', 'detalles']
+        widgets = {
+            'tipo_prenda':     forms.HiddenInput(),
+            'tipo_reparacion': forms.HiddenInput(),
+            'costo':           forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'placeholder': '0.00'}),
+            'detalles':        forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Detalles opcionales'}),
+        }
 
 
 class VentaForm(forms.ModelForm):
     class Meta:
         model = Venta
-        fields = ['fecha_venta', 'cliente', 'empleado', 'descuento', 'notas']
+        fields = ['fecha_venta', 'cliente', 'empleado', 'descuento', 'notas', 'forma_pago']
         widgets = {
             'fecha_venta': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
             'descuento': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'min': '0', 'max': '100'}),
             'notas': forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+            'forma_pago': forms.Select(attrs={'class': 'form-select'}),
         }
 
     def __init__(self, *args, **kwargs):
@@ -165,10 +214,9 @@ class VentaForm(forms.ModelForm):
 class VentaItemForm(forms.ModelForm):
     class Meta:
         model = VentaItem
-        fields = ['articulo', 'cantidad', 'precio_unitario']
+        fields = ['prenda_item', 'precio_unitario']
         widgets = {
-            'articulo':        forms.Select(attrs={'class': 'form-select item-articulo'}),
-            'cantidad':        forms.NumberInput(attrs={'class': 'form-control item-cantidad', 'min': '1'}),
+            'prenda_item':     forms.Select(attrs={'class': 'form-select item-prenda-item'}),
             'precio_unitario': forms.NumberInput(attrs={'class': 'form-control item-precio', 'step': '0.01', 'min': '0'}),
         }
 
@@ -177,15 +225,27 @@ class ConfeccionForm(forms.ModelForm):
     class Meta:
         model = Confeccion
         fields = [
-            'fecha_inicio', 'color', 'modelo', 'cliente', 'empleado', 'observaciones',
-            'precio', 'adelanto', 'saldo', 'fecha_prueba', 'fecha_entrega', 'estado',
+            'fecha_inicio', 'color', 'modelo', 'cliente', 'empleado', 'garantia_meses', 'observaciones',
+            'precio', 'porcentaje_comision', 'adelanto', 'saldo', 'fecha_prueba', 'fecha_entrega', 'estado', 'forma_pago',
         ]
+        labels = {
+            'porcentaje_comision': 'Comisión empleado (%)',
+        }
         widgets = {
-            'fecha_inicio': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
-            'fecha_prueba': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
-            'fecha_entrega': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
-            'observaciones': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
-            'saldo': forms.NumberInput(attrs={'class': 'form-control', 'readonly': 'readonly'}),
+            'fecha_inicio':    forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
+            'fecha_prueba':    forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
+            'fecha_entrega':   forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
+            'observaciones':   forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
+            'garantia_meses':  forms.NumberInput(attrs={'class': 'form-control', 'min': 1, 'max': 60, 'placeholder': 'Ej: 6'}),
+            'saldo':           forms.NumberInput(attrs={'class': 'form-control', 'readonly': 'readonly'}),
+            'forma_pago':      forms.Select(attrs={'class': 'form-select'}),
+            'porcentaje_comision': forms.NumberInput(attrs={
+                'class': 'form-control',
+                'step': '0.01',
+                'min': '0',
+                'max': '100',
+                'placeholder': '0–100, ej: 15.50',
+            }),
         }
 
     def __init__(self, *args, **kwargs):
@@ -194,13 +254,26 @@ class ConfeccionForm(forms.ModelForm):
             if 'class' not in field.widget.attrs:
                 is_select = isinstance(field.widget, (forms.Select, forms.SelectMultiple))
                 field.widget.attrs['class'] = 'form-select' if is_select else 'form-control'
+        if self.instance.pk and self.instance.estado == 'entregado':
+            self.fields['estado'].widget.attrs['disabled'] = True
+            self.fields['estado'].required = False
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if self.instance.pk and self.instance.estado == 'entregado':
+            estado_enviado = cleaned_data.get('estado')
+            if not estado_enviado:
+                cleaned_data['estado'] = 'entregado'
+            elif estado_enviado != 'entregado':
+                self.add_error('estado', 'No se puede revertir el estado de una confección ya entregada.')
+        return cleaned_data
 
 
 class ConfeccionItemForm(forms.ModelForm):
     class Meta:
         model = ConfeccionItem
         fields = [
-            'tipo_prenda',
+            'tipo_prenda', 'talla',
             'pantalon_largo_total', 'pantalon_contorno_cintura', 'pantalon_contorno_cadera',
             'pantalon_largo_entrepierna', 'pantalon_contorno_pierna', 'pantalon_contorno_rodilla',
             'pantalon_contorno_bota', 'pantalon_tiro_delantero', 'pantalon_tiro_trasero',
@@ -220,17 +293,17 @@ class ConfeccionItemForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        tp = self.fields['tipo_prenda']
-        tp.widget.attrs.update({'class': 'form-select form-select-sm tipo-prenda-select'})
-        tp.choices = [('', '— Tipo de prenda —')] + list(ConfeccionItem.TIPO_PRENDA_CHOICES)
-        tp.required = False
+        self.fields['tipo_prenda'].widget = forms.HiddenInput(attrs={'class': 'tipo-prenda-hidden'})
+        self.fields['tipo_prenda'].required = False
+        self.fields['talla'].widget = forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Ej: 42 ó 42-43', 'style': 'width:9rem'})
+        self.fields['talla'].required = False
         for name in list(self.fields.keys()):
-            if name == 'tipo_prenda':
+            if name in ('tipo_prenda', 'talla'):
                 continue
-            self.fields[name].widget = forms.NumberInput(attrs={
-                'class': 'form-control form-control-sm medida-input',
-                'step': '0.01',
-                'style': 'width:5.5rem',
+            self.fields[name].widget = forms.TextInput(attrs={
+                'class': 'form-control medida-input',
+                'style': 'width:7rem',
+                'placeholder': '—',
             })
             self.fields[name].required = False
 
@@ -243,51 +316,221 @@ ConfeccionItemFormSet = inlineformset_factory(
 )
 
 class AlquilerForm(forms.ModelForm):
+    adelanto = forms.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        required=False,
+        min_value=0,
+        initial=0,
+        widget=forms.NumberInput(attrs={
+            'class': 'form-control',
+            'step': '0.01',
+            'min': '0',
+            'placeholder': '0.00',
+        }),
+        label='Adelanto',
+    )
+    fecha_evento = forms.DateField(
+        required=False,
+        widget=forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
+        label='Fecha del evento',
+    )
+
     class Meta:
         model = Alquiler
-        fields = ['fecha_alquiler', 'fecha_devolucion', 'estado', 'cliente', 'empleado', 'descuento', 'garantia', 'notas']
+        fields = ['fecha_alquiler', 'fecha_devolucion', 'hora_devolucion', 'fecha_evento', 'estado', 'cliente', 'empleado', 'descuento', 'garantia_tipo', 'garantia_monto', 'garantia', 'notas', 'forma_pago']
         widgets = {
             'fecha_alquiler':   forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
             'fecha_devolucion': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
-            'estado':    forms.Select(attrs={'class': 'form-select'}),
-            'descuento': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'min': '0', 'max': '100'}),
-            'garantia': forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
-            'notas':    forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+            'hora_devolucion':  forms.TimeInput(attrs={'type': 'time', 'class': 'form-control'}),
+            'estado':         forms.HiddenInput(),
+            'descuento':      forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'min': '0', 'max': '100'}),
+            'garantia_tipo':  forms.HiddenInput(),
+            'garantia_monto': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'min': '0', 'placeholder': '0.00'}),
+            'garantia':       forms.Textarea(attrs={'class': 'form-control', 'rows': 2, 'placeholder': 'Describa la garantía…'}),
+            'notas':          forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+            'forma_pago':     forms.Select(attrs={'class': 'form-select'}),
         }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields['estado'].required = False
+        self.fields['garantia_tipo'].required = False
+        self.fields['garantia_monto'].required = False
+        self.fields['garantia'].required = False
         for name, field in self.fields.items():
+            if name in ('estado', 'garantia_tipo'):
+                continue
             if 'class' not in field.widget.attrs:
                 is_select = isinstance(field.widget, (forms.Select, forms.SelectMultiple))
                 field.widget.attrs['class'] = 'form-select' if is_select else 'form-control'
 
     def clean(self):
+        from decimal import Decimal
         cleaned_data = super().clean()
         fecha_alquiler   = cleaned_data.get('fecha_alquiler')
         fecha_devolucion = cleaned_data.get('fecha_devolucion')
-        if fecha_alquiler and fecha_devolucion and fecha_devolucion <= fecha_alquiler:
-            self.add_error('fecha_devolucion', "La fecha de devolución debe ser posterior a la fecha de alquiler.")
+        fecha_evento     = cleaned_data.get('fecha_evento')
+        if fecha_alquiler and fecha_devolucion and fecha_devolucion < fecha_alquiler:
+            self.add_error('fecha_devolucion', "La fecha de devolución no puede ser anterior a la fecha de alquiler.")
+        if fecha_evento:
+            if fecha_alquiler and fecha_evento < fecha_alquiler:
+                self.add_error('fecha_evento', "La fecha del evento no puede ser anterior a la fecha de alquiler.")
+            if fecha_devolucion and fecha_evento > fecha_devolucion:
+                self.add_error('fecha_evento', "La fecha del evento no puede ser posterior a la fecha de devolución.")
         descuento = cleaned_data.get('descuento')
         if descuento is not None and not (0 <= descuento <= 100):
             self.add_error('descuento', "El descuento debe estar entre 0 y 100.")
+        if not cleaned_data.get('estado'):
+            cleaned_data['estado'] = 'alquilado'
+        if cleaned_data.get('adelanto') is None:
+            cleaned_data['adelanto'] = Decimal('0')
         return cleaned_data
 
 
 class AlquilerItemForm(forms.ModelForm):
     class Meta:
         model = AlquilerItem
-        fields = ['articulo', 'cantidad', 'precio_unitario']
+        fields = ['prenda_item', 'precio_unitario']
         widgets = {
-            'articulo':       forms.Select(attrs={'class': 'form-select item-articulo'}),
-            'cantidad':       forms.NumberInput(attrs={'class': 'form-control item-cantidad', 'min': '1'}),
+            'prenda_item':    forms.Select(attrs={'class': 'form-select item-prenda-item'}),
             'precio_unitario':forms.NumberInput(attrs={'class': 'form-control item-precio', 'step': '0.01', 'min': '0'}),
         }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields['articulo'].queryset = PrendaInventario.objects.filter(tipo='alquiler', estado='ACT')
-        self.fields['articulo'].empty_label = '— Seleccionar prenda —'
+        self.fields['prenda_item'].queryset = PrendaItem.objects.filter(
+            tipo='alquiler', prenda__estado='ACT', estado='disponible'
+        ).select_related('prenda')
+        self.fields['prenda_item'].empty_label = '— Seleccionar item —'
+
+
+class PagoAlquilerForm(forms.Form):
+    from decimal import Decimal as _Decimal
+    monto = forms.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        min_value=_Decimal('0.01'),
+        widget=forms.NumberInput(attrs={
+            'class': 'form-control',
+            'step': '0.01',
+            'min': '0.01',
+            'placeholder': '0.00',
+        }),
+        label='Monto',
+    )
+    forma_pago = forms.ChoiceField(
+        choices=FORMA_PAGO_CHOICES,
+        widget=forms.Select(attrs={'class': 'form-select'}),
+        label='Forma de pago',
+    )
+    descripcion = forms.CharField(
+        max_length=200,
+        required=False,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control',
+            'placeholder': 'Nota (opcional)',
+        }),
+        label='Nota',
+    )
+
+
+class PagoConfeccionForm(forms.Form):
+    from decimal import Decimal as _Decimal
+    monto = forms.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        min_value=_Decimal('0.01'),
+        widget=forms.NumberInput(attrs={
+            'class': 'form-control',
+            'step': '0.01',
+            'min': '0.01',
+            'placeholder': '0.00',
+        }),
+        label='Monto',
+    )
+    forma_pago = forms.ChoiceField(
+        choices=FORMA_PAGO_CHOICES,
+        widget=forms.Select(attrs={'class': 'form-select'}),
+        label='Forma de pago',
+    )
+    descripcion = forms.CharField(
+        max_length=200,
+        required=False,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control',
+            'placeholder': 'Nota (opcional)',
+        }),
+        label='Nota',
+    )
+
+
+class PagoReparacionForm(forms.Form):
+    from decimal import Decimal as _Decimal
+    monto = forms.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        min_value=_Decimal('0.01'),
+        widget=forms.NumberInput(attrs={
+            'class': 'form-control',
+            'step': '0.01',
+            'min': '0.01',
+            'placeholder': '0.00',
+        }),
+        label='Monto',
+    )
+    forma_pago = forms.ChoiceField(
+        choices=FORMA_PAGO_CHOICES,
+        widget=forms.Select(attrs={'class': 'form-select'}),
+        label='Forma de pago',
+    )
+    descripcion = forms.CharField(
+        max_length=200,
+        required=False,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control',
+            'placeholder': 'Nota (opcional)',
+        }),
+        label='Nota',
+    )
+
+
+class PagoComisionEmpleadoForm(forms.Form):
+    from decimal import Decimal as _Decimal
+    monto = forms.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        min_value=_Decimal('0.01'),
+        widget=forms.NumberInput(attrs={
+            'class': 'form-control',
+            'step': '0.01',
+            'min': '0.01',
+            'placeholder': '0.00',
+        }),
+        label='Monto a pagar',
+    )
+    forma_pago = forms.ChoiceField(
+        choices=FORMA_PAGO_CHOICES,
+        widget=forms.Select(attrs={'class': 'form-select'}),
+        label='Forma de pago',
+    )
+    via_caja = forms.BooleanField(
+        required=False,
+        initial=True,
+        widget=forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+        label='Registrar en caja',
+        help_text='Si está activo, crea un egreso en la caja actual. Desactívalo si pagaste fuera de caja.',
+    )
+    descripcion = forms.CharField(
+        max_length=200,
+        required=False,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control',
+            'placeholder': 'Observaciones (opcional)',
+        }),
+        label='Descripción',
+    )
+
 
 class TransaccionForm(forms.ModelForm):
     class Meta:
@@ -314,22 +557,25 @@ class PrendaInventarioForm(forms.ModelForm):
     class Meta:
         model = PrendaInventario
         fields = [
-            'tipo', 'nombre', 'modelo', 'talla', 'color', 'codigo_referencia',
-            'condicion', 'cantidad', 'stock_minimo', 'precio', 'estado', 'notas',
+            'nombre', 'modelo', 'talla', 'color', 'codigo_referencia',
+            'stock_minimo', 'max_usos_default', 'precio', 'estado', 'notas',
+            'tipo_prenda',
         ]
         labels = {
-            'tipo': 'Tipo',
             'nombre': 'Nombre',
             'modelo': 'Modelo / Línea',
             'talla': 'Talla',
             'color': 'Color',
             'codigo_referencia': 'Código de Referencia',
-            'condicion': 'Condición',
-            'cantidad': 'Cantidad en Stock',
             'stock_minimo': 'Stock Mínimo',
+            'max_usos_default': 'Máx. usos por defecto',
             'precio': 'Precio',
             'estado': 'Estado',
             'notas': 'Notas',
+            'tipo_prenda': 'Tipo de Prenda',
+        }
+        help_texts = {
+            'max_usos_default': 'Máx. alquileres antes de baja sugerida (opcional)',
         }
         widgets = {
             'notas': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
@@ -348,6 +594,32 @@ class PrendaInventarioForm(forms.ModelForm):
         if precio is not None and precio <= 0:
             self.add_error('precio', "El precio debe ser mayor que cero.")
         return cleaned_data
+
+
+class PrendaItemForm(forms.ModelForm):
+    class Meta:
+        model = PrendaItem
+        fields = ['tipo', 'condicion', 'ubicacion', 'max_usos', 'notas']
+        labels = {
+            'tipo': 'Tipo',
+            'condicion': 'Condición',
+            'ubicacion': 'Ubicación',
+            'max_usos': 'Máx. usos',
+            'notas': 'Notas',
+        }
+        help_texts = {
+            'max_usos': 'Dejar vacío para heredar límite del SKU',
+        }
+        widgets = {
+            'notas': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name, field in self.fields.items():
+            if 'class' not in field.widget.attrs:
+                is_select = isinstance(field.widget, (forms.Select, forms.SelectMultiple))
+                field.widget.attrs['class'] = 'form-select' if is_select else 'form-control'
 
 
 class InsumoForm(forms.ModelForm):
@@ -375,11 +647,17 @@ class InsumoForm(forms.ModelForm):
         }
         widgets = {
             'notas': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
+            'unidad_medida': forms.HiddenInput(),
+            'tipo_material': forms.HiddenInput(),
         }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields['unidad_medida'].required = False
+        self.fields['tipo_material'].required = False
         for name, field in self.fields.items():
+            if name in ('unidad_medida', 'tipo_material'):
+                continue
             if 'class' not in field.widget.attrs:
                 is_select = isinstance(field.widget, (forms.Select, forms.SelectMultiple))
                 field.widget.attrs['class'] = 'form-select' if is_select else 'form-control'
@@ -387,9 +665,10 @@ class InsumoForm(forms.ModelForm):
 class EmpleadoReporteForm(forms.Form):
     fecha_inicio = forms.DateField(required=False, label="Desde", widget=forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}))
     fecha_fin = forms.DateField(required=False, label="Hasta", widget=forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}))
-    tipo_contrato = forms.ChoiceField(
+    tipo_contrato = forms.ModelChoiceField(
+        queryset=TipoContrato.objects.all(),
         required=False,
-        choices=[('', 'Todos')] + Empleado.TIPO_CONTRATO_CHOICES,
+        empty_label="Todos",
         label="Tipo de Contrato",
         widget=forms.Select(attrs={'class': 'form-control'})
     )
@@ -444,11 +723,12 @@ class ReparacionReporteForm(forms.Form):
         empty_label="-- Seleccione Empleado --",
         widget=forms.Select(attrs={'class': 'form-select'}) # Usando form-select
     )
-    tipo_prenda = forms.ChoiceField(
-        choices=[('', '-- Seleccione Tipo de Prenda --')] + list(Reparacion.TIPO_PRENDA_CHOICES),
+    tipo_prenda = forms.ModelChoiceField(
+        queryset=TipoPrenda.objects.all(),
         label="Tipo de Prenda",
         required=False,
-        widget=forms.Select(attrs={'class': 'form-select'}) # Usando form-select
+        empty_label="-- Seleccione Tipo de Prenda --",
+        widget=forms.Select(attrs={'class': 'form-select'}),
     )
     estado = forms.ChoiceField(
         choices=[('', '-- Seleccione Estado --')] + list(Reparacion.ESTADO_CHOICES),
@@ -461,12 +741,17 @@ class ReparacionReporteForm(forms.Form):
 class OrdenProduccionForm(forms.ModelForm):
     class Meta:
         model = OrdenProduccion
-        fields = ['descripcion', 'confeccion', 'fecha_inicio', 'fecha_estimada', 'empleado', 'notas']
+        fields = [
+            'tipo', 'descripcion', 'confeccion',
+            'prenda_inventario', 'cantidad',
+            'fecha_inicio', 'fecha_estimada', 'empleado', 'notas',
+        ]
         widgets = {
             'descripcion':    forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
             'fecha_inicio':   forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
             'fecha_estimada': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
             'notas':          forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+            'cantidad':       forms.NumberInput(attrs={'class': 'form-control', 'min': '1', 'step': '1'}),
         }
 
     def __init__(self, *args, **kwargs):
@@ -478,6 +763,25 @@ class OrdenProduccionForm(forms.ModelForm):
         self.fields['confeccion'].required = False
         self.fields['fecha_estimada'].required = False
         self.fields['empleado'].required = False
+        self.fields['prenda_inventario'].required = False
+        self.fields['cantidad'].required = False
+
+    def clean(self):
+        cleaned = super().clean()
+        tipo = cleaned.get('tipo')
+        if tipo == 'stock':
+            if not cleaned.get('prenda_inventario'):
+                self.add_error('prenda_inventario', 'Requerido para órdenes de inventario.')
+            cantidad = cleaned.get('cantidad')
+            if not cantidad or cantidad < 1:
+                self.add_error('cantidad', 'Debe ser al menos 1.')
+            cleaned['confeccion'] = None
+        elif tipo == 'cliente':
+            if not cleaned.get('confeccion'):
+                self.add_error('confeccion', 'Requerido para órdenes de cliente.')
+            cleaned['prenda_inventario'] = None
+            cleaned['cantidad'] = None
+        return cleaned
 
 
 class InsumoCortadoForm(forms.ModelForm):
@@ -488,3 +792,181 @@ class InsumoCortadoForm(forms.ModelForm):
             'insumo':   forms.Select(attrs={'class': 'form-select item-insumo'}),
             'cantidad': forms.NumberInput(attrs={'class': 'form-control item-cantidad', 'step': '0.001', 'min': '0.001'}),
         }
+
+
+# ============================================================
+# MÓDULO DE CAJA — Formularios
+# ============================================================
+
+class CajaSesionAperturaForm(forms.ModelForm):
+    class Meta:
+        model = CajaSesion
+        fields = ['monto_apertura', 'observaciones']
+        widgets = {
+            'monto_apertura': forms.NumberInput(attrs={
+                'class': 'form-control',
+                'step': '0.01',
+                'min': '0',
+                'placeholder': 'Monto inicial en efectivo',
+            }),
+            'observaciones': forms.Textarea(attrs={
+                'class': 'form-control',
+                'rows': 2,
+                'placeholder': 'Observaciones (opcional)',
+            }),
+        }
+        labels = {
+            'monto_apertura': 'Monto de Apertura (Bs)',
+            'observaciones': 'Observaciones',
+        }
+
+
+class CajaSesionCierreForm(forms.ModelForm):
+    class Meta:
+        model = CajaSesion
+        fields = ['monto_cierre_declarado', 'observaciones']
+        widgets = {
+            'monto_cierre_declarado': forms.NumberInput(attrs={
+                'class': 'form-control',
+                'step': '0.01',
+                'min': '0',
+                'placeholder': 'Total contado al cerrar',
+            }),
+            'observaciones': forms.Textarea(attrs={
+                'class': 'form-control',
+                'rows': 3,
+                'placeholder': 'Observaciones (requerido si hay diferencia)',
+            }),
+        }
+        labels = {
+            'monto_cierre_declarado': 'Monto Declarado (Bs)',
+            'observaciones': 'Observaciones',
+        }
+
+
+class CajaMovimientoManualForm(forms.ModelForm):
+    """Formulario para movimientos manuales. Filtra concepto a MANUAL_CONCEPTOS."""
+
+    class Meta:
+        model = CajaMovimiento
+        fields = ['concepto', 'monto', 'forma_pago', 'tipo_gasto', 'cliente', 'descripcion']
+        widgets = {
+            'concepto': forms.Select(attrs={'class': 'form-select', 'id': 'id_concepto'}),
+            'monto': forms.NumberInput(attrs={
+                'class': 'form-control',
+                'step': '0.01',
+                'min': '0.01',
+                'placeholder': '0.00',
+            }),
+            'forma_pago': forms.Select(attrs={'class': 'form-select'}),
+            'tipo_gasto': forms.Select(attrs={'class': 'form-select', 'id': 'id_tipo_gasto'}),
+            'cliente': forms.Select(attrs={'class': 'form-select'}),
+            'descripcion': forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+        }
+        labels = {
+            'concepto': 'Concepto',
+            'monto': 'Monto (Bs)',
+            'forma_pago': 'Forma de Pago',
+            'tipo_gasto': 'Tipo de Gasto',
+            'cliente': 'Cliente',
+            'descripcion': 'Descripción',
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Restrict concepto choices to MANUAL_CONCEPTOS only
+        manual_choices = [
+            (c, label)
+            for c, label in CajaMovimiento.CONCEPTO_CHOICES
+            if c in CajaMovimiento.MANUAL_CONCEPTOS
+        ]
+        self.fields['concepto'].choices = [('', '---------')] + manual_choices
+        # Only active TipoGasto entries in dropdown
+        self.fields['tipo_gasto'].queryset = TipoGasto.objects.filter(activo=True)
+        self.fields['tipo_gasto'].required = False
+        self.fields['cliente'].required = False
+        self.fields['descripcion'].required = False
+
+    def clean(self):
+        cleaned = super().clean()
+        concepto = cleaned.get('concepto')
+        tipo_gasto = cleaned.get('tipo_gasto')
+        if concepto in CajaMovimiento.REQUIERE_TIPO_GASTO and not tipo_gasto:
+            self.add_error('tipo_gasto', 'Requerido para este tipo de gasto.')
+        if concepto and concepto not in CajaMovimiento.MANUAL_CONCEPTOS:
+            self.add_error('concepto', 'Concepto no permitido en movimientos manuales.')
+        return cleaned
+
+
+class TipoGastoForm(forms.ModelForm):
+    class Meta:
+        model = TipoGasto
+        fields = ['nombre', 'descripcion', 'activo']
+        widgets = {
+            'nombre': forms.TextInput(attrs={'class': 'form-control', 'autofocus': True}),
+            'descripcion': forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+            'activo': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+        }
+        labels = {
+            'nombre': 'Nombre',
+            'descripcion': 'Descripción',
+            'activo': 'Activo',
+        }
+
+
+class ConjuntoForm(forms.ModelForm):
+    class Meta:
+        model = Conjunto
+        fields = ['nombre', 'tipo', 'descripcion', 'precio_sugerido', 'activo']
+        widgets = {
+            'nombre': forms.TextInput(attrs={'class': 'form-control'}),
+            'tipo': forms.Select(attrs={'class': 'form-select'}),
+            'descripcion': forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+            'precio_sugerido': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'min': '0'}),
+            'activo': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['precio_sugerido'].required = False
+        labels = {
+            'nombre': 'Nombre',
+            'tipo': 'Tipo',
+            'descripcion': 'Descripción',
+            'precio_sugerido': 'Precio sugerido (Bs.)',
+            'activo': 'Activo',
+        }
+
+
+class ConjuntoSlotInlineForm(forms.ModelForm):
+    class Meta:
+        model = ConjuntoSlot
+        fields = ['prenda_item', 'opcional']
+        widgets = {
+            'prenda_item': forms.HiddenInput(),
+        }
+
+    def __init__(self, *args, **kwargs):
+        tipo = kwargs.pop('tipo', None)
+        super().__init__(*args, **kwargs)
+        qs = (
+            PrendaItem.objects
+            .filter(estado='disponible', prenda__estado='ACT')
+            .select_related('prenda')
+            .order_by('codigo_item')
+        )
+        if tipo:
+            qs = qs.filter(tipo=tipo)
+        self.fields['prenda_item'].queryset = qs
+        self.fields['prenda_item'].empty_label = '— Seleccionar item —'
+
+    def clean(self):
+        cleaned = super().clean()
+        if not cleaned.get('DELETE') and cleaned.get('prenda_item') is None:
+            raise ValidationError({'prenda_item': 'Selecciona un item de prenda.'})
+        return cleaned
+
+
+ConjuntoSlotFormSet = inlineformset_factory(
+    Conjunto, ConjuntoSlot, form=ConjuntoSlotInlineForm, extra=0, can_delete=True,
+)

@@ -1,0 +1,280 @@
+{% extends 'misastreria/base.html' %}
+{% load static %}
+
+{% block titulo %}Tiempos de servicio{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="activity" class="me-2 text-muted"></i>Tiempos de servicio
+      </h2>
+      <div class="text-muted mt-1 small">Cuánto tarda cada servicio y qué porcentaje del inventario está en uso.</div>
+    </div>
+    <div class="col-auto ms-auto d-flex gap-2">
+      <button type="button" class="btn btn-outline-secondary" onclick="exportReport('pdf')">
+        <i data-lucide="file-text"></i> PDF
+      </button>
+      <button type="button" class="btn btn-outline-success" onclick="exportReport('excel')">
+        <i data-lucide="file-spreadsheet"></i> Excel
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <form method="GET" action="{% url 'analitica_operativas' %}" class="row g-2 align-items-end" id="filter-form">
+      <div class="col-md-4">
+        <label for="fecha_inicio" class="form-label small mb-1 fw-semibold text-muted">Fecha Inicio:</label>
+        <input type="date" class="form-control form-control-sm" id="fecha_inicio" name="fecha_inicio" value="{{ fecha_inicio }}">
+      </div>
+      <div class="col-md-4">
+        <label for="fecha_fin" class="form-label small mb-1 fw-semibold text-muted">Fecha Fin:</label>
+        <input type="date" class="form-control form-control-sm" id="fecha_fin" name="fecha_fin" value="{{ fecha_fin }}">
+      </div>
+      <div class="col-md-4 d-flex gap-2 align-items-end">
+        <button type="submit" class="btn btn-primary btn-sm">
+          <i data-lucide="filter"></i> Filtrar
+        </button>
+        <a href="{% url 'analitica_operativas' %}" class="btn btn-outline-secondary btn-sm">Limpiar</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Alquileres -->
+<div class="mb-3">
+  <h5 class="text-muted small fw-semibold text-uppercase mb-2" style="letter-spacing:.05em">
+    <i class="bi bi-calendar-check me-1"></i>Alquileres — Duración
+  </h5>
+  <div class="row g-3">
+    <div class="col-sm-6 col-xl-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-clock-history" style="color:var(--primary);font-size:1.25rem"></i>
+            <span class="text-muted small">Duración promedio</span>
+          </div>
+          <div class="fs-3 fw-semibold">
+            {% if kpis.alquiler_duracion_avg is not None %}{{ kpis.alquiler_duracion_avg }} días{% else %}<span class="text-muted">Sin datos</span>{% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-sm-6 col-xl-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-arrow-down" style="color:var(--success);font-size:1.25rem"></i>
+            <span class="text-muted small">Duración mínima</span>
+          </div>
+          <div class="fs-3 fw-semibold">
+            {% if kpis.alquiler_duracion_min is not None %}{{ kpis.alquiler_duracion_min }} días{% else %}<span class="text-muted">Sin datos</span>{% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-sm-6 col-xl-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-arrow-up" style="color:var(--danger);font-size:1.25rem"></i>
+            <span class="text-muted small">Duración máxima</span>
+          </div>
+          <div class="fs-3 fw-semibold">
+            {% if kpis.alquiler_duracion_max is not None %}{{ kpis.alquiler_duracion_max }} días{% else %}<span class="text-muted">Sin datos</span>{% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-sm-6 col-xl-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-check-circle" style="color:var(--info);font-size:1.25rem"></i>
+            <span class="text-muted small">Con devolución</span>
+          </div>
+          <div class="fs-3 fw-semibold">{{ kpis.alquiler_count }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Confecciones -->
+<div class="mb-3">
+  <h5 class="text-muted small fw-semibold text-uppercase mb-2" style="letter-spacing:.05em">
+    <i class="bi bi-scissors me-1"></i>Confecciones — Tiempo de entrega
+  </h5>
+  <div class="row g-3">
+    <div class="col-sm-6 col-xl-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-clock-history" style="color:var(--primary);font-size:1.25rem"></i>
+            <span class="text-muted small">Entrega promedio</span>
+          </div>
+          <div class="fs-3 fw-semibold">
+            {% if kpis.confeccion_entrega_avg is not None %}{{ kpis.confeccion_entrega_avg }} días{% else %}<span class="text-muted">Sin datos</span>{% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-sm-6 col-xl-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-arrow-down" style="color:var(--success);font-size:1.25rem"></i>
+            <span class="text-muted small">Entrega mínima</span>
+          </div>
+          <div class="fs-3 fw-semibold">
+            {% if kpis.confeccion_entrega_min is not None %}{{ kpis.confeccion_entrega_min }} días{% else %}<span class="text-muted">Sin datos</span>{% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-sm-6 col-xl-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-arrow-up" style="color:var(--danger);font-size:1.25rem"></i>
+            <span class="text-muted small">Entrega máxima</span>
+          </div>
+          <div class="fs-3 fw-semibold">
+            {% if kpis.confeccion_entrega_max is not None %}{{ kpis.confeccion_entrega_max }} días{% else %}<span class="text-muted">Sin datos</span>{% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-sm-6 col-xl-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-check-circle" style="color:var(--info);font-size:1.25rem"></i>
+            <span class="text-muted small">Entregadas</span>
+          </div>
+          <div class="fs-3 fw-semibold">{{ kpis.confeccion_count }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Reparaciones -->
+<div class="mb-3">
+  <h5 class="text-muted small fw-semibold text-uppercase mb-2" style="letter-spacing:.05em">
+    <i class="bi bi-wrench me-1"></i>Reparaciones — Tiempo de entrega
+  </h5>
+  <div class="row g-3">
+    <div class="col-sm-6 col-xl-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-clock-history" style="color:var(--primary);font-size:1.25rem"></i>
+            <span class="text-muted small">Tiempo promedio</span>
+          </div>
+          <div class="fs-3 fw-semibold">
+            {% if kpis.reparacion_turnaround_avg is not None %}{{ kpis.reparacion_turnaround_avg }} días{% else %}<span class="text-muted">Sin datos</span>{% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-sm-6 col-xl-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-arrow-down" style="color:var(--success);font-size:1.25rem"></i>
+            <span class="text-muted small">Tiempo mínimo</span>
+          </div>
+          <div class="fs-3 fw-semibold">
+            {% if kpis.reparacion_turnaround_min is not None %}{{ kpis.reparacion_turnaround_min }} días{% else %}<span class="text-muted">Sin datos</span>{% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-sm-6 col-xl-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-arrow-up" style="color:var(--danger);font-size:1.25rem"></i>
+            <span class="text-muted small">Tiempo máximo</span>
+          </div>
+          <div class="fs-3 fw-semibold">
+            {% if kpis.reparacion_turnaround_max is not None %}{{ kpis.reparacion_turnaround_max }} días{% else %}<span class="text-muted">Sin datos</span>{% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-sm-6 col-xl-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-check-circle" style="color:var(--info);font-size:1.25rem"></i>
+            <span class="text-muted small">Entregadas</span>
+          </div>
+          <div class="fs-3 fw-semibold">{{ kpis.reparacion_count }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Inventario -->
+<div class="mb-3">
+  <h5 class="text-muted small fw-semibold text-uppercase mb-2" style="letter-spacing:.05em">
+    <i class="bi bi-box-seam me-1"></i>Inventario — Ocupación
+  </h5>
+  <div class="row g-3">
+    <div class="col-sm-6 col-xl-4">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-box" style="color:var(--warning);font-size:1.25rem"></i>
+            <span class="text-muted small">Prendas en uso</span>
+          </div>
+          <div class="fs-3 fw-semibold">{{ kpis.inventario_ocupados }}</div>
+          <div class="text-muted small">de {{ kpis.inventario_total }} totales</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-sm-6 col-xl-4">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-percent" style="color:var(--primary);font-size:1.25rem"></i>
+            <span class="text-muted small">% del inventario en uso</span>
+          </div>
+          <div class="fs-3 fw-semibold">{{ kpis.inventario_tasa_ocupacion }}%</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-sm-6 col-xl-4">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-box-seam" style="color:var(--info);font-size:1.25rem"></i>
+            <span class="text-muted small">Prendas totales</span>
+          </div>
+          <div class="fs-3 fw-semibold">{{ kpis.inventario_total }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function exportReport(format) {
+    const params = new URLSearchParams(window.location.search);
+    params.set('export_format', format);
+    window.location.href = '?' + params.toString();
+}
+</script>
+{% endblock %}

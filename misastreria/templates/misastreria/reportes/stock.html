@@ -1,27 +1,49 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}Reporte de Stock{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="package" class="me-2 text-muted"></i>Reporte de Stock
+      </h2>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
 {% block contenido %}
-<h1>Reporte de Stock</h1>
-<table class="table table-striped">
-    <thead>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table">
+      <thead>
         <tr>
-            <th>Código</th>
-            <th>Artículo</th>
-            <th>Cantidad</th>
-            <th>Categoría</th>
+          <th>Código</th>
+          <th>Artículo</th>
+          <th>Stock total</th>
+          <th>Categoría</th>
         </tr>
-    </thead>
-    <tbody>
-        {% for inventario in inventarios %}
+      </thead>
+      <tbody>
+        {% for prenda in prendas %}
         <tr>
-            <td>{{ inventario.codigo }}</td>
-            <td>{{ inventario.articulo }}</td>
-            <td>{{ inventario.cantidad }}</td>
-            <td>{{ inventario.categoria|default:"N/A" }}</td>
+          <td>{{ prenda.codigo }}</td>
+          <td>{{ prenda.nombre }}</td>
+          <td>{{ prenda.cantidad }}</td>
+          <td>
+            {% if prenda.items_alquiler %}<span class="badge-estado badge-alquilado me-1">{{ prenda.items_alquiler }} alq.</span>{% endif %}
+            {% if prenda.items_venta %}<span class="badge-estado badge-entregado">{{ prenda.items_venta }} vta.</span>{% endif %}
+            {% if not prenda.items_alquiler and not prenda.items_venta %}<span class="text-muted">—</span>{% endif %}
+          </td>
         </tr>
         {% empty %}
-        <tr><td colspan="4">No hay artículos en inventario.</td></tr>
+        <tr><td colspan="4" class="text-center text-muted">No hay artículos en inventario.</td></tr>
         {% endfor %}
-    </tbody>
-</table>
+      </tbody>
+    </table>
+  </div>
+</div>
+
 {% endblock %}

@@ -1,0 +1,117 @@
+{% extends 'misastreria/base.html' %}
+{% load static %}
+
+{% block titulo %}Trabajo por empleado{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="users" class="me-2 text-muted"></i>Trabajo por empleado
+      </h2>
+      <div class="text-muted mt-1 small">Actividad y facturación por empleado en el período seleccionado.</div>
+    </div>
+    <div class="col-auto ms-auto d-flex gap-2">
+      <button type="button" class="btn btn-outline-secondary" onclick="exportReport('pdf')">
+        <i data-lucide="file-text"></i> PDF
+      </button>
+      <button type="button" class="btn btn-outline-success" onclick="exportReport('excel')">
+        <i data-lucide="file-spreadsheet"></i> Excel
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <form method="GET" action="{% url 'analitica_empleados' %}" class="row g-2 align-items-end" id="filter-form">
+      <div class="col-md-4">
+        <label for="fecha_inicio" class="form-label small mb-1 fw-semibold text-muted">Fecha Inicio:</label>
+        <input type="date" class="form-control form-control-sm" id="fecha_inicio" name="fecha_inicio" value="{{ fecha_inicio }}">
+      </div>
+      <div class="col-md-4">
+        <label for="fecha_fin" class="form-label small mb-1 fw-semibold text-muted">Fecha Fin:</label>
+        <input type="date" class="form-control form-control-sm" id="fecha_fin" name="fecha_fin" value="{{ fecha_fin }}">
+      </div>
+      <div class="col-md-4 d-flex gap-2 align-items-end">
+        <button type="submit" class="btn btn-primary btn-sm">
+          <i data-lucide="filter"></i> Filtrar
+        </button>
+        <a href="{% url 'analitica_empleados' %}" class="btn btn-outline-secondary btn-sm">Limpiar</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <span class="text-muted small">{{ total_empleados }} empleado{{ total_empleados|pluralize }} con actividad</span>
+  </div>
+  <div class="table-responsive">
+    {% if empleados %}
+    <table class="table table-vcenter card-table table-hover" style="font-size:.875rem">
+      <thead>
+        <tr>
+          <th>Empleado</th>
+          <th class="text-end">Ventas (n)</th>
+          <th class="text-end">Ventas (S/)</th>
+          <th class="text-end">Alquil. (n)</th>
+          <th class="text-end">Alquil. (S/)</th>
+          <th class="text-end">Conf. (n)</th>
+          <th class="text-end">Conf. (S/)</th>
+          <th class="text-end">Rep. (n)</th>
+          <th class="text-end">Rep. (S/)</th>
+          <th class="text-end">Total (n)</th>
+          <th class="text-end">Total (S/)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for emp in empleados %}
+        <tr>
+          <td class="fw-semibold">{{ emp.empleado_nombre|default:"Sin nombre" }}</td>
+          <td class="text-end">{{ emp.num_ventas }}</td>
+          <td class="text-end">{{ emp.ingreso_ventas|floatformat:2 }}</td>
+          <td class="text-end">{{ emp.num_alquileres }}</td>
+          <td class="text-end">{{ emp.ingreso_alquileres|floatformat:2 }}</td>
+          <td class="text-end">{{ emp.num_confecciones }}</td>
+          <td class="text-end">{{ emp.ingreso_confecciones|floatformat:2 }}</td>
+          <td class="text-end">{{ emp.num_reparaciones }}</td>
+          <td class="text-end">{{ emp.ingreso_reparaciones|floatformat:2 }}</td>
+          <td class="text-end fw-semibold">{{ emp.num_total }}</td>
+          <td class="text-end fw-semibold" style="color:var(--success)">{{ emp.ingreso_total|floatformat:2 }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="11">
+            <div class="text-center text-muted py-3">
+              <i class="bi bi-person-x d-block mb-2" style="font-size:2rem"></i>
+              Sin datos para los filtros seleccionados.
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="card-body">
+      <p class="text-center text-muted">Sin datos para los filtros seleccionados.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function exportReport(format) {
+    const params = new URLSearchParams(window.location.search);
+    params.set('export_format', format);
+    window.location.href = '?' + params.toString();
+}
+</script>
+{% endblock %}

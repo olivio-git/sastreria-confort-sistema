@@ -1,22 +1,29 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}Eliminar Insumo{% endblock %}
 {% block contenido %}
-
-<div class="page-header">
-  <h1 class="page-title"><i class="bi bi-trash me-2"></i>Eliminar Insumo</h1>
+<div class="row justify-content-center">
+  <div class="col-12 col-sm-8 col-md-5 col-lg-4">
+    <div class="card card-md">
+      <div class="card-status-top bg-danger"></div>
+      <div class="card-body text-center py-4">
+        <div class="mb-3 text-danger">
+          <i data-lucide="scissors" style="width:3rem;height:3rem;opacity:.7"></i>
+        </div>
+        <h3 class="card-title mb-1">¿Eliminar Insumo?</h3>
+        <p class="text-muted mb-0"><strong>{{ insumo }}</strong> ({{ insumo.codigo }})<br><small>Esta acción no se puede deshacer.</small></p>
+      </div>
+      <div class="card-footer d-flex justify-content-center gap-3">
+        <a href="{% url 'lista_insumos' %}" class="btn btn-outline-secondary">
+          <i data-lucide="x"></i>Cancelar
+        </a>
+        <form method="post" class="d-inline">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-danger">
+            <i data-lucide="trash-2"></i>Eliminar
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
 </div>
-
-<div class="form-card">
-  <p>¿Estás seguro de que deseas eliminar el insumo <strong>{{ insumo }}</strong> ({{ insumo.codigo }})?</p>
-  <p class="text-muted">Esta acción no se puede deshacer.</p>
-
-  <form method="post" class="d-flex gap-2">
-    {% csrf_token %}
-    <button type="submit" class="btn btn-danger">
-      <i class="bi bi-trash me-1"></i>Sí, eliminar
-    </button>
-    <a href="{% url 'lista_insumos' %}" class="btn btn-outline-secondary">Cancelar</a>
-  </form>
-</div>
-
 {% endblock %}

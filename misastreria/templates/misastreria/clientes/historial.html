@@ -1,230 +1,325 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}{{ cliente }} — Historial{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'lista_clientes' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left"></i>Volver
+      </a>
+    </div>
+    <div class="col">
+      <div class="page-pretitle">Historial del cliente</div>
+      <h2 class="page-title"><i data-lucide="user" class="me-2 text-muted"></i>{{ cliente }}</h2>
+    </div>
+    <div class="col-auto ms-auto">
+      <a href="{% url 'editar_cliente' cliente.id %}" class="btn btn-outline-primary">
+        <i data-lucide="pencil"></i>Editar datos
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
 {% block contenido %}
 
-<div class="page-header">
-  <h1 class="page-title"><i class="bi bi-person-badge me-2"></i>{{ cliente }}</h1>
-  <a href="{% url 'lista_clientes' %}" class="btn btn-outline-secondary btn-sm">
-    <i class="bi bi-arrow-left me-1"></i>Volver
-  </a>
-</div>
-
 <!-- Info del cliente -->
-<div class="form-card mb-4">
-  <div class="row g-3">
-    <div class="col-sm-6 col-md-3">
-      <span class="text-muted small d-block">CI</span>
-      <span class="fw-semibold">{{ cliente.ci|default:"—" }}</span>
+<div class="card mb-4">
+  <div class="card-header"><h3 class="card-title">Datos del cliente</h3></div>
+  <div class="card-body">
+    <div class="datagrid">
+      <div class="datagrid-item">
+        <div class="datagrid-title">CI</div>
+        <div class="datagrid-content fw-semibold">{{ cliente.ci|default:"—" }}</div>
+      </div>
+      <div class="datagrid-item">
+        <div class="datagrid-title">Celular</div>
+        <div class="datagrid-content fw-semibold">{{ cliente.celular }}</div>
+      </div>
+      <div class="datagrid-item">
+        <div class="datagrid-title">Registro</div>
+        <div class="datagrid-content fw-semibold">{{ cliente.fecha_registro|date:"d/m/Y" }}</div>
+      </div>
+      <div class="datagrid-item">
+        <div class="datagrid-title">Total gastado</div>
+        <div class="datagrid-content fw-bold" style="color:var(--tblr-primary)">Bs. {{ total_general|floatformat:2 }}</div>
+      </div>
+      {% if cliente.notas %}
+      <div class="datagrid-item" style="grid-column:1/-1">
+        <div class="datagrid-title">Notas</div>
+        <div class="datagrid-content">{{ cliente.notas }}</div>
+      </div>
+      {% endif %}
     </div>
-    <div class="col-sm-6 col-md-3">
-      <span class="text-muted small d-block">Celular</span>
-      <span class="fw-semibold">{{ cliente.celular }}</span>
-    </div>
-    <div class="col-sm-6 col-md-3">
-      <span class="text-muted small d-block">Registro</span>
-      <span class="fw-semibold">{{ cliente.fecha_registro|date:"d/m/Y" }}</span>
-    </div>
-    <div class="col-sm-6 col-md-3">
-      <span class="text-muted small d-block">Total gastado</span>
-      <span class="fw-semibold fs-5">Bs. {{ total_general|floatformat:2 }}</span>
-    </div>
-    {% if cliente.notas %}
-    <div class="col-12">
-      <span class="text-muted small d-block">Notas</span>
-      <span>{{ cliente.notas }}</span>
-    </div>
-    {% endif %}
-  </div>
-  <div class="mt-3 d-flex gap-2">
-    <a href="{% url 'editar_cliente' cliente.id %}" class="btn btn-sm btn-outline-primary">
-      <i class="bi bi-pencil me-1"></i>Editar datos
-    </a>
   </div>
 </div>
 
-<!-- Resumen por módulo -->
+<!-- Stats por módulo -->
 <div class="row g-3 mb-4">
   <div class="col-6 col-md-3">
-    <div class="form-card text-center py-2">
-      <div class="text-muted small">Reparaciones</div>
-      <div class="fw-semibold">{{ reparaciones.count }} — Bs. {{ total_reparaciones|floatformat:2 }}</div>
+    <div class="card">
+      <div class="card-body p-3">
+        <div class="subheader mb-1">Reparaciones</div>
+        <div class="h3 mb-0">{{ reparaciones.count }}</div>
+        <div class="text-muted small">Bs. {{ total_reparaciones|floatformat:2 }}</div>
+      </div>
     </div>
   </div>
   <div class="col-6 col-md-3">
-    <div class="form-card text-center py-2">
-      <div class="text-muted small">Confecciones</div>
-      <div class="fw-semibold">{{ confecciones.count }} — Bs. {{ total_confecciones|floatformat:2 }}</div>
+    <div class="card">
+      <div class="card-body p-3">
+        <div class="subheader mb-1">Confecciones</div>
+        <div class="h3 mb-0">{{ confecciones.count }}</div>
+        <div class="text-muted small">Bs. {{ total_confecciones|floatformat:2 }}</div>
+      </div>
     </div>
   </div>
   <div class="col-6 col-md-3">
-    <div class="form-card text-center py-2">
-      <div class="text-muted small">Alquileres</div>
-      <div class="fw-semibold">{{ alquileres.count }} — Bs. {{ total_alquileres|floatformat:2 }}</div>
+    <div class="card">
+      <div class="card-body p-3">
+        <div class="subheader mb-1">Alquileres</div>
+        <div class="h3 mb-0">{{ alquileres.count }}</div>
+        <div class="text-muted small">Bs. {{ total_alquileres|floatformat:2 }}</div>
+      </div>
     </div>
   </div>
   <div class="col-6 col-md-3">
-    <div class="form-card text-center py-2">
-      <div class="text-muted small">Ventas</div>
-      <div class="fw-semibold">{{ ventas.count }} — Bs. {{ total_ventas|floatformat:2 }}</div>
+    <div class="card">
+      <div class="card-body p-3">
+        <div class="subheader mb-1">Ventas</div>
+        <div class="h3 mb-0">{{ ventas.count }}</div>
+        <div class="text-muted small">Bs. {{ total_ventas|floatformat:2 }}</div>
+      </div>
     </div>
   </div>
 </div>
 
-<!-- Tabs -->
-<div class="tab-section">
-  <ul class="nav nav-tabs" id="clienteTabs" role="tablist">
-    <li class="nav-item" role="presentation">
-      <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-reparaciones" type="button">
-        <i class="bi bi-tools me-1"></i>Reparaciones
-        <span class="badge bg-secondary ms-1" style="font-size:.7rem">{{ reparaciones.count }}</span>
-      </button>
-    </li>
-    <li class="nav-item" role="presentation">
-      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-confecciones" type="button">
-        <i class="bi bi-scissors me-1"></i>Confecciones
-        <span class="badge bg-secondary ms-1" style="font-size:.7rem">{{ confecciones.count }}</span>
-      </button>
-    </li>
-    <li class="nav-item" role="presentation">
-      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-alquileres" type="button">
-        <i class="bi bi-bag me-1"></i>Alquileres
-        <span class="badge bg-secondary ms-1" style="font-size:.7rem">{{ alquileres.count }}</span>
-      </button>
-    </li>
-    <li class="nav-item" role="presentation">
-      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-ventas" type="button">
-        <i class="bi bi-cart me-1"></i>Ventas
-        <span class="badge bg-secondary ms-1" style="font-size:.7rem">{{ ventas.count }}</span>
-      </button>
-    </li>
-  </ul>
+<!-- Historial con tabs -->
+<div class="card">
+  <div class="card-header">
+    <ul class="nav nav-pills card-header-pills" id="clienteTabs" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active d-flex align-items-center gap-2" data-bs-toggle="tab" data-bs-target="#tab-reparaciones" type="button">
+          <i data-lucide="wrench" style="width:.9rem;height:.9rem"></i>
+          Reparaciones
+          <span class="ms-1 fw-normal opacity-75 small">({{ reparaciones.count }})</span>
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link d-flex align-items-center gap-2" data-bs-toggle="tab" data-bs-target="#tab-confecciones" type="button">
+          <i data-lucide="scissors" style="width:.9rem;height:.9rem"></i>
+          Confecciones
+          <span class="ms-1 fw-normal opacity-75 small">({{ confecciones.count }})</span>
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link d-flex align-items-center gap-2" data-bs-toggle="tab" data-bs-target="#tab-alquileres" type="button">
+          <i data-lucide="package" style="width:.9rem;height:.9rem"></i>
+          Alquileres
+          <span class="ms-1 fw-normal opacity-75 small">({{ alquileres.count }})</span>
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link d-flex align-items-center gap-2" data-bs-toggle="tab" data-bs-target="#tab-ventas" type="button">
+          <i data-lucide="shopping-cart" style="width:.9rem;height:.9rem"></i>
+          Ventas
+          <span class="ms-1 fw-normal opacity-75 small">({{ ventas.count }})</span>
+        </button>
+      </li>
+    </ul>
+  </div>
 
   <div class="tab-content" id="clienteTabsContent">
 
     <!-- Reparaciones -->
     <div class="tab-pane fade show active" id="tab-reparaciones" role="tabpanel">
-      <table class="table table-hover">
-        <thead>
-          <tr><th>Código</th><th>Prenda</th><th>Tipo</th><th class="text-end">Costo</th><th>Entrega</th><th>Estado</th><th></th></tr>
-        </thead>
-        <tbody>
-          {% for r in reparaciones %}
-          <tr>
-            <td class="fw-semibold">{{ r.codigo }}</td>
-            <td>{{ r.get_tipo_prenda_display }}{% if r.otro_prenda %} ({{ r.otro_prenda }}){% endif %}</td>
-            <td>{{ r.get_tipo_reparacion_display }}</td>
-            <td class="text-end">{{ r.costo|floatformat:2|default:"—" }}</td>
-            <td>{{ r.fecha_entrega|date:"d/m/Y" }}</td>
-            <td><span class="badge-estado badge-{{ r.estado }}">{{ r.get_estado_display }}</span></td>
-            <td><div class="btn-actions">
-              <a href="{% url 'editar_reparacion' r.id %}" class="btn btn-sm btn-outline-primary" title="Editar"><i class="bi bi-pencil"></i></a>
-            </div></td>
-          </tr>
-          {% empty %}
-          <tr><td colspan="7"><div class="empty-state"><i class="bi bi-tools d-block"></i>Sin reparaciones.</div></td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      <div class="pagination-bar">
-        <span>{{ reparaciones.count }} reparación{{ reparaciones.count|pluralize:"es" }}</span>
+      <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+          <thead>
+            <tr>
+              <th>Código</th><th>Prenda</th><th>Tipo</th>
+              <th class="text-end">Costo</th><th>Entrega</th><th>Estado</th>
+              <th data-no-toggle style="white-space:nowrap"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in reparaciones %}
+            <tr>
+              <td class="fw-semibold">{{ r.codigo }}</td>
+              <td>{{ r.tipo_prenda }}</td>
+              <td>{{ r.tipo_reparacion }}</td>
+              <td class="text-end">{{ r.costo|floatformat:2|default:"—" }}</td>
+              <td>{{ r.fecha_entrega|date:"d/m/Y" }}</td>
+              <td><span class="badge-estado badge-{{ r.estado }}">{{ r.get_estado_display }}</span></td>
+              <td>
+                <div class="btn-actions">
+                  <a href="{% url 'editar_reparacion' r.id %}" class="btn btn-sm btn-icon btn-ghost-primary" title="Editar">
+                    <i data-lucide="pencil"></i>
+                  </a>
+                </div>
+              </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="7">
+              <div class="empty-state">
+                <i data-lucide="wrench" style="width:2rem;height:2rem;opacity:.3;display:block;margin:0 auto .75rem"></i>
+                Sin reparaciones registradas.
+              </div>
+            </td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="card-footer d-flex justify-content-between">
+        <span class="text-muted small">{{ reparaciones.count }} reparación{{ reparaciones.count|pluralize:"es" }}</span>
         <span class="fw-semibold">Total: Bs. {{ total_reparaciones|floatformat:2 }}</span>
       </div>
     </div>
 
     <!-- Confecciones -->
     <div class="tab-pane fade" id="tab-confecciones" role="tabpanel">
-      <table class="table table-hover">
-        <thead>
-          <tr><th>Código</th><th>Color</th><th>Modelo</th><th class="text-end">Precio</th><th class="text-end">Saldo</th><th>Entrega</th><th>Estado</th><th></th></tr>
-        </thead>
-        <tbody>
-          {% for c in confecciones %}
-          <tr>
-            <td class="fw-semibold">{{ c.codigo }}</td>
-            <td>{{ c.color }}</td>
-            <td>{{ c.modelo }}</td>
-            <td class="text-end">{{ c.precio|floatformat:2 }}</td>
-            <td class="text-end">{{ c.saldo|floatformat:2 }}</td>
-            <td>{{ c.fecha_entrega|date:"d/m/Y"|default:"—" }}</td>
-            <td><span class="badge-estado badge-{{ c.estado }}">{{ c.get_estado_display }}</span></td>
-            <td><div class="btn-actions">
-              <a href="{% url 'editar_confeccion' c.id %}" class="btn btn-sm btn-outline-primary" title="Editar"><i class="bi bi-pencil"></i></a>
-            </div></td>
-          </tr>
-          {% empty %}
-          <tr><td colspan="8"><div class="empty-state"><i class="bi bi-scissors d-block"></i>Sin confecciones.</div></td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      <div class="pagination-bar">
-        <span>{{ confecciones.count }} confección{{ confecciones.count|pluralize:"es" }}</span>
+      <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+          <thead>
+            <tr>
+              <th>Código</th><th>Color</th><th>Modelo</th>
+              <th class="text-end">Precio</th><th class="text-end">Saldo</th>
+              <th>Entrega</th><th>Estado</th>
+              <th data-no-toggle style="white-space:nowrap"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in confecciones %}
+            <tr>
+              <td class="fw-semibold">{{ c.codigo }}</td>
+              <td>{{ c.color }}</td>
+              <td>{{ c.modelo }}</td>
+              <td class="text-end">{{ c.precio|floatformat:2 }}</td>
+              <td class="text-end">{{ c.saldo|floatformat:2 }}</td>
+              <td>{{ c.fecha_entrega|date:"d/m/Y"|default:"—" }}</td>
+              <td><span class="badge-estado badge-{{ c.estado }}">{{ c.get_estado_display }}</span></td>
+              <td>
+                <div class="btn-actions">
+                  <a href="{% url 'editar_confeccion' c.id %}" class="btn btn-sm btn-icon btn-ghost-primary" title="Editar">
+                    <i data-lucide="pencil"></i>
+                  </a>
+                </div>
+              </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="8">
+              <div class="empty-state">
+                <i data-lucide="scissors" style="width:2rem;height:2rem;opacity:.3;display:block;margin:0 auto .75rem"></i>
+                Sin confecciones registradas.
+              </div>
+            </td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="card-footer d-flex justify-content-between">
+        <span class="text-muted small">{{ confecciones.count }} confección{{ confecciones.count|pluralize:"es" }}</span>
         <span class="fw-semibold">Total: Bs. {{ total_confecciones|floatformat:2 }}</span>
       </div>
     </div>
 
     <!-- Alquileres -->
     <div class="tab-pane fade" id="tab-alquileres" role="tabpanel">
-      <table class="table table-hover">
-        <thead>
-          <tr><th>Código</th><th>Prendas</th><th class="text-end">Total</th><th>Alquiler</th><th>Devolución</th><th>Estado</th><th></th></tr>
-        </thead>
-        <tbody>
-          {% for a in alquileres %}
-          <tr>
-            <td class="fw-semibold">{{ a.codigo }}</td>
-            <td>
-              {% for item in a.items.all %}
-                <span class="badge bg-light text-dark border me-1">{{ item.articulo.nombre }} ×{{ item.cantidad }}</span>
-              {% empty %}—{% endfor %}
-            </td>
-            <td class="text-end fw-semibold">{{ a.total|floatformat:2 }}</td>
-            <td>{{ a.fecha_alquiler|date:"d/m/Y" }}</td>
-            <td>{{ a.fecha_devolucion|date:"d/m/Y" }}</td>
-            <td><span class="badge-estado badge-{{ a.estado }}">{{ a.get_estado_display }}</span></td>
-            <td><div class="btn-actions">
-              <a href="{% url 'editar_alquiler' a.id %}" class="btn btn-sm btn-outline-primary" title="Editar"><i class="bi bi-pencil"></i></a>
-              <a href="{% url 'crear_confeccion' %}?desde_alquiler={{ a.id }}" class="btn btn-sm btn-outline-secondary" title="Confeccionar similar"><i class="bi bi-scissors"></i></a>
-            </div></td>
-          </tr>
-          {% empty %}
-          <tr><td colspan="7"><div class="empty-state"><i class="bi bi-bag d-block"></i>Sin alquileres.</div></td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      <div class="pagination-bar">
-        <span>{{ alquileres.count }} alquiler{{ alquileres.count|pluralize:"es" }}</span>
+      <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+          <thead>
+            <tr>
+              <th>Código</th><th>Prendas</th>
+              <th class="text-end">Total</th><th>Alquiler</th><th>Devolución</th>
+              <th>Estado</th>
+              <th data-no-toggle style="white-space:nowrap"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for a in alquileres %}
+            <tr>
+              <td class="fw-semibold">{{ a.codigo }}</td>
+              <td>
+                {% for item in a.items.all %}
+                  <span class="badge bg-light text-dark border me-1"><code>{{ item.prenda_item.codigo_item }}</code> {{ item.prenda_item.prenda.nombre }}{% if item.grupo_conjunto %}<span class="badge-conjunto" title="Conjunto {{ item.grupo_conjunto }}"><i class="bi bi-layers"></i>{{ item.grupo_conjunto }}</span>{% endif %}</span>
+                {% empty %}—{% endfor %}
+              </td>
+              <td class="text-end fw-semibold">{{ a.total|floatformat:2 }}</td>
+              <td>{{ a.fecha_alquiler|date:"d/m/Y" }}</td>
+              <td>{{ a.fecha_devolucion|date:"d/m/Y" }}</td>
+              <td><span class="badge-estado badge-{{ a.estado }}">{{ a.get_estado_display }}</span></td>
+              <td>
+                <div class="btn-actions">
+                  <a href="{% url 'editar_alquiler' a.id %}" class="btn btn-sm btn-icon btn-ghost-primary" title="Editar">
+                    <i data-lucide="pencil"></i>
+                  </a>
+                  <a href="{% url 'crear_confeccion' %}?desde_alquiler={{ a.id }}" class="btn btn-sm btn-icon btn-ghost-secondary" title="Confeccionar similar">
+                    <i data-lucide="scissors"></i>
+                  </a>
+                </div>
+              </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="7">
+              <div class="empty-state">
+                <i data-lucide="package" style="width:2rem;height:2rem;opacity:.3;display:block;margin:0 auto .75rem"></i>
+                Sin alquileres registrados.
+              </div>
+            </td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="card-footer d-flex justify-content-between">
+        <span class="text-muted small">{{ alquileres.count }} alquiler{{ alquileres.count|pluralize:"es" }}</span>
         <span class="fw-semibold">Total: Bs. {{ total_alquileres|floatformat:2 }}</span>
       </div>
     </div>
 
     <!-- Ventas -->
     <div class="tab-pane fade" id="tab-ventas" role="tabpanel">
-      <table class="table table-hover">
-        <thead>
-          <tr><th>Código</th><th>Prendas</th><th class="text-end">Total</th><th>Fecha</th><th></th></tr>
-        </thead>
-        <tbody>
-          {% for v in ventas %}
-          <tr>
-            <td class="fw-semibold">{{ v.codigo }}</td>
-            <td>
-              {% for item in v.items.all %}
-                <span class="badge bg-light text-dark border me-1">{{ item.articulo.nombre }} ×{{ item.cantidad }}</span>
-              {% empty %}—{% endfor %}
-            </td>
-            <td class="text-end fw-semibold">{{ v.total|floatformat:2 }}</td>
-            <td>{{ v.fecha_venta|date:"d/m/Y" }}</td>
-            <td><div class="btn-actions">
-              <a href="{% url 'editar_venta' v.id %}" class="btn btn-sm btn-outline-primary" title="Editar"><i class="bi bi-pencil"></i></a>
-            </div></td>
-          </tr>
-          {% empty %}
-          <tr><td colspan="5"><div class="empty-state"><i class="bi bi-cart d-block"></i>Sin ventas.</div></td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      <div class="pagination-bar">
-        <span>{{ ventas.count }} venta{{ ventas.count|pluralize }}</span>
+      <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+          <thead>
+            <tr>
+              <th>Código</th><th>Prendas</th>
+              <th class="text-end">Total</th><th>Fecha</th>
+              <th data-no-toggle style="white-space:nowrap"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for v in ventas %}
+            <tr>
+              <td class="fw-semibold">{{ v.codigo }}</td>
+              <td>
+                {% for item in v.items.all %}
+                  <span class="badge bg-light text-dark border me-1"><code>{{ item.prenda_item.codigo_item }}</code> {{ item.prenda_item.prenda.nombre }}{% if item.grupo_conjunto %}<span class="badge-conjunto" title="Conjunto {{ item.grupo_conjunto }}"><i class="bi bi-layers"></i>{{ item.grupo_conjunto }}</span>{% endif %}</span>
+                {% empty %}—{% endfor %}
+              </td>
+              <td class="text-end fw-semibold">{{ v.total|floatformat:2 }}</td>
+              <td>{{ v.fecha_venta|date:"d/m/Y" }}</td>
+              <td>
+                <div class="btn-actions">
+                  <a href="{% url 'editar_venta' v.id %}" class="btn btn-sm btn-icon btn-ghost-primary" title="Editar">
+                    <i data-lucide="pencil"></i>
+                  </a>
+                </div>
+              </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="5">
+              <div class="empty-state">
+                <i data-lucide="shopping-cart" style="width:2rem;height:2rem;opacity:.3;display:block;margin:0 auto .75rem"></i>
+                Sin ventas registradas.
+              </div>
+            </td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="card-footer d-flex justify-content-between">
+        <span class="text-muted small">{{ ventas.count }} venta{{ ventas.count|pluralize }}</span>
         <span class="fw-semibold">Total: Bs. {{ total_ventas|floatformat:2 }}</span>
       </div>
     </div>

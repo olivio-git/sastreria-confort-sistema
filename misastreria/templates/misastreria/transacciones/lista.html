@@ -1,125 +1,157 @@
 {% extends 'misastreria/base.html' %}
-{% block titulo %}Transacciones{% endblock %}
-{% block contenido %}
-<div class="page-header">
-  <h1 class="page-title"><i class="bi bi-currency-dollar me-2"></i>Transacciones</h1>
-  <div class="d-flex gap-2">
-    <button class="btn btn-outline-secondary btn-sm" data-col-toggle="tablaTransacciones">
-      <i class="bi bi-layout-three-columns me-1"></i>Columnas
-    </button>
-    <a href="{% url 'crear_transaccion' %}" class="btn btn-success btn-sm">
-      <i class="bi bi-plus-lg me-1"></i>Nueva Transacción
-    </a>
-  </div>
-</div>
+{% block titulo %}Gastos Varios{% endblock %}
 
-<form method="get" class="filter-bar" id="filterForm">
-  <input type="hidden" name="periodo" value="{{ periodo }}">
-  <div class="filter-group" style="flex:1;min-width:180px">
-    <label>Buscar</label>
-    <input type="text" name="q" class="form-control" placeholder="Código, descripción…"
-           value="{{ q }}" data-debounce="400">
-  </div>
-  <div class="filter-group">
-    <label>Tipo</label>
-    <select name="tipo_transaccion" class="form-select" data-debounce="0">
-      <option value="">Todos</option>
-      {% for val, lbl in tipo_transaccion_choices %}
-      <option value="{{ val }}" {% if val == tipo_transaccion %}selected{% endif %}>{{ lbl }}</option>
-      {% endfor %}
-    </select>
-  </div>
-  <div class="filter-group">
-    <label>Desde</label>
-    <input type="date" name="desde" class="form-control" value="{{ desde }}">
-  </div>
-  <div class="filter-group">
-    <label>Hasta</label>
-    <input type="date" name="hasta" class="form-control" value="{{ hasta }}">
-  </div>
-  <div class="filter-group justify-content-end">
-    <label class="invisible">.</label>
-    <div class="d-flex gap-2 flex-wrap">
-      <div class="date-shortcuts">
-        <a href="?periodo=semana" class="btn btn-outline-secondary {% if periodo == 'semana' %}active{% endif %}">Semana</a>
-        <a href="?periodo=mes" class="btn btn-outline-secondary {% if periodo == 'mes' %}active{% endif %}">Mes</a>
-        <a href="?periodo=3meses" class="btn btn-outline-secondary {% if periodo == '3meses' %}active{% endif %}">3 meses</a>
-      </div>
-      <button type="submit" class="btn btn-primary btn-sm" data-filter-btn><i class="bi bi-search me-1"></i>Filtrar</button>
-      <a href="{% url 'lista_transacciones' %}" class="btn btn-outline-secondary">Limpiar</a>
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="banknote" class="me-2 text-muted"></i>Gastos Varios
+      </h2>
+    </div>
+    <div class="col-auto ms-auto d-flex gap-2">
+      <button class="btn btn-outline-secondary" data-col-toggle="tablaTransacciones">
+        <i data-lucide="layout-list"></i>Columnas
+      </button>
+      <a href="{% url 'crear_transaccion' %}" class="btn btn-success">
+        <i data-lucide="plus"></i>Nuevo Gasto
+      </a>
     </div>
   </div>
-  <input type="hidden" name="orden" value="{{ orden }}">
-</form>
+</div>
+{% endblock %}
 
-<div class="d-flex justify-content-end mb-2">
-  <a href="{{ orden_toggle_url }}" class="btn btn-outline-secondary btn-sm" title="Cambiar orden">
-    {% if orden == 'desc' %}<i class="bi bi-sort-down me-1"></i>Más reciente primero
-    {% else %}<i class="bi bi-sort-up me-1"></i>Más antiguo primero{% endif %}
-  </a>
+{% block contenido %}
+<!-- Filtros -->
+<div class="card mb-3">
+  <div class="card-body">
+    <form method="get" class="row g-2 align-items-end" id="filterForm">
+      <input type="hidden" name="periodo" value="{{ periodo }}">
+      <div class="col-12 col-md-4">
+        <label class="form-label small mb-1 fw-semibold text-muted">Buscar</label>
+        <input type="text" name="q" class="form-control" placeholder="Código, descripción…"
+               value="{{ q }}" data-debounce="400">
+      </div>
+      <div class="col-6 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Tipo</label>
+        <select name="tipo_transaccion" class="form-select" data-debounce="0">
+          <option value="">Todos</option>
+          {% for val, lbl in tipo_transaccion_choices %}
+          <option value="{{ val }}" {% if val == tipo_transaccion %}selected{% endif %}>{{ lbl }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Servicio</label>
+        <select name="tipo_servicio" class="form-select" data-debounce="0">
+          <option value="">Todos</option>
+          {% for val, lbl in tipo_servicio_choices %}
+          <option value="{{ val }}" {% if val == tipo_servicio %}selected{% endif %}>{{ lbl }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Desde</label>
+        <input type="date" name="desde" class="form-control" value="{{ desde }}">
+      </div>
+      <div class="col-6 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Hasta</label>
+        <input type="date" name="hasta" class="form-control" value="{{ hasta }}">
+      </div>
+      <div class="col-auto ms-auto d-flex gap-2 align-items-end flex-wrap">
+        <div class="date-shortcuts">
+          <a href="?periodo=semana" class="btn btn-outline-secondary {% if periodo == 'semana' %}active{% endif %}">Semana</a>
+          <a href="?periodo=mes" class="btn btn-outline-secondary {% if periodo == 'mes' %}active{% endif %}">Mes</a>
+          <a href="?periodo=3meses" class="btn btn-outline-secondary {% if periodo == '3meses' %}active{% endif %}">3 meses</a>
+        </div>
+        <button type="submit" class="btn btn-primary d-flex align-items-center gap-1" data-filter-btn>
+          <i data-lucide="search"></i>Filtrar
+        </button>
+        <a href="{% url 'lista_transacciones' %}" class="btn btn-outline-secondary">Limpiar</a>
+      </div>
+      <input type="hidden" name="orden" value="{{ orden }}">
+    </form>
+  </div>
 </div>
 
-<div class="table-wrapper">
-  <table class="table table-hover" id="tablaTransacciones">
-    <thead>
-      <tr>
-        <th>Código</th>
-        <th>Tipo</th>
-        <th>Descripción</th>
-        <th>Servicio</th>
-        <th>Fecha</th>
-        <th>Cant.</th>
-        <th>Monto</th>
-        <th data-no-toggle>Acciones</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for t in page_obj %}
-      <tr>
-        <td class="fw-semibold">{{ t.codigo }}</td>
-        <td>
-          <span class="badge-estado {% if t.tipo_transaccion == 'ingreso' %}badge-entregado{% else %}badge-pendiente{% endif %}">
-            {{ t.get_tipo_transaccion_display }}
-          </span>
-        </td>
-        <td class="text-muted" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-          {{ t.descripcion|truncatechars:60 }}
-        </td>
-        <td>{{ t.get_tipo_servicio_display }}</td>
-        <td>{{ t.fecha|date:"d/m/Y" }}</td>
-        <td>{{ t.cantidad }}</td>
-        <td>{{ t.monto|floatformat:2 }}</td>
-        <td>
-          <div class="btn-actions">
-            <a href="{% url 'editar_transaccion' t.id %}" class="btn btn-sm btn-outline-primary" title="Editar"><i class="bi bi-pencil"></i></a>
-            <a href="{% url 'eliminar_transaccion' t.id %}" class="btn btn-sm btn-outline-danger" title="Eliminar"><i class="bi bi-trash"></i></a>
-          </div>
-        </td>
-      </tr>
-      {% empty %}
-      <tr>
-        <td colspan="8">
-          <div class="empty-state">
-            <i class="bi bi-currency-dollar d-block"></i>
-            No hay transacciones en el período seleccionado.
-          </div>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  <div class="pagination-bar">
-    <span>{{ total }} transacción{{ total|pluralize:"es" }}</span>
-    <nav>
-      <ul class="pagination pagination-sm mb-0">
+<!-- Tabla -->
+<div class="card">
+  <div class="card-header d-flex align-items-center">
+    <span class="text-muted small">{{ total }} gasto{{ total|pluralize:"s" }}</span>
+    <div class="ms-auto">
+      <a href="{{ orden_toggle_url }}" class="btn btn-outline-secondary" title="Cambiar orden">
+        {% if orden == 'desc' %}
+          <i data-lucide="arrow-down-wide-narrow"></i>Más reciente primero
+        {% else %}
+          <i data-lucide="arrow-up-wide-narrow"></i>Más antiguo primero
+        {% endif %}
+      </a>
+    </div>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table" id="tablaTransacciones">
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Tipo</th>
+          <th>Descripción</th>
+          <th>Servicio</th>
+          <th>Fecha</th>
+          <th>Cant.</th>
+          <th>Monto</th>
+          <th data-no-toggle style="white-space:nowrap">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in page_obj %}
+        <tr>
+          <td class="fw-semibold">{{ t.codigo }}</td>
+          <td>
+            <span class="badge-estado {% if t.tipo_transaccion == 'ingreso' %}badge-entregado{% else %}badge-pendiente{% endif %}">
+              {{ t.get_tipo_transaccion_display }}
+            </span>
+          </td>
+          <td class="text-muted" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+            {{ t.descripcion|truncatechars:60 }}
+          </td>
+          <td>{{ t.get_tipo_servicio_display }}</td>
+          <td>{{ t.fecha|date:"d/m/Y" }}</td>
+          <td>{{ t.cantidad }}</td>
+          <td>{{ t.monto|floatformat:2 }}</td>
+          <td style="white-space:nowrap">
+            <div class="btn-actions">
+              <a href="{% url 'editar_transaccion' t.id %}" class="btn btn-sm btn-icon btn-ghost-primary" title="Editar"><i data-lucide="pencil"></i></a>
+              <button type="button" class="btn btn-sm btn-icon btn-ghost-danger" title="Eliminar"
+                data-delete-url="{% url 'eliminar_transaccion' t.id %}"
+                data-delete-name="{{ t }}"><i data-lucide="trash-2"></i></button>
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="8">
+            <div class="empty-state">
+              <i data-lucide="banknote" style="width:2.5rem;height:2.5rem;opacity:.3;display:block;margin:0 auto .75rem"></i>
+              No hay transacciones en el período seleccionado.
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer d-flex align-items-center">
+    <p class="m-0 text-muted small">Mostrando <strong>{{ page_obj.start_index }}–{{ page_obj.end_index }}</strong> de <strong>{{ total }}</strong></p>
+    <nav class="ms-auto">
+      <ul class="pagination pagination-sm m-0">
         {% if page_obj.has_previous %}
-          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&tipo_transaccion={{ tipo_transaccion }}&desde={{ desde }}&hasta={{ hasta }}&orden={{ orden }}">«</a></li>
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&tipo_transaccion={{ tipo_transaccion }}&desde={{ desde }}&hasta={{ hasta }}&orden={{ orden }}">‹</a></li>
+          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&tipo_transaccion={{ tipo_transaccion }}&tipo_servicio={{ tipo_servicio }}&desde={{ desde }}&hasta={{ hasta }}&orden={{ orden }}">«</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&tipo_transaccion={{ tipo_transaccion }}&tipo_servicio={{ tipo_servicio }}&desde={{ desde }}&hasta={{ hasta }}&orden={{ orden }}">‹</a></li>
         {% endif %}
         <li class="page-item active"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
         {% if page_obj.has_next %}
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&tipo_transaccion={{ tipo_transaccion }}&desde={{ desde }}&hasta={{ hasta }}&orden={{ orden }}">›</a></li>
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&tipo_transaccion={{ tipo_transaccion }}&desde={{ desde }}&hasta={{ hasta }}&orden={{ orden }}">»</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&tipo_transaccion={{ tipo_transaccion }}&tipo_servicio={{ tipo_servicio }}&desde={{ desde }}&hasta={{ hasta }}&orden={{ orden }}">›</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&tipo_transaccion={{ tipo_transaccion }}&tipo_servicio={{ tipo_servicio }}&desde={{ desde }}&hasta={{ hasta }}&orden={{ orden }}">»</a></li>
         {% endif %}
       </ul>
     </nav>

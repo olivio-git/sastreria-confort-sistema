@@ -1,0 +1,123 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Conceptos de Gasto{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="tags" class="me-2 text-muted"></i>Conceptos de Gasto
+      </h2>
+    </div>
+    <div class="col-auto ms-auto">
+      <a href="{% url 'crear_tipo_gasto' %}" class="btn btn-success btn-sm">
+        <i data-lucide="plus" class="me-1"></i>Nuevo Concepto
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+<form method="get" class="filter-bar" id="filterForm">
+  <div class="filter-group" style="flex:1;min-width:180px">
+    <label>Buscar</label>
+    <input type="text" name="q" class="form-control" placeholder="Nombre..." value="{{ q }}" data-debounce="400">
+  </div>
+  <div class="filter-group">
+    <label>Estado</label>
+    <select name="activo" class="form-select" data-debounce="0">
+      <option value="">Todos</option>
+      <option value="1" {% if activo == '1' %}selected{% endif %}>Activos</option>
+      <option value="0" {% if activo == '0' %}selected{% endif %}>Inactivos</option>
+    </select>
+  </div>
+  <div class="filter-group justify-content-end">
+    <label class="invisible">.</label>
+    <a href="{% url 'lista_tipo_gasto' %}" class="btn btn-outline-secondary">Limpiar</a>
+  </div>
+</form>
+
+<div class="table-wrapper">
+  <table class="table table-hover">
+    <thead>
+      <tr>
+        <th>Nombre</th>
+        <th>Descripción</th>
+        <th>Estado</th>
+        <th>Acciones</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for tipo in page_obj %}
+      <tr>
+        <td class="fw-semibold">{{ tipo.nombre }}</td>
+        <td class="text-muted">{{ tipo.descripcion|default:"—" }}</td>
+        <td>
+          <span class="badge-estado {% if tipo.activo %}badge-entregado{% else %}badge-inactivo{% endif %}">
+            {% if tipo.activo %}Activo{% else %}Inactivo{% endif %}
+          </span>
+        </td>
+        <td>
+          <div class="btn-actions">
+            <a href="{% url 'editar_tipo_gasto' tipo.pk %}" class="btn btn-sm btn-outline-primary" title="Editar">
+              <i data-lucide="pencil"></i>
+            </a>
+            <button type="button"
+                    class="btn btn-sm btn-outline-danger"
+                    title="Eliminar"
+                    data-bs-toggle="modal"
+                    data-bs-target="#deleteModal"
+                    data-action="{% url 'eliminar_tipo_gasto' tipo.pk %}"
+                    data-name="{{ tipo.nombre }}">
+              <i data-lucide="trash-2"></i>
+            </button>
+          </div>
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="4">
+          <div class="empty-state">
+            <i data-lucide="tags" style="width:2.5rem;height:2.5rem;opacity:.3;display:block;margin:0 auto .75rem"></i>
+            No hay conceptos de gasto registrados.
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="pagination-bar">
+    <span>{{ total }} registro{{ total|pluralize }}</span>
+    <nav>
+      <ul class="pagination pagination-sm mb-0">
+        {% if page_obj.has_previous %}
+          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&activo={{ activo }}">«</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&activo={{ activo }}">‹</a></li>
+        {% endif %}
+        <li class="page-item active">
+          <span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+        </li>
+        {% if page_obj.has_next %}
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&activo={{ activo }}">›</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&activo={{ activo }}">»</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const deleteModal = document.getElementById('deleteModal');
+if (deleteModal) {
+  deleteModal.addEventListener('show.bs.modal', function(e) {
+    const btn = e.relatedTarget;
+    document.getElementById('deleteModalForm').action = btn.dataset.action;
+    document.getElementById('deleteModalName').textContent = btn.dataset.name;
+  });
+}
+</script>
+{% endblock %}

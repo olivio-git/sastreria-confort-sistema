@@ -1,0 +1,135 @@
+{% extends 'misastreria/base.html' %}
+{% load static %}
+
+{% block titulo %}Total facturado por cliente{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="users" class="me-2 text-muted"></i>Total facturado por cliente
+      </h2>
+      <div class="text-muted mt-1 small">Facturación total por cliente en el período seleccionado.</div>
+    </div>
+    <div class="col-auto ms-auto d-flex gap-2">
+      <button type="button" class="btn btn-outline-secondary" onclick="exportReport('pdf')">
+        <i data-lucide="file-text"></i> PDF
+      </button>
+      <button type="button" class="btn btn-outline-success" onclick="exportReport('excel')">
+        <i data-lucide="file-spreadsheet"></i> Excel
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <form method="GET" action="{% url 'analitica_clientes_ltv' %}" class="row g-2 align-items-end" id="filter-form">
+      <div class="col-md-3">
+        <label for="fecha_inicio" class="form-label small mb-1 fw-semibold text-muted">Fecha Inicio:</label>
+        <input type="date" class="form-control form-control-sm" id="fecha_inicio" name="fecha_inicio" value="{{ fecha_inicio }}">
+      </div>
+      <div class="col-md-3">
+        <label for="fecha_fin" class="form-label small mb-1 fw-semibold text-muted">Fecha Fin:</label>
+        <input type="date" class="form-control form-control-sm" id="fecha_fin" name="fecha_fin" value="{{ fecha_fin }}">
+      </div>
+      <div class="col-md-2">
+        <label for="limit" class="form-label small mb-1 fw-semibold text-muted">Mostrar (máx.):</label>
+        <input type="number" class="form-control form-control-sm" id="limit" name="limit" value="{{ limit }}" min="1" max="200">
+      </div>
+      <div class="col-md-4 d-flex gap-2 align-items-end">
+        <button type="submit" class="btn btn-primary btn-sm">
+          <i data-lucide="filter"></i> Filtrar
+        </button>
+        <a href="{% url 'analitica_clientes_ltv' %}" class="btn btn-outline-secondary btn-sm">Limpiar</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <span class="text-muted small">{{ total_clientes }} cliente{{ total_clientes|pluralize }} encontrado{{ total_clientes|pluralize }}</span>
+  </div>
+  <div class="table-responsive">
+    {% if page_obj %}
+    <table class="table table-vcenter card-table table-hover">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Cliente</th>
+          <th class="text-end">Ventas (S/)</th>
+          <th class="text-end">Alquileres (S/)</th>
+          <th class="text-end">Confecciones (S/)</th>
+          <th class="text-end">Reparaciones (S/)</th>
+          <th class="text-end">Total facturado (S/)</th>
+          <th class="text-end">Nº de servicios</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in page_obj %}
+        <tr>
+          <td class="text-muted small">{{ forloop.counter0|add:page_obj.start_index }}</td>
+          <td class="fw-semibold">{{ row.cliente_nombre }}</td>
+          <td class="text-end">{{ row.total_ventas|floatformat:2 }}</td>
+          <td class="text-end">{{ row.total_alquileres|floatformat:2 }}</td>
+          <td class="text-end">{{ row.total_confecciones|floatformat:2 }}</td>
+          <td class="text-end">{{ row.total_reparaciones|floatformat:2 }}</td>
+          <td class="text-end fw-semibold" style="color:var(--success)">{{ row.total_global|floatformat:2 }}</td>
+          <td class="text-end">{{ row.num_transacciones }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="8">
+            <div class="text-center text-muted py-3">
+              <i class="bi bi-inbox d-block mb-2" style="font-size:2rem"></i>
+              Sin datos para los filtros seleccionados.
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="card-body">
+      <p class="text-center text-muted">Sin datos para los filtros seleccionados.</p>
+    </div>
+    {% endif %}
+  </div>
+  {% if page_obj.paginator.num_pages > 1 %}
+  <div class="card-footer d-flex align-items-center">
+    <span class="text-muted small">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+    <nav class="ms-auto">
+      <ul class="pagination pagination-sm mb-0">
+        {% if page_obj.has_previous %}
+          <li class="page-item"><a class="page-link" href="?page=1&fecha_inicio={{ fecha_inicio }}&fecha_fin={{ fecha_fin }}&limit={{ limit }}">«</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&fecha_inicio={{ fecha_inicio }}&fecha_fin={{ fecha_fin }}&limit={{ limit }}">‹</a></li>
+        {% endif %}
+        <li class="page-item active">
+          <span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+        </li>
+        {% if page_obj.has_next %}
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&fecha_inicio={{ fecha_inicio }}&fecha_fin={{ fecha_fin }}&limit={{ limit }}">›</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&fecha_inicio={{ fecha_inicio }}&fecha_fin={{ fecha_fin }}&limit={{ limit }}">»</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function exportReport(format) {
+    const params = new URLSearchParams(window.location.search);
+    params.set('export_format', format);
+    window.location.href = '?' + params.toString();
+}
+</script>
+{% endblock %}

@@ -1,83 +1,242 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}{{ titulo }}{% endblock %}
-{% block contenido %}
 
-<div class="page-header">
-  <h1 class="page-title"><i class="bi bi-scissors me-2"></i>{{ titulo }}</h1>
-  {% if insumo %}<small class="text-muted ms-2">{{ insumo.codigo }}</small>{% endif %}
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'lista_insumos' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left"></i>Volver
+      </a>
+    </div>
+    <div class="col">
+      <h2 class="page-title"><i data-lucide="scissors" class="me-2 text-muted"></i>{{ titulo }}{% if insumo %} <small class="text-muted ms-2 fs-6">{{ insumo.codigo }}</small>{% endif %}</h2>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+<div class="row justify-content-center">
+  <div class="col-12 col-lg-9 col-xl-7">
+    <div class="card">
+      <div class="card-header"><h3 class="card-title">Datos</h3></div>
+      <div class="card-body">
+        <form method="post" id="mainForm">
+          {% csrf_token %}
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label">{{ form.tipo_material.label }}{% if not form.tipo_material.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              <div class="input-group">
+                <div style="position:relative;flex:1">
+                  <input type="text" class="form-control" id="text_tipo_material"
+                         placeholder="Buscar tipo…" autocomplete="off"
+                         value="{% if form.instance.pk and form.instance.tipo_material %}{{ form.instance.tipo_material }}{% endif %}">
+                  {{ form.tipo_material }}
+                </div>
+                <button type="button" class="btn btn-outline-secondary" id="btnNuevoTipoMaterial" title="Crear nuevo tipo">
+                  <i data-lucide="plus"></i>
+                </button>
+              </div>
+              {% if form.tipo_material.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.tipo_material.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-8">
+              <label class="form-label">{{ form.articulo.label }}{% if not form.articulo.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.articulo }}
+              {% if form.articulo.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.articulo.errors }}</div>{% endif %}
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label">{{ form.coleccion.label }}{% if not form.coleccion.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.coleccion }}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">{{ form.color.label }}{% if not form.color.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.color }}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">{{ form.tipo_tela.label }}{% if not form.tipo_tela.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.tipo_tela }}
+            </div>
+
+            <div class="col-md-6">
+              <label class="form-label">{{ form.codigo_referencia.label }}{% if not form.codigo_referencia.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.codigo_referencia }}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">{{ form.proveedor.label }}{% if not form.proveedor.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.proveedor }}
+            </div>
+
+            <div class="col-md-3">
+              <label class="form-label">{{ form.cantidad.label }}{% if not form.cantidad.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.cantidad }}
+              {% if form.cantidad.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.cantidad.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">{{ form.unidad_medida.label }}{% if not form.unidad_medida.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              <div class="input-group">
+                <div style="position:relative;flex:1">
+                  <input type="text" class="form-control" id="text_unidad_medida"
+                         placeholder="Buscar unidad…" autocomplete="off"
+                         value="{% if form.instance.pk and form.instance.unidad_medida %}{{ form.instance.unidad_medida }}{% endif %}">
+                  {{ form.unidad_medida }}
+                </div>
+                <button type="button" class="btn btn-outline-secondary" id="btnNuevaUnidadMedida" title="Crear nueva unidad">
+                  <i data-lucide="plus"></i>
+                </button>
+              </div>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">{{ form.stock_minimo.label }}{% if not form.stock_minimo.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.stock_minimo }}
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">{{ form.precio_costo.label }}{% if not form.precio_costo.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.precio_costo }}
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label">{{ form.estado.label }}{% if not form.estado.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.estado }}
+            </div>
+            <div class="col-12">
+              <label class="form-label">{{ form.notas.label }}{% if not form.notas.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.notas }}
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="card-footer text-end d-flex justify-content-end gap-2">
+        <a href="{% url 'lista_insumos' %}" class="btn btn-outline-secondary">Cancelar</a>
+        <button type="submit" form="mainForm" class="btn btn-primary">
+          <i data-lucide="check"></i>Guardar
+        </button>
+      </div>
+    </div>
+  </div>
 </div>
 
-<form method="post" class="form-card">
-  {% csrf_token %}
-
-  <div class="row g-3">
-    <div class="col-md-4">
-      <label class="form-label">{{ form.tipo_material.label }}</label>
-      {{ form.tipo_material }}
-      {% if form.tipo_material.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.tipo_material.errors }}</div>{% endif %}
-    </div>
-    <div class="col-md-8">
-      <label class="form-label">{{ form.articulo.label }}</label>
-      {{ form.articulo }}
-      {% if form.articulo.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.articulo.errors }}</div>{% endif %}
-    </div>
-
-    <div class="col-md-4">
-      <label class="form-label">{{ form.coleccion.label }}</label>
-      {{ form.coleccion }}
-    </div>
-    <div class="col-md-4">
-      <label class="form-label">{{ form.color.label }}</label>
-      {{ form.color }}
-    </div>
-    <div class="col-md-4">
-      <label class="form-label">{{ form.tipo_tela.label }}</label>
-      {{ form.tipo_tela }}
-    </div>
-
-    <div class="col-md-6">
-      <label class="form-label">{{ form.codigo_referencia.label }}</label>
-      {{ form.codigo_referencia }}
-    </div>
-    <div class="col-md-6">
-      <label class="form-label">{{ form.proveedor.label }}</label>
-      {{ form.proveedor }}
-    </div>
-
-    <div class="col-md-3">
-      <label class="form-label">{{ form.cantidad.label }}</label>
-      {{ form.cantidad }}
-      {% if form.cantidad.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.cantidad.errors }}</div>{% endif %}
-    </div>
-    <div class="col-md-3">
-      <label class="form-label">{{ form.unidad_medida.label }}</label>
-      {{ form.unidad_medida }}
-    </div>
-    <div class="col-md-3">
-      <label class="form-label">{{ form.stock_minimo.label }}</label>
-      {{ form.stock_minimo }}
-    </div>
-    <div class="col-md-3">
-      <label class="form-label">{{ form.precio_costo.label }}</label>
-      {{ form.precio_costo }}
-    </div>
-
-    <div class="col-md-4">
-      <label class="form-label">{{ form.estado.label }}</label>
-      {{ form.estado }}
-    </div>
-    <div class="col-12">
-      <label class="form-label">{{ form.notas.label }}</label>
-      {{ form.notas }}
+<!-- Modal: Nuevo tipo de material -->
+<div class="modal fade" id="modalNuevoTipoMaterial" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Nuevo tipo de material</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label">Nombre</label>
+          <input type="text" class="form-control" id="nuevoTipoMaterialNombre" placeholder="Ej: Lino">
+        </div>
+        <div id="modalTipoMaterialError" class="text-danger small" style="display:none"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btnGuardarTipoMaterial">Guardar</button>
+      </div>
     </div>
   </div>
+</div>
 
-  <div class="d-flex gap-2 mt-4">
-    <button type="submit" class="btn btn-primary">
-      <i class="bi bi-check-lg me-1"></i>Guardar
-    </button>
-    <a href="{% url 'lista_insumos' %}" class="btn btn-outline-secondary">Cancelar</a>
+<!-- Modal: Nueva unidad de medida -->
+<div class="modal fade" id="modalNuevaUnidadMedida" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Nueva unidad de medida</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label">Nombre</label>
+          <input type="text" class="form-control" id="nuevaUnidadNombre" placeholder="Ej: Gramo">
+        </div>
+        <div id="modalUnidadError" class="text-danger small" style="display:none"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btnGuardarUnidadMedida">Guardar</button>
+      </div>
+    </div>
   </div>
-</form>
+</div>
+{% endblock %}
 
+{% block extra_js %}
+{% load static %}
+<script>
+(function() {
+  // Combobox tipo_material
+  var tmOpts = {{ tipo_material_opts|default:"[]"|safe }};
+  var tmHidden = document.getElementById('id_tipo_material');
+  var tmText   = document.getElementById('text_tipo_material');
+  if (tmHidden && tmText) {
+    window.makeLocalCombobox(tmText, tmHidden, tmOpts);
+  }
+  var modalTM = document.getElementById('modalNuevoTipoMaterial');
+  if (modalTM) {
+    document.getElementById('btnNuevoTipoMaterial').addEventListener('click', function() {
+      document.getElementById('nuevoTipoMaterialNombre').value = '';
+      document.getElementById('modalTipoMaterialError').style.display = 'none';
+      new bootstrap.Modal(modalTM).show();
+    });
+    document.getElementById('btnGuardarTipoMaterial').addEventListener('click', function() {
+      var nombre = document.getElementById('nuevoTipoMaterialNombre').value.trim();
+      var errEl  = document.getElementById('modalTipoMaterialError');
+      if (!nombre) { errEl.textContent = 'El nombre es requerido.'; errEl.style.display = 'block'; return; }
+      fetch('{% url "crear_tipo_material" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'nombre=' + encodeURIComponent(nombre),
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error) { errEl.textContent = data.error; errEl.style.display = 'block'; return; }
+        if (tmHidden) tmHidden.value = data.id;
+        if (tmText)   tmText.value   = data.nombre;
+        bootstrap.Modal.getInstance(modalTM).hide();
+      })
+      .catch(function() { errEl.textContent = 'Error al guardar.'; errEl.style.display = 'block'; });
+    });
+  }
+
+  // Combobox unidad_medida
+  var umOpts = {{ unidad_medida_opts|default:"[]"|safe }}.map(function(u) {
+    return { id: u.id, nombre: u.nombre };
+  });
+  var umHidden = document.getElementById('id_unidad_medida');
+  var umText   = document.getElementById('text_unidad_medida');
+  if (umHidden && umText) {
+    window.makeLocalCombobox(umText, umHidden, umOpts);
+  }
+  var modalUM = document.getElementById('modalNuevaUnidadMedida');
+  if (modalUM) {
+    document.getElementById('btnNuevaUnidadMedida').addEventListener('click', function() {
+      document.getElementById('nuevaUnidadNombre').value = '';
+      document.getElementById('modalUnidadError').style.display = 'none';
+      new bootstrap.Modal(modalUM).show();
+    });
+    document.getElementById('btnGuardarUnidadMedida').addEventListener('click', function() {
+      var nombre = document.getElementById('nuevaUnidadNombre').value.trim();
+      var errEl  = document.getElementById('modalUnidadError');
+      if (!nombre) { errEl.textContent = 'El nombre es requerido.'; errEl.style.display = 'block'; return; }
+      fetch('{% url "crear_unidad_medida" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'nombre=' + encodeURIComponent(nombre),
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error) { errEl.textContent = data.error; errEl.style.display = 'block'; return; }
+        if (umHidden) umHidden.value = data.id;
+        if (umText)   umText.value   = data.nombre;
+        bootstrap.Modal.getInstance(modalUM).hide();
+      })
+      .catch(function() { errEl.textContent = 'Error al guardar.'; errEl.style.display = 'block'; });
+    });
+  }
+})();
+</script>
 {% endblock %}

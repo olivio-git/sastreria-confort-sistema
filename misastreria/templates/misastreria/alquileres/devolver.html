@@ -1,41 +1,103 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}Devolver Alquiler{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'lista_alquileres' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left"></i>Volver
+      </a>
+    </div>
+    <div class="col">
+      <h2 class="page-title"><i data-lucide="package-check" class="me-2 text-muted"></i>Confirmar Devolución</h2>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
 {% block contenido %}
-
-<div class="page-header">
-  <h1 class="page-title"><i class="bi bi-arrow-return-left me-2"></i>Devolver Alquiler</h1>
+<div class="row justify-content-center">
+  <div class="col-12 col-sm-9 col-md-6 col-lg-5">
+    <div class="card card-md">
+      <div class="card-status-top bg-success"></div>
+      <div class="card-header">
+        <h3 class="card-title">{{ alquiler.codigo }}</h3>
+        {% if alquiler.cliente %}
+        <span class="text-muted ms-2 small">{{ alquiler.cliente }}</span>
+        {% endif %}
+      </div>
+      <div class="card-body">
+        <p class="text-muted mb-3">Se restaurarán las siguientes prendas a disponible:</p>
+        <div class="table-responsive">
+          <table class="table table-vcenter card-table table-sm mb-0">
+            <thead>
+              <tr>
+                <th>Código item</th>
+                <th>Prenda</th>
+                <th>Condición actual</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in alquiler.items.all %}
+              <tr>
+                <td><code>{{ item.prenda_item.codigo_item }}</code></td>
+                <td>{{ item.prenda_item.prenda.nombre }}</td>
+                <td>{{ item.prenda_item.get_condicion_display }}</td>
+                <td><span class="badge-estado badge-alquilado">{{ item.prenda_item.get_estado_display }}</span></td>
+              </tr>
+              {% empty %}
+              <tr>
+                <td colspan="4" class="text-muted text-center py-2">Sin prendas registradas.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% if tiene_garantia_monetaria %}
+      <div class="card-body border-top pt-3">
+        <p class="fw-semibold mb-2">
+          <i data-lucide="shield-check" style="width:1rem;height:1rem;vertical-align:middle" class="me-1 text-success"></i>
+          Garantía recibida: <span class="text-success">{{ alquiler.get_garantia_tipo_display }} — Bs. {{ alquiler.garantia_monto|floatformat:2 }}</span>
+        </p>
+        <label class="form-label fw-semibold mb-1" for="garantia_devolver">
+          Monto a devolver al cliente (Bs.)
+        </label>
+        <input
+          type="number"
+          id="garantia_devolver"
+          name="garantia_devolver"
+          class="form-control"
+          step="0.01"
+          min="0"
+          max="{{ alquiler.garantia_monto }}"
+          value="{{ alquiler.garantia_monto|floatformat:2 }}"
+          form="form-devolver"
+        >
+        <div class="form-text text-muted">
+          Podés reducir el monto si aplicás un recargo. Ingresá <strong>0</strong> para no devolver nada.
+        </div>
+      </div>
+      {% elif alquiler.garantia_tipo == 'descripcion' and alquiler.garantia %}
+      <div class="card-body border-top pt-3">
+        <p class="text-muted small mb-1 fw-semibold">Garantía registrada</p>
+        <p class="mb-0 small">{{ alquiler.garantia }}</p>
+      </div>
+      {% endif %}
+      <div class="card-footer d-flex justify-content-center gap-3">
+        <a href="{% url 'lista_alquileres' %}" class="btn btn-outline-secondary">
+          <i data-lucide="x"></i>Cancelar
+        </a>
+        <form method="post" id="form-devolver" class="d-inline">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-success d-flex align-items-center gap-1">
+            <i data-lucide="check"></i>Confirmar devolución
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
 </div>
-
-<div class="form-card">
-  <p class="mb-3">
-    ¿Confirmas la devolución del alquiler <strong>{{ alquiler.codigo }}</strong>
-    {% if alquiler.cliente %}del cliente <strong>{{ alquiler.cliente }}</strong>{% endif %}?
-  </p>
-  <p class="text-muted mb-3">Se restaurará el stock de las siguientes prendas:</p>
-
-  <table class="table table-sm mb-4">
-    <thead>
-      <tr><th>Prenda</th><th class="text-center">Cantidad</th></tr>
-    </thead>
-    <tbody>
-      {% for item in alquiler.items.all %}
-      <tr>
-        <td>{{ item.articulo }}</td>
-        <td class="text-center">{{ item.cantidad }}</td>
-      </tr>
-      {% empty %}
-      <tr><td colspan="2" class="text-muted">Sin prendas registradas.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-
-  <form method="post" class="d-flex gap-2">
-    {% csrf_token %}
-    <button type="submit" class="btn btn-success">
-      <i class="bi bi-check-lg me-1"></i>Confirmar devolución
-    </button>
-    <a href="{% url 'lista_alquileres' %}" class="btn btn-outline-secondary">Cancelar</a>
-  </form>
-</div>
-
 {% endblock %}

@@ -1,11 +1,31 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}Eliminar Confección{% endblock %}
 {% block contenido %}
-<h1>Eliminar Confección</h1>
-<p>¿Estás seguro de que deseas eliminar la confección <strong>{{ confeccion.codigo }} - {{ confeccion.get_tipo_prenda_display }}</strong> para el cliente <strong>{{ confeccion.cliente }}</strong>?</p>
-<form method="post">
-    {% csrf_token %}
-    <button type="submit" class="btn btn-danger">Eliminar</button>
-    <a href="{% url 'lista_confecciones' %}" class="btn btn-secondary">Cancelar</a>
-</form>
+<div class="row justify-content-center">
+  <div class="col-12 col-sm-8 col-md-5 col-lg-4">
+    <div class="card card-md">
+      <div class="card-status-top bg-danger"></div>
+      <div class="card-body text-center py-4">
+        <div class="mb-3 text-danger"><i data-lucide="scissors" style="width:3rem;height:3rem;opacity:.7"></i></div>
+        <h3 class="card-title mb-1">¿Eliminar Confección?</h3>
+        <p class="text-muted mb-0">
+          <strong>{{ confeccion.codigo }}{% if confeccion.tipos_prenda_display %} - {{ confeccion.tipos_prenda_display }}{% endif %}</strong><br>
+          {% if confeccion.cliente %}<strong>{{ confeccion.cliente }}</strong><br>{% endif %}
+          <small>Esta acción no se puede deshacer.</small>
+        </p>
+      </div>
+      <div class="card-footer d-flex justify-content-center gap-3">
+        <a href="{% url 'lista_confecciones' %}" class="btn btn-outline-secondary">
+          <i data-lucide="x"></i>Cancelar
+        </a>
+        <form method="post" class="d-inline">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-danger">
+            <i data-lucide="trash-2"></i>Eliminar
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}

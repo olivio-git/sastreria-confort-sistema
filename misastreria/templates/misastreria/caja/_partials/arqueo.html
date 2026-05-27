@@ -1,0 +1,26 @@
+{% if arqueo %}
+<table class="table table-vcenter table-sm mb-0" style="font-size:.83rem">
+  <thead>
+    <tr>
+      <th class="ps-3">Forma de Pago</th>
+      <th class="text-end">Ingresos</th>
+      <th class="text-end">Egresos</th>
+      <th class="text-end pe-3">Neto</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for fp, vals in arqueo.items %}
+    <tr>
+      <td class="fw-semibold text-capitalize ps-3">{{ fp }}</td>
+      <td class="text-end text-success">{{ vals.ingresos|floatformat:2 }}</td>
+      <td class="text-end text-danger">{{ vals.egresos|floatformat:2 }}</td>
+      <td class="text-end fw-semibold pe-3 {% if vals.neto > 0 %}text-success{% elif vals.neto < 0 %}text-danger{% else %}text-muted{% endif %}">
+        {% if vals.neto > 0 %}+{% endif %}{{ vals.neto|floatformat:2 }}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="text-muted small mb-0 p-3">Sin movimientos en esta sesión.</p>
+{% endif %}

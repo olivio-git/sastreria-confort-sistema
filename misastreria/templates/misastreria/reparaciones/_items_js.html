@@ -1,0 +1,172 @@
+<script>
+(function () {
+  var itemsBody    = document.getElementById('items-body');
+  var countInput   = document.getElementById('items_count');
+  var totalDisplay = document.getElementById('total-display');
+  var totalFooter  = document.getElementById('total-footer');
+  var rowIndex = 0;
+
+  var PRENDA_LIST = (typeof TIPOS_PRENDA !== 'undefined') ? TIPOS_PRENDA : [];
+  var REP_LIST    = (typeof TIPOS_REPARACION !== 'undefined') ? TIPOS_REPARACION : [];
+
+  // Target hidden inputs for modal saves
+  var activeTpHidden = null;
+  var activeTrHidden = null;
+
+  function recalcularTotal() {
+    var total = 0;
+    itemsBody.querySelectorAll('.item-costo').forEach(function (inp) {
+      var v = parseFloat(inp.value);
+      if (!isNaN(v)) total += v;
+    });
+    if (totalDisplay) totalDisplay.textContent = 'Bs ' + total.toFixed(2);
+    if (totalFooter) totalFooter.style.display = '';
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function addRow(data) {
+    data = data || {};
+    var idx     = rowIndex++;
+    var tpHidId = 'item-tp-' + idx;
+    var trHidId = 'item-tr-' + idx;
+
+    var tr = document.createElement('tr');
+    tr.dataset.index = idx;
+    tr.innerHTML =
+      '<td>' +
+        '<input type="hidden" id="' + tpHidId + '" name="items[' + idx + '][tipo_prenda]" form="mainForm" value="' + escHtml(String(data.tipo_prenda_id || '')) + '">' +
+        '<div class="input-group">' +
+          '<div style="position:relative;flex:1">' +
+            '<input type="text" class="form-control item-tp-text" placeholder="Buscar prenda…" autocomplete="off" value="' + escHtml(data.tipo_prenda__nombre || '') + '">' +
+          '</div>' +
+          '<button type="button" class="btn btn-outline-secondary btn-nuevo-tp" title="Nuevo tipo de prenda"><i data-lucide="plus"></i></button>' +
+        '</div>' +
+      '</td>' +
+      '<td>' +
+        '<input type="hidden" id="' + trHidId + '" name="items[' + idx + '][tipo_reparacion]" form="mainForm" value="' + escHtml(String(data.tipo_reparacion_id || '')) + '">' +
+        '<div class="input-group">' +
+          '<div style="position:relative;flex:1">' +
+            '<input type="text" class="form-control item-tr-text" placeholder="Buscar tipo…" autocomplete="off" value="' + escHtml(data.tipo_reparacion__nombre || '') + '">' +
+          '</div>' +
+          '<button type="button" class="btn btn-outline-secondary btn-nuevo-tr" title="Nuevo tipo de reparación"><i data-lucide="plus"></i></button>' +
+        '</div>' +
+      '</td>' +
+      '<td>' +
+        '<input type="number" name="items[' + idx + '][costo]" form="mainForm" class="form-control item-costo" step="0.01" min="0" placeholder="0.00" value="' + escHtml(String(data.costo != null ? data.costo : '')) + '">' +
+      '</td>' +
+      '<td>' +
+        '<input type="text" name="items[' + idx + '][detalles]" form="mainForm" class="form-control" placeholder="Opcional" value="' + escHtml(data.detalles || '') + '">' +
+      '</td>' +
+      '<td>' +
+        '<button type="button" class="btn btn-sm btn-ghost-danger btn-remove-item" title="Quitar"><i data-lucide="trash-2"></i></button>' +
+      '</td>';
+
+    itemsBody.appendChild(tr);
+    if (window.lucide) lucide.createIcons({ nodes: [tr] });
+
+    var tpHidden = document.getElementById(tpHidId);
+    var trHidden = document.getElementById(trHidId);
+
+    if (window.makeLocalCombobox) {
+      makeLocalCombobox(tr.querySelector('.item-tp-text'), tpHidden, PRENDA_LIST);
+      makeLocalCombobox(tr.querySelector('.item-tr-text'), trHidden, REP_LIST);
+    }
+
+    tr.querySelector('.btn-nuevo-tp').addEventListener('click', function () {
+      activeTpHidden = tpHidden;
+      document.getElementById('nuevoTipoPrendaNombre').value = '';
+      document.getElementById('modalTipoPrendaError').style.display = 'none';
+      new bootstrap.Modal(document.getElementById('modalNuevoTipoPrenda')).show();
+    });
+
+    tr.querySelector('.btn-nuevo-tr').addEventListener('click', function () {
+      activeTrHidden = trHidden;
+      document.getElementById('nuevoTipoReparacionNombre').value = '';
+      document.getElementById('modalTipoReparacionError').style.display = 'none';
+      new bootstrap.Modal(document.getElementById('modalNuevoTipoReparacion')).show();
+    });
+
+    tr.querySelector('.item-costo').addEventListener('input', recalcularTotal);
+    tr.querySelector('.btn-remove-item').addEventListener('click', function () {
+      tr.remove();
+      syncCount();
+      recalcularTotal();
+    });
+
+    syncCount();
+    recalcularTotal();
+  }
+
+  function syncCount() {
+    countInput.value = itemsBody.querySelectorAll('tr[data-index]').length;
+  }
+
+  document.getElementById('btn-add-item').addEventListener('click', function () { addRow(); });
+
+  var existentes = (typeof ITEMS_EXISTENTES !== 'undefined') ? ITEMS_EXISTENTES : null;
+  if (existentes && existentes.length > 0) {
+    existentes.forEach(function (item) { addRow(item); });
+  } else if (!existentes) {
+    addRow();
+  }
+
+  // Modal: guardar nuevo tipo de prenda
+  var modalPrenda = document.getElementById('modalNuevoTipoPrenda');
+  if (modalPrenda) {
+    document.getElementById('btnGuardarTipoPrenda').addEventListener('click', function () {
+      var nombre = document.getElementById('nuevoTipoPrendaNombre').value.trim();
+      var errEl  = document.getElementById('modalTipoPrendaError');
+      if (!nombre) { errEl.textContent = 'El nombre es requerido.'; errEl.style.display = 'block'; return; }
+      fetch('{% url "crear_tipo_prenda" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'nombre=' + encodeURIComponent(nombre) + '&plantilla=',
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error) { errEl.textContent = data.error; errEl.style.display = 'block'; return; }
+        PRENDA_LIST.push({ id: data.id, nombre: data.nombre });
+        PRENDA_LIST.sort(function(a, b) { return a.nombre.localeCompare(b.nombre); });
+        if (activeTpHidden) {
+          activeTpHidden.value = data.id;
+          var textInput = activeTpHidden.closest('td').querySelector('.item-tp-text');
+          if (textInput) textInput.value = data.nombre;
+        }
+        bootstrap.Modal.getInstance(modalPrenda).hide();
+      })
+      .catch(function() { errEl.textContent = 'Error al guardar.'; errEl.style.display = 'block'; });
+    });
+  }
+
+  // Modal: guardar nuevo tipo de reparación
+  var modalRep = document.getElementById('modalNuevoTipoReparacion');
+  if (modalRep) {
+    document.getElementById('btnGuardarTipoReparacion').addEventListener('click', function () {
+      var nombre = document.getElementById('nuevoTipoReparacionNombre').value.trim();
+      var errEl  = document.getElementById('modalTipoReparacionError');
+      if (!nombre) { errEl.textContent = 'El nombre es requerido.'; errEl.style.display = 'block'; return; }
+      fetch('{% url "crear_tipo_reparacion" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'nombre=' + encodeURIComponent(nombre),
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error) { errEl.textContent = data.error; errEl.style.display = 'block'; return; }
+        REP_LIST.push({ id: data.id, nombre: data.nombre });
+        REP_LIST.sort(function(a, b) { return a.nombre.localeCompare(b.nombre); });
+        if (activeTrHidden) {
+          activeTrHidden.value = data.id;
+          var textInput = activeTrHidden.closest('td').querySelector('.item-tr-text');
+          if (textInput) textInput.value = data.nombre;
+        }
+        bootstrap.Modal.getInstance(modalRep).hide();
+      })
+      .catch(function() { errEl.textContent = 'Error al guardar.'; errEl.style.display = 'block'; });
+    });
+  }
+})();
+</script>

@@ -1,81 +1,93 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}{{ titulo }}{% endblock %}
-{% block contenido %}
 
-<div class="page-header">
-  <h1 class="page-title"><i class="bi bi-box-seam me-2"></i>{{ titulo }}</h1>
-  {% if prenda %}<small class="text-muted ms-2">{{ prenda.codigo }}</small>{% endif %}
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'lista_prendas' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left"></i>Volver
+      </a>
+    </div>
+    <div class="col">
+      <h2 class="page-title"><i data-lucide="shopping-bag" class="me-2 text-muted"></i>{{ titulo }}{% if prenda %} <small class="text-muted ms-2 fs-6">{{ prenda.codigo }}</small>{% endif %}</h2>
+    </div>
+  </div>
 </div>
+{% endblock %}
 
-<form method="post" class="form-card">
-  {% csrf_token %}
+{% block contenido %}
+<div class="row justify-content-center">
+  <div class="col-12 col-lg-9 col-xl-7">
+    <div class="card">
+      <div class="card-header"><h3 class="card-title">Datos</h3></div>
+      <div class="card-body">
+        <form method="post" id="mainForm">
+          {% csrf_token %}
+          <div class="row g-3">
+            <div class="col-md-12">
+              <label class="form-label">{{ form.nombre.label }}{% if not form.nombre.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.nombre }}
+              {% if form.nombre.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.nombre.errors }}</div>{% endif %}
+            </div>
 
-  <div class="row g-3">
-    <div class="col-md-4">
-      <label class="form-label">{{ form.tipo.label }}</label>
-      {{ form.tipo }}
-      {% if form.tipo.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.tipo.errors }}</div>{% endif %}
-    </div>
-    <div class="col-md-8">
-      <label class="form-label">{{ form.nombre.label }}</label>
-      {{ form.nombre }}
-      {% if form.nombre.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.nombre.errors }}</div>{% endif %}
-    </div>
+            <div class="col-md-4">
+              <label class="form-label">{{ form.talla.label }}{% if not form.talla.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.talla }}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">{{ form.color.label }}{% if not form.color.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.color }}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">{{ form.modelo.label }}{% if not form.modelo.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.modelo }}
+            </div>
 
-    <div class="col-md-4">
-      <label class="form-label">{{ form.talla.label }}</label>
-      {{ form.talla }}
-    </div>
-    <div class="col-md-4">
-      <label class="form-label">{{ form.color.label }}</label>
-      {{ form.color }}
-    </div>
-    <div class="col-md-4">
-      <label class="form-label">{{ form.modelo.label }}</label>
-      {{ form.modelo }}
-    </div>
+            <div class="col-md-6">
+              <label class="form-label">{{ form.codigo_referencia.label }}{% if not form.codigo_referencia.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.codigo_referencia }}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">{{ form.estado.label }}{% if not form.estado.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.estado }}
+            </div>
 
-    <div class="col-md-6">
-      <label class="form-label">{{ form.codigo_referencia.label }}</label>
-      {{ form.codigo_referencia }}
-    </div>
-    <div class="col-md-6">
-      <label class="form-label">{{ form.condicion.label }}</label>
-      {{ form.condicion }}
-      <small class="text-muted">Solo aplica a prendas de alquiler</small>
-    </div>
+            <div class="col-md-6">
+              <label class="form-label">{{ form.precio.label }}{% if not form.precio.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.precio }}
+              {% if form.precio.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.precio.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">{{ form.stock_minimo.label }}{% if not form.stock_minimo.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.stock_minimo }}
+            </div>
 
-    <div class="col-md-4">
-      <label class="form-label">{{ form.precio.label }}</label>
-      {{ form.precio }}
-      {% if form.precio.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.precio.errors }}</div>{% endif %}
-    </div>
-    <div class="col-md-4">
-      <label class="form-label">{{ form.cantidad.label }}</label>
-      {{ form.cantidad }}
-      {% if form.cantidad.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.cantidad.errors }}</div>{% endif %}
-    </div>
-    <div class="col-md-4">
-      <label class="form-label">{{ form.stock_minimo.label }}</label>
-      {{ form.stock_minimo }}
-    </div>
+            <div class="col-md-6">
+              <label class="form-label">{{ form.tipo_prenda.label }}{% if not form.tipo_prenda.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.tipo_prenda }}
+              {% if form.tipo_prenda.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.tipo_prenda.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">{{ form.max_usos_default.label }}{% if not form.max_usos_default.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.max_usos_default }}
+              {% if form.max_usos_default.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.max_usos_default.errors }}</div>{% endif %}
+            </div>
 
-    <div class="col-md-4">
-      <label class="form-label">{{ form.estado.label }}</label>
-      {{ form.estado }}
-    </div>
-    <div class="col-12">
-      <label class="form-label">{{ form.notas.label }}</label>
-      {{ form.notas }}
+            <div class="col-12">
+              <label class="form-label">{{ form.notas.label }}{% if not form.notas.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.notas }}
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="card-footer text-end d-flex justify-content-end gap-2">
+        <a href="{% url 'lista_prendas' %}" class="btn btn-outline-secondary">Cancelar</a>
+        <button type="submit" form="mainForm" class="btn btn-primary">
+          <i data-lucide="check"></i>Guardar
+        </button>
+      </div>
     </div>
   </div>
-
-  <div class="d-flex gap-2 mt-4">
-    <button type="submit" class="btn btn-primary">
-      <i class="bi bi-check-lg me-1"></i>Guardar
-    </button>
-    <a href="{% url 'lista_prendas' %}" class="btn btn-outline-secondary">Cancelar</a>
-  </div>
-</form>
-
+</div>
 {% endblock %}

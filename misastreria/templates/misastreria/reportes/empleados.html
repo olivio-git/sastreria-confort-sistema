@@ -1,48 +1,77 @@
-{% extends 'misastreria/base.html' %} {# Asegúrate que esta línea es correcta #}
+{% extends 'misastreria/base.html' %}
 {% load static %}
 
-{% block contenido %} {# <--- ¡Aquí está el cambio clave! #}
-<h2>📊 Reporte de Empleados</h2>
+{% block titulo %}Reporte de Empleados{% endblock %}
 
-<form method="get" class="row g-3 mb-4">
-  <div class="col-md-4">{{ form.fecha_inicio }}</div>
-  <div class="col-md-4">{{ form.fecha_fin }}</div>
-  <div class="col-md-4">{{ form.tipo_contrato }}</div>
-  <div class="col-md-12">
-    <button type="submit" class="btn btn-primary me-2">Filtrar</button>
-    <a href="{% url 'exportar_empleados_pdf' %}?{{ request.GET.urlencode }}" class="btn btn-danger me-2">Exportar PDF</a>
-    <a href="{% url 'exportar_empleados_excel' %}?{{ request.GET.urlencode }}" class="btn btn-success">Exportar Excel</a>
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="users" class="me-2 text-muted"></i>Reporte de Empleados
+      </h2>
+    </div>
+    <div class="col-auto ms-auto d-flex gap-2">
+      <a href="{% url 'exportar_empleados_pdf' %}?{{ request.GET.urlencode }}" class="btn btn-outline-secondary">
+        <i data-lucide="file-text"></i>PDF
+      </a>
+      <a href="{% url 'exportar_empleados_excel' %}?{{ request.GET.urlencode }}" class="btn btn-outline-success">
+        <i data-lucide="file-spreadsheet"></i>Excel
+      </a>
+    </div>
   </div>
-</form>
+</div>
+{% endblock %}
 
-{# Condición para mostrar la tabla si hay datos, o el mensaje si no los hay #}
-{% if datos %} 
-<table class="table table-bordered table-striped">
-  <thead class="table-dark">
-    <tr>
-      <th>Nombre</th>
-      <th>Tipo de Contrato</th>
-      <th>Fecha de Ingreso</th>
-      <th>Faltas</th>
-      <th>Permisos</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for item in datos %}
-    <tr>
-      <td>{{ item.empleado }}</td>
-      <td>{{ item.empleado.get_tipo_contrato_display }}</td>
-      <td>{{ item.empleado.fecha_ingreso }}</td>
-      <td>{{ item.faltas }}</td>
-      <td>{{ item.permisos }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-{% else %} 
+{% block contenido %}
+
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <form method="get" class="row g-2 align-items-end" id="filterForm">
+      <div class="col-md-4">{{ form.fecha_inicio }}</div>
+      <div class="col-md-4">{{ form.fecha_fin }}</div>
+      <div class="col-md-4">{{ form.tipo_contrato }}</div>
+      <div class="col-12 d-flex gap-2 justify-content-end">
+        <button type="submit" class="btn btn-primary">
+          <i data-lucide="search"></i>Filtrar
+        </button>
+        <a href="{% url 'reporte_empleados' %}" class="btn btn-outline-secondary">Limpiar</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% if datos %}
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table">
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th>Tipo de Contrato</th>
+          <th>Fecha de Ingreso</th>
+          <th>Faltas</th>
+          <th>Permisos</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in datos %}
+        <tr>
+          <td>{{ item.empleado }}</td>
+          <td>{{ item.empleado.get_tipo_contrato_display }}</td>
+          <td>{{ item.empleado.fecha_ingreso }}</td>
+          <td>{{ item.faltas }}</td>
+          <td>{{ item.permisos }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
 <div class="alert alert-info">
   No hay registros de empleados que coincidan con los criterios de búsqueda.
 </div>
 {% endif %}
 
-{% endblock contenido %} {# <--- ¡Y aquí también! #}
+{% endblock contenido %}

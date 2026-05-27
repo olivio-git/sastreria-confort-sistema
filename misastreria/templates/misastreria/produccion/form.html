@@ -1,85 +1,148 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}{{ titulo }}{% endblock %}
 
-{% block contenido %}
-<div class="page-header">
-  <h1 class="page-title"><i class="bi bi-scissors me-2"></i>{{ titulo }}</h1>
-  {% if orden %}<small class="text-muted ms-2">{{ orden.codigo }}</small>{% endif %}
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'lista_ordenes' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left"></i>Volver
+      </a>
+    </div>
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="scissors" class="me-2 text-muted"></i>{{ titulo }}
+        {% if orden %}<small class="text-muted ms-2 fw-normal">{{ orden.codigo }}</small>{% endif %}
+      </h2>
+    </div>
+  </div>
 </div>
+{% endblock %}
 
+{% block contenido %}
 <form method="post" id="ordenForm">
   {% csrf_token %}
 
   <!-- Datos de la orden -->
-  <div class="form-card mb-3">
-    <h6 class="fw-semibold mb-3 text-muted">Datos de la orden</h6>
-    <div class="row g-3">
-      <div class="col-md-12">
-        <label class="form-label">{{ form.descripcion.label }}</label>
-        {{ form.descripcion }}
-        {% if form.descripcion.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.descripcion.errors }}</div>{% endif %}
-      </div>
-      <div class="col-md-6">
-        <label class="form-label">{{ form.empleado.label }}</label>
-        {{ form.empleado }}
-      </div>
-      <div class="col-md-6">
-        <label class="form-label">{{ form.confeccion.label }}</label>
-        {{ form.confeccion }}
-      </div>
-      <div class="col-md-4">
-        <label class="form-label">{{ form.fecha_inicio.label }}</label>
-        {{ form.fecha_inicio }}
-        {% if form.fecha_inicio.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.fecha_inicio.errors }}</div>{% endif %}
-      </div>
-      <div class="col-md-4">
-        <label class="form-label">{{ form.fecha_estimada.label }}</label>
-        {{ form.fecha_estimada }}
-      </div>
-      <div class="col-md-4">
+  <div class="card mb-3">
+    <div class="card-header"><h3 class="card-title">Datos de la orden</h3></div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-12">
+          <label class="form-label">{{ form.descripcion.label }}{% if not form.descripcion.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+          {{ form.descripcion }}
+          {% if form.descripcion.errors %}<div class="invalid-feedback d-block">{{ form.descripcion.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">{{ form.empleado.label }}{% if not form.empleado.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+          <div style="position:relative">
+            <input type="text"
+                   data-empleado-search="id_empleado"
+                   data-endpoint="{% url 'buscar_empleados' %}"
+                   class="form-control"
+                   placeholder="Seleccionar empleado…"
+                   value="{% if form.instance.pk and form.instance.empleado %}{{ form.instance.empleado }}{% endif %}"
+                   autocomplete="off">
+            <input type="hidden" name="empleado" id="id_empleado" value="{{ form.empleado.value|default:'' }}">
+          </div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">{{ form.tipo.label }}{% if not form.tipo.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+          {{ form.tipo }}
+          {% if form.tipo.errors %}<div class="invalid-feedback d-block">{{ form.tipo.errors }}</div>{% endif %}
+        </div>
+
+        <!-- Bloque cliente -->
+        <div id="bloque-cliente" class="col-md-6">
+          <label class="form-label">{{ form.confeccion.label }}{% if not form.confeccion.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+          {{ form.confeccion }}
+          {% if form.confeccion.errors %}<div class="invalid-feedback d-block">{{ form.confeccion.errors }}</div>{% endif %}
+        </div>
+
+        <!-- Bloque stock -->
+        <div id="bloque-stock">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">{{ form.prenda_inventario.label }}{% if not form.prenda_inventario.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.prenda_inventario }}
+              {% if form.prenda_inventario.errors %}<div class="invalid-feedback d-block">{{ form.prenda_inventario.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">{{ form.cantidad.label }}{% if not form.cantidad.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.cantidad }}
+              {% if form.cantidad.errors %}<div class="invalid-feedback d-block">{{ form.cantidad.errors }}</div>{% endif %}
+            </div>
+          </div>
+        </div>
+
+        <!-- Toggle tipo de orden (IIFE inline — estado inicial pre-render para evitar flash) -->
+        <script>
+        (function () {
+          var tipo = document.getElementById('id_tipo');
+          function toggle() {
+            var isStock = tipo.value === 'stock';
+            document.getElementById('bloque-cliente').style.display = isStock ? 'none' : '';
+            document.getElementById('bloque-stock').style.display = isStock ? '' : 'none';
+          }
+          toggle();
+          tipo.addEventListener('change', toggle);
+        })();
+        </script>
+        <div class="col-md-4">
+          <label class="form-label">{{ form.fecha_inicio.label }}{% if not form.fecha_inicio.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+          {{ form.fecha_inicio }}
+          {% if form.fecha_inicio.errors %}<div class="invalid-feedback d-block">{{ form.fecha_inicio.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">{{ form.fecha_estimada.label }}{% if not form.fecha_estimada.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+          {{ form.fecha_estimada }}
+        </div>
         {% if orden %}
-        <label class="form-label">Estado actual</label>
-        <div class="form-control-plaintext">
-          <span class="badge-estado badge-{{ orden.estado }}">{{ orden.get_estado_display }}</span>
+        <div class="col-md-4">
+          <label class="form-label">Estado actual</label>
+          <div class="form-control-plaintext">
+            <span class="badge-estado badge-{{ orden.estado }}">{{ orden.get_estado_display }}</span>
+          </div>
         </div>
         {% endif %}
-      </div>
-      <div class="col-md-12">
-        <label class="form-label">{{ form.notas.label }}</label>
-        {{ form.notas }}
+        <div class="col-md-12">
+          <label class="form-label">{{ form.notas.label }}{% if not form.notas.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+          {{ form.notas }}
+        </div>
       </div>
     </div>
   </div>
 
   <!-- Insumos utilizados -->
-  <div class="form-card mb-3">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-      <h6 class="fw-semibold mb-0 text-muted">Insumos utilizados</h6>
-      <button type="button" class="btn btn-outline-primary btn-sm" id="btnAgregarInsumo">
-        <i class="bi bi-plus-lg me-1"></i>Agregar insumo
-      </button>
+  <div class="card mb-3">
+    <div class="card-header d-flex align-items-center">
+      <h3 class="card-title">Insumos utilizados</h3>
+      <div class="card-options">
+        <button type="button" class="btn btn-outline-primary" id="btnAgregarInsumo">
+          <i data-lucide="plus"></i>Agregar insumo
+        </button>
+      </div>
     </div>
-
     <div class="table-responsive">
-      <table class="table table-sm" id="tablaInsumos">
+      <table class="table table-vcenter card-table table-sm" id="tablaInsumos">
         <thead>
           <tr>
-            <th style="min-width:280px">Insumo</th>
-            <th style="width:160px">Cantidad usada</th>
+            <th>Insumo</th>
+            <th style="width:180px">Cantidad usada</th>
             <th style="width:44px"></th>
           </tr>
         </thead>
         <tbody id="insumosBody"></tbody>
       </table>
     </div>
-    <div id="sinInsumos" class="text-muted text-center py-2">
-      <i class="bi bi-box me-1"></i>Sin insumos registrados (opcional).
+    <div id="sinInsumos" class="text-muted text-center py-3 small">
+      Sin insumos registrados (opcional).
     </div>
   </div>
 
   <div class="d-flex gap-2">
     <button type="submit" class="btn btn-primary">
-      <i class="bi bi-check-lg me-1"></i>Guardar
+      <i data-lucide="check"></i>Guardar
     </button>
     <a href="{% url 'lista_ordenes' %}" class="btn btn-outline-secondary">Cancelar</a>
   </div>
@@ -92,10 +155,13 @@
         <option value="">— Seleccionar insumo —</option>
       </select>
     </td>
-    <td><input type="number" name="item_cantidad" class="form-control form-control-sm item-cantidad" step="0.001" min="0.001" placeholder="0.000"></td>
+    <td>
+      <input type="number" name="item_cantidad" class="form-control form-control-sm item-cantidad"
+             step="0.001" min="0.001" placeholder="0.000">
+    </td>
     <td class="align-middle">
-      <button type="button" class="btn btn-sm btn-outline-danger btn-remove-insumo" title="Quitar">
-        <i class="bi bi-x-lg"></i>
+      <button type="button" class="btn btn-sm btn-icon btn-ghost-danger btn-remove-insumo" title="Quitar">
+        <i data-lucide="x"></i>
       </button>
     </td>
   </tr>

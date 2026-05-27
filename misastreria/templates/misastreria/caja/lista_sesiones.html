@@ -1,0 +1,122 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Sesiones de Caja{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="wallet" class="me-2 text-muted"></i>Sesiones de Caja
+      </h2>
+    </div>
+    <div class="col-auto ms-auto">
+      <a href="{% url 'abrir_sesion_caja' %}" class="btn btn-success">
+        <i data-lucide="plus"></i>Abrir Sesión
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+<div class="card">
+  <div class="card-header">
+    <span class="text-muted small">{{ total }} sesión{{ total|pluralize:"es" }}</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Estado</th>
+          <th>Apertura</th>
+          <th>Cierre</th>
+          <th class="text-end">Monto Apertura</th>
+          <th class="text-end">Saldo Sistema</th>
+          <th class="text-end">Diferencia</th>
+          <th style="white-space:nowrap">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in page_obj %}
+        <tr>
+          <td class="fw-semibold">{{ s.pk }}</td>
+          <td>
+            <span class="badge-estado {% if s.estado == 'abierta' %}badge-entregado{% else %}badge-inactivo{% endif %}">
+              {{ s.get_estado_display }}
+            </span>
+          </td>
+          <td style="white-space:nowrap">{{ s.fecha_apertura|date:"d/m/Y H:i" }}</td>
+          <td style="white-space:nowrap">
+            {% if s.fecha_cierre %}
+              {{ s.fecha_cierre|date:"d/m/Y H:i" }}
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td class="text-end">Bs. {{ s.monto_apertura|floatformat:2 }}</td>
+          <td class="text-end">Bs. {{ s.saldo_sistema|floatformat:2 }}</td>
+          <td class="text-end">
+            {% if s.diferencia is not None %}
+              <span class="fw-semibold {% if s.diferencia > 0 %}text-success{% elif s.diferencia < 0 %}text-danger{% else %}text-muted{% endif %}">
+                {% if s.diferencia > 0 %}+{% endif %}Bs. {{ s.diferencia|floatformat:2 }}
+              </span>
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td style="white-space:nowrap">
+            <div class="btn-actions">
+              <a href="{% url 'detalle_sesion_caja' s.pk %}" class="btn btn-sm btn-icon btn-ghost-primary" title="Ver">
+                <i data-lucide="eye"></i>
+              </a>
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="8">
+            <div class="empty-state">
+              <i data-lucide="wallet" style="width:2.5rem;height:2.5rem;opacity:.3;display:block;margin:0 auto .75rem"></i>
+              No hay sesiones de caja registradas.
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer d-flex align-items-center">
+    <p class="m-0 text-muted small">
+      {% if page_obj.paginator.num_pages > 1 %}
+        Mostrando <strong>{{ page_obj.start_index }}–{{ page_obj.end_index }}</strong> de <strong>{{ total }}</strong>
+      {% else %}
+        <strong>{{ total }}</strong> sesión{{ total|pluralize:"es" }}
+      {% endif %}
+    </p>
+    <nav class="ms-auto">
+      <ul class="pagination pagination-sm m-0">
+        {% if page_obj.has_previous %}
+          <li class="page-item">
+            <a class="page-link" href="?page=1">«</a>
+          </li>
+          <li class="page-item">
+            <a class="page-link" href="?page={{ page_obj.previous_page_number }}">‹</a>
+          </li>
+        {% endif %}
+        <li class="page-item active">
+          <span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+        </li>
+        {% if page_obj.has_next %}
+          <li class="page-item">
+            <a class="page-link" href="?page={{ page_obj.next_page_number }}">›</a>
+          </li>
+          <li class="page-item">
+            <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}">»</a>
+          </li>
+        {% endif %}
+      </ul>
+    </nav>
+  </div>
+</div>
+{% endblock %}

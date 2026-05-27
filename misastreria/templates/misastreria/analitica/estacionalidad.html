@@ -1,0 +1,150 @@
+{% extends 'misastreria/base.html' %}
+{% load static %}
+
+{% block titulo %}Meses más activos{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="calendar-range" class="me-2 text-muted"></i>Meses más activos
+      </h2>
+      <div class="text-muted mt-1 small">Cuántos servicios se hicieron cada mes del año.</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <form method="GET" action="{% url 'analitica_estacionalidad' %}" class="row g-2 align-items-end" id="filter-form">
+      <div class="col-md-3">
+        <label for="año" class="form-label small mb-1 fw-semibold text-muted">Año:</label>
+        <select class="form-select form-select-sm" id="año" name="año" data-debounce="0">
+          {% for a in años_disponibles %}
+          <option value="{{ a }}" {% if a == año %}selected{% endif %}>{{ a }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-auto d-flex gap-2 align-items-end">
+        <button type="submit" class="btn btn-primary btn-sm">
+          <i data-lucide="filter"></i> Ver
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Gráfico -->
+<div class="card mb-3">
+  <div class="card-header">
+    <span class="fw-semibold">Servicios por mes — {{ año }}</span>
+  </div>
+  <div class="card-body">
+    <canvas id="chartEstacionalidad" style="max-height:340px"></canvas>
+  </div>
+</div>
+
+<!-- Tabla resumen -->
+<div class="card">
+  <div class="card-header d-flex align-items-center justify-content-between">
+    <span class="fw-semibold">Detalle mensual</span>
+    <span class="text-muted small">Total del año: <strong>{{ total_año }}</strong> servicios</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table table-hover" style="font-size:.875rem">
+      <thead>
+        <tr>
+          <th>Mes</th>
+          <th class="text-end">Alquileres</th>
+          <th class="text-end">Ventas</th>
+          <th class="text-end">Confecciones</th>
+          <th class="text-end">Reparaciones</th>
+          <th class="text-end fw-semibold">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for fila in tabla %}
+        <tr {% if fila.total == 0 %}class="text-muted"{% endif %}>
+          <td class="fw-semibold">{{ fila.mes }}</td>
+          <td class="text-end">{% if fila.alquileres %}{{ fila.alquileres }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="text-end">{% if fila.ventas %}{{ fila.ventas }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="text-end">{% if fila.confecciones %}{{ fila.confecciones }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="text-end">{% if fila.reparaciones %}{{ fila.reparaciones }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="text-end fw-semibold {% if fila.total == 0 %}text-muted{% endif %}">{{ fila.total }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  const raw = {{ data_json|safe }};
+
+  const ctx = document.getElementById('chartEstacionalidad').getContext('2d');
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: raw.meses,
+      datasets: [
+        {
+          label: 'Alquileres',
+          data: raw.alquileres,
+          backgroundColor: 'rgba(37,99,235,0.75)',
+          borderRadius: 4,
+        },
+        {
+          label: 'Ventas',
+          data: raw.ventas,
+          backgroundColor: 'rgba(16,185,129,0.75)',
+          borderRadius: 4,
+        },
+        {
+          label: 'Confecciones',
+          data: raw.confecciones,
+          backgroundColor: 'rgba(245,158,11,0.75)',
+          borderRadius: 4,
+        },
+        {
+          label: 'Reparaciones',
+          data: raw.reparaciones,
+          backgroundColor: 'rgba(239,68,68,0.75)',
+          borderRadius: 4,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: { position: 'bottom' },
+        tooltip: {
+          callbacks: {
+            footer: function(items) {
+              const total = items.reduce((s, i) => s + i.parsed.y, 0);
+              return 'Total: ' + total;
+            }
+          }
+        }
+      },
+      scales: {
+        x: { grid: { display: false } },
+        y: { beginAtZero: true, ticks: { stepSize: 1, precision: 0 } },
+      },
+    },
+  });
+})();
+</script>
+{% endblock %}

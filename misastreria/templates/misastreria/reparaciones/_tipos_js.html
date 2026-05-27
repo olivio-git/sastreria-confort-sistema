@@ -1,0 +1,72 @@
+{% load static %}
+<script>
+(function () {
+  var hiddenPrenda = document.getElementById('id_tipo_prenda');
+  var textPrenda   = document.getElementById('text_tipo_prenda');
+  if (hiddenPrenda && textPrenda) {
+    textPrenda.parentElement.style.position = 'relative';
+    window.makeCombobox(textPrenda, 'id_tipo_prenda', '{% url "buscar_tipo_prenda" %}');
+  }
+
+  var hiddenRep = document.getElementById('id_tipo_reparacion');
+  var textRep   = document.getElementById('text_tipo_reparacion');
+  if (hiddenRep && textRep) {
+    textRep.parentElement.style.position = 'relative';
+    window.makeCombobox(textRep, 'id_tipo_reparacion', '{% url "buscar_tipo_reparacion" %}');
+  }
+
+  var modalPrenda = document.getElementById('modalNuevoTipoPrenda');
+  if (modalPrenda) {
+    document.getElementById('btnNuevoTipoPrenda').addEventListener('click', function () {
+      document.getElementById('nuevoTipoPrendaNombre').value = '';
+      document.getElementById('modalTipoPrendaError').style.display = 'none';
+      new bootstrap.Modal(modalPrenda).show();
+    });
+    document.getElementById('btnGuardarTipoPrenda').addEventListener('click', function () {
+      var nombre = document.getElementById('nuevoTipoPrendaNombre').value.trim();
+      var errEl  = document.getElementById('modalTipoPrendaError');
+      if (!nombre) { errEl.textContent = 'El nombre es requerido.'; errEl.style.display = 'block'; return; }
+      fetch('{% url "crear_tipo_prenda" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'nombre=' + encodeURIComponent(nombre) + '&plantilla=',
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error) { errEl.textContent = data.error; errEl.style.display = 'block'; return; }
+        if (hiddenPrenda) hiddenPrenda.value = data.id;
+        if (textPrenda)   textPrenda.value   = data.nombre;
+        bootstrap.Modal.getInstance(modalPrenda).hide();
+      })
+      .catch(function() { errEl.textContent = 'Error al guardar.'; errEl.style.display = 'block'; });
+    });
+  }
+
+  var modalRep = document.getElementById('modalNuevoTipoReparacion');
+  if (modalRep) {
+    document.getElementById('btnNuevoTipoReparacion').addEventListener('click', function () {
+      document.getElementById('nuevoTipoReparacionNombre').value = '';
+      document.getElementById('modalTipoReparacionError').style.display = 'none';
+      new bootstrap.Modal(modalRep).show();
+    });
+    document.getElementById('btnGuardarTipoReparacion').addEventListener('click', function () {
+      var nombre = document.getElementById('nuevoTipoReparacionNombre').value.trim();
+      var errEl  = document.getElementById('modalTipoReparacionError');
+      if (!nombre) { errEl.textContent = 'El nombre es requerido.'; errEl.style.display = 'block'; return; }
+      fetch('{% url "crear_tipo_reparacion" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'nombre=' + encodeURIComponent(nombre),
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error) { errEl.textContent = data.error; errEl.style.display = 'block'; return; }
+        if (hiddenRep)  hiddenRep.value  = data.id;
+        if (textRep)    textRep.value    = data.nombre;
+        bootstrap.Modal.getInstance(modalRep).hide();
+      })
+      .catch(function() { errEl.textContent = 'Error al guardar.'; errEl.style.display = 'block'; });
+    });
+  }
+})();
+</script>

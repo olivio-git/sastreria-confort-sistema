@@ -1,104 +1,130 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}{{ titulo }}{% endblock %}
 
-{% block contenido %}
-<div class="page-header">
-  <h1 class="page-title"><i class="bi bi-cart me-2"></i>{{ titulo }}</h1>
-  {% if venta %}<small class="text-muted ms-2">{{ venta.codigo }}</small>{% endif %}
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'lista_ventas' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left"></i>Volver
+      </a>
+    </div>
+    <div class="col">
+      <h2 class="page-title"><i data-lucide="shopping-cart" class="me-2 text-muted"></i>{{ titulo }}{% if venta %} <small class="text-muted ms-2 fs-6">{{ venta.codigo }}</small>{% endif %}</h2>
+    </div>
+  </div>
 </div>
+{% endblock %}
 
+{% block contenido %}
 <form method="post" id="ventaForm">
   {% csrf_token %}
 
   <!-- Cabecera de la venta -->
-  <div class="form-card mb-3">
-    <h6 class="fw-semibold mb-3 text-muted">Datos de la venta</h6>
-    <div class="row g-3">
-      <div class="col-md-6">
-        <label class="form-label">Cliente</label>
-        <div style="position:relative">
-          <input type="text"
-                 data-cliente-search="id_cliente"
-                 data-endpoint="{% url 'buscar_clientes' %}"
-                 class="form-control"
-                 placeholder="Buscar por CI o nombre…"
-                 value="{% if form.instance.pk and form.instance.cliente %}{{ form.instance.cliente }}{% endif %}"
-                 autocomplete="off">
-          <input type="hidden" name="cliente" id="id_cliente" value="{{ form.cliente.value|default:'' }}">
+  <div class="card mb-3">
+    <div class="card-header"><h3 class="card-title">Datos de la venta</h3></div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label">Cliente{% if not form.cliente.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+          <div style="position:relative">
+            <input type="text"
+                   data-cliente-search="id_cliente"
+                   data-endpoint="{% url 'buscar_clientes' %}"
+                   class="form-control"
+                   placeholder="Buscar por CI o nombre…"
+                   value="{% if form.instance.pk and form.instance.cliente %}{{ form.instance.cliente }}{% endif %}"
+                   autocomplete="off">
+            <input type="hidden" name="cliente" id="id_cliente" value="{{ form.cliente.value|default:'' }}">
+          </div>
+          {% if form.cliente.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.cliente.errors }}</div>{% endif %}
         </div>
-        {% if form.cliente.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.cliente.errors }}</div>{% endif %}
-      </div>
-      <div class="col-md-6">
-        <label class="form-label">{{ form.empleado.label }}</label>
-        {{ form.empleado }}
-      </div>
+        <div class="col-md-6">
+          <label class="form-label">{{ form.empleado.label }}{% if not form.empleado.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+          <div style="position:relative">
+            <input type="text"
+                   data-empleado-search="id_empleado"
+                   data-endpoint="{% url 'buscar_empleados' %}"
+                   class="form-control"
+                   placeholder="Seleccionar empleado…"
+                   value="{% if form.instance.pk and form.instance.empleado %}{{ form.instance.empleado }}{% endif %}"
+                   autocomplete="off">
+            <input type="hidden" name="empleado" id="id_empleado" value="{{ form.empleado.value|default:'' }}">
+          </div>
+        </div>
 
-      <div class="col-md-4">
-        <label class="form-label">{{ form.fecha_venta.label }}</label>
-        {{ form.fecha_venta }}
-        {% if form.fecha_venta.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.fecha_venta.errors }}</div>{% endif %}
-      </div>
-      <div class="col-md-8">
-        <label class="form-label">{{ form.notas.label }}</label>
-        {{ form.notas }}
+        <div class="col-md-4">
+          <label class="form-label">{{ form.fecha_venta.label }}{% if not form.fecha_venta.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+          {{ form.fecha_venta }}
+          {% if form.fecha_venta.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.fecha_venta.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-8">
+          <label class="form-label">{{ form.notas.label }}{% if not form.notas.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+          {{ form.notas }}
+        </div>
       </div>
     </div>
   </div>
 
   <!-- Tabla de prendas (multi-item) -->
-  <div class="form-card mb-3">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-      <h6 class="fw-semibold mb-0 text-muted">Prendas</h6>
-      <button type="button" class="btn btn-outline-primary btn-sm" id="btnAgregarItem">
-        <i class="bi bi-plus-lg me-1"></i>Agregar prenda
-      </button>
-    </div>
-
-    <div class="table-responsive">
-      <table class="table table-sm" id="tablaItems">
-        <thead>
-          <tr>
-            <th style="min-width:260px">Prenda</th>
-            <th style="width:90px">Cant.</th>
-            <th style="width:130px">Precio unit.</th>
-            <th style="width:120px" class="text-end">Subtotal</th>
-            <th style="width:44px"></th>
-          </tr>
-        </thead>
-        <tbody id="itemsBody"></tbody>
-      </table>
-    </div>
-
-    <div id="sinItems" class="text-muted text-center py-3" style="display:none">
-      <i class="bi bi-cart-x me-1"></i>Sin prendas. Agrega al menos una.
-    </div>
-
-    <!-- Totales -->
-    <div class="d-flex flex-column align-items-end gap-1 mt-3 border-top pt-3">
-      <div class="d-flex gap-3 align-items-center">
-        <span class="text-muted">Subtotal</span>
-        <strong id="resSubtotal" style="min-width:110px;text-align:right">0.00</strong>
+  <div class="card mb-3">
+    <div class="card-header d-flex align-items-center">
+      <h3 class="card-title mb-0">Prendas</h3>
+      <div class="ms-auto d-flex gap-2">
+        <button type="button" class="btn btn-outline-success" id="btnAgregarConjunto" data-bs-toggle="modal" data-bs-target="#modalConjuntos">
+          <i data-lucide="layers"></i>Agregar conjunto
+        </button>
+        <button type="button" class="btn btn-outline-primary" id="btnAgregarItem">
+          <i data-lucide="plus"></i>Agregar prenda
+        </button>
       </div>
-      <div class="d-flex gap-3 align-items-center">
-        <label class="text-muted mb-0">Descuento</label>
-        <div class="input-group" style="width:140px">
-          {{ form.descuento }}
-          <span class="input-group-text">%</span>
+    </div>
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table" id="tablaItems">
+          <thead>
+            <tr>
+              <th style="min-width:300px">Item</th>
+              <th style="width:130px">Precio unit.</th>
+              <th style="width:120px" class="text-end">Subtotal</th>
+              <th style="width:44px"></th>
+            </tr>
+          </thead>
+          <tbody id="itemsBody"></tbody>
+        </table>
+      </div>
+
+      <div id="sinItems" class="text-muted text-center py-3" style="display:none">
+        <i data-lucide="shopping-cart" class="me-1"></i>Sin prendas. Agrega al menos una.
+      </div>
+
+      <!-- Totales -->
+      <div class="d-flex flex-column align-items-end gap-1 mt-3 border-top pt-3">
+        <div class="d-flex gap-3 align-items-center">
+          <span class="text-muted">Subtotal</span>
+          <strong id="resSubtotal" style="min-width:110px;text-align:right">0.00</strong>
         </div>
-        <strong id="resDescuento" style="min-width:110px;text-align:right">- 0.00</strong>
-      </div>
-      <div class="d-flex gap-3 align-items-center fs-5">
-        <span class="fw-semibold">Total</span>
-        <strong id="resTotal" style="min-width:110px;text-align:right">0.00</strong>
+        <div class="d-flex gap-3 align-items-center">
+          <label class="text-muted mb-0">Descuento{% if not form.descuento.field.required %} <span class="small">(Opcional)</span>{% endif %}</label>
+          <div class="input-group" style="width:140px">
+            {{ form.descuento }}
+            <span class="input-group-text">%</span>
+          </div>
+          <strong id="resDescuento" style="min-width:110px;text-align:right">- 0.00</strong>
+        </div>
+        <div class="d-flex gap-3 align-items-center fs-5">
+          <span class="fw-semibold">Total</span>
+          <strong id="resTotal" style="min-width:110px;text-align:right">0.00</strong>
+        </div>
       </div>
     </div>
   </div>
 
-  <div class="d-flex gap-2">
-    <button type="submit" class="btn btn-primary">
-      <i class="bi bi-check-lg me-1"></i>Guardar
-    </button>
+  <div class="d-flex justify-content-end gap-2">
     <a href="{% url 'lista_ventas' %}" class="btn btn-outline-secondary">Cancelar</a>
+    <button type="submit" class="btn btn-primary">
+      <i data-lucide="check"></i>Guardar
+    </button>
   </div>
 </form>
 
@@ -106,46 +132,52 @@
 <template id="itemRowTemplate">
   <tr class="item-row">
     <td>
-      <select name="item_articulo" class="form-select form-select-sm item-articulo">
-        <option value="">— Seleccionar prenda —</option>
-      </select>
+      <div style="position:relative">
+        <input type="text" class="form-control item-articulo-text" placeholder="Buscar item por código…" autocomplete="off">
+        <input type="hidden" name="item_prenda_item" class="item-articulo">
+      </div>
     </td>
-    <td><input type="number" name="item_cantidad" class="form-control form-control-sm item-cantidad" value="1" min="1"></td>
-    <td><input type="number" name="item_precio" class="form-control form-control-sm item-precio" step="0.01" min="0" placeholder="0.00"></td>
+    <td><input type="number" name="item_precio" class="form-control item-precio" step="0.01" min="0" placeholder="0.00"></td>
     <td class="text-end align-middle"><span class="item-subtotal fw-semibold">0.00</span></td>
     <td class="align-middle">
-      <button type="button" class="btn btn-sm btn-outline-danger btn-remove-item" title="Quitar">
-        <i class="bi bi-x-lg"></i>
+      <button type="button" class="btn btn-sm btn-icon btn-ghost-danger btn-remove-item" title="Quitar">
+        <i data-lucide="x"></i>
       </button>
     </td>
   </tr>
 </template>
+<!-- Modal: Seleccionar conjunto -->
+<div class="modal fade" id="modalConjuntos" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i data-lucide="layers" class="me-2"></i>Seleccionar conjunto</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="modalConjuntosBody"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-success" id="btnConfirmarConjunto" disabled>Agregar al formulario</button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
 const PRENDAS = {{ prendas_json|safe }};
+const CONJUNTOS = {{ conjuntos_json|default:"[]"|safe }};
 const ITEMS_INICIALES = {{ items_existentes|default:"[]"|safe }};
 
 const tbody     = document.getElementById('itemsBody');
 const sinItems  = document.getElementById('sinItems');
 const descInput = document.querySelector('[name="descuento"]');
 
-function buildOptions(selectedId) {
-  let opts = '<option value="">— Seleccionar prenda —</option>';
-  PRENDAS.forEach(p => {
-    const sel = (selectedId && p.id == selectedId) ? 'selected' : '';
-    opts += `<option value="${p.id}" data-precio="${p.precio}" ${sel}>${p.label} (stock: ${p.cantidad})</option>`;
-  });
-  return opts;
-}
-
 function calcFila(row) {
-  const cant   = parseFloat(row.querySelector('.item-cantidad').value) || 0;
-  const precio = parseFloat(row.querySelector('.item-precio').value)   || 0;
-  const sub    = cant * precio;
-  row.querySelector('.item-subtotal').textContent = sub.toFixed(2);
-  return sub;
+  const precio = parseFloat(row.querySelector('.item-precio').value) || 0;
+  row.querySelector('.item-subtotal').textContent = precio.toFixed(2);
+  return precio;
 }
 
 function calcTotales() {
@@ -160,39 +192,59 @@ function calcTotales() {
   sinItems.style.display = tbody.querySelectorAll('.item-row').length ? 'none' : 'block';
 }
 
-function addRow(articuloId, cantidad, precio) {
-  const tmpl = document.getElementById('itemRowTemplate');
-  const row  = tmpl.content.cloneNode(true).querySelector('tr');
+function addRow(prendaItemId, precio) {
+  const tmpl      = document.getElementById('itemRowTemplate');
+  const row       = tmpl.content.cloneNode(true).querySelector('tr');
+  const textInput = row.querySelector('.item-articulo-text');
+  const hiddenInput = row.querySelector('.item-articulo');
 
-  row.querySelector('.item-articulo').innerHTML = buildOptions(articuloId);
-  if (cantidad) row.querySelector('.item-cantidad').value = cantidad;
-  if (precio)   row.querySelector('.item-precio').value   = parseFloat(precio).toFixed(2);
+  if (prendaItemId) hiddenInput.value = prendaItemId;
+  if (precio)       row.querySelector('.item-precio').value = parseFloat(precio).toFixed(2);
 
-  row.querySelector('.item-articulo').addEventListener('change', function() {
-    const opt = this.selectedOptions[0];
-    if (opt && opt.dataset.precio) {
-      row.querySelector('.item-precio').value = parseFloat(opt.dataset.precio).toFixed(2);
+  window.makePrendaFlyoutCombobox(textInput, hiddenInput, PRENDAS);
+
+  hiddenInput.addEventListener('change', function() {
+    if (this.value) {
+      const seleccionados = [...tbody.querySelectorAll('[name="item_prenda_item"]')].map(i => i.value);
+      const ocurrencias = seleccionados.filter(v => v === this.value).length;
+      if (ocurrencias > 1) {
+        alert('Ese item ya está seleccionado en otra fila.');
+        this.value = '';
+        textInput.value = '';
+        return;
+      }
+      const prenda = PRENDAS.find(p => String(p.prenda_item_id) === String(this.value));
+      if (prenda) row.querySelector('.item-precio').value = parseFloat(prenda.precio).toFixed(2);
     }
     calcTotales();
   });
-  row.querySelector('.item-cantidad').addEventListener('input', calcTotales);
   row.querySelector('.item-precio').addEventListener('input', calcTotales);
   row.querySelector('.btn-remove-item').addEventListener('click', function() {
     row.remove(); calcTotales();
   });
 
   tbody.appendChild(row);
+  lucide.createIcons();
   calcTotales();
 }
 
 if (ITEMS_INICIALES.length > 0) {
-  ITEMS_INICIALES.forEach(item => addRow(item.articulo_id, item.cantidad, item.precio_unitario));
+  ITEMS_INICIALES.forEach(item => addRow(item.prenda_item_id, item.precio_unitario));
 } else {
   addRow();
 }
 
 document.getElementById('btnAgregarItem').addEventListener('click', () => addRow());
 descInput.addEventListener('input', calcTotales);
+
+window.initConjuntoModal('modalConjuntos', CONJUNTOS, function(conjunto, slotsIncluidos) {
+  const result = window.addConjuntoToForm(conjunto, slotsIncluidos, {
+    PRENDAS: PRENDAS, tbody: tbody, addRow: addRow,
+  });
+  if (result.faltantes.length > 0) {
+    alert('Conjunto agregado. Sin existencias: ' + result.faltantes.join(', '));
+  }
+});
 
 document.getElementById('ventaForm').addEventListener('submit', function(e) {
   const validas = [...tbody.querySelectorAll('.item-row')]

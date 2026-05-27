@@ -1,0 +1,249 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Movimientos de Caja{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="banknote" class="me-2 text-muted"></i>Movimientos de Caja
+      </h2>
+    </div>
+    <div class="col-auto ms-auto">
+      <a href="{% url 'crear_movimiento_caja' %}" class="btn btn-success">
+        <i data-lucide="plus"></i>Nuevo Movimiento
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+<!-- Filtros -->
+<div class="card mb-3">
+  <div class="card-body">
+    <form method="get" class="row g-2 align-items-end" id="filterForm">
+      <div class="col-12 col-md-3">
+        <label class="form-label small mb-1 fw-semibold text-muted">Buscar</label>
+        <input type="text" name="q" class="form-control" placeholder="Código, descripción…"
+               value="{{ q }}" data-debounce="400">
+      </div>
+      <div class="col-6 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Tipo</label>
+        <select name="tipo" class="form-select" data-debounce="0">
+          <option value="">Todos</option>
+          {% for val, lbl in tipo_choices %}
+          <option value="{{ val }}" {% if val == tipo %}selected{% endif %}>{{ lbl }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Concepto</label>
+        <select name="concepto" class="form-select" data-debounce="0">
+          <option value="">Todos</option>
+          {% for val, lbl in concepto_choices %}
+          <option value="{{ val }}" {% if val == concepto %}selected{% endif %}>{{ lbl }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Forma de Pago</label>
+        <select name="forma_pago" class="form-select" data-debounce="0">
+          <option value="">Todas</option>
+          {% for val, lbl in forma_pago_choices %}
+          <option value="{{ val }}" {% if val == forma_pago %}selected{% endif %}>{{ lbl }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Origen</label>
+        <select name="origen" class="form-select" data-debounce="0">
+          <option value="">Todos</option>
+          {% for val, lbl in origen_choices %}
+          <option value="{{ val }}" {% if val == origen %}selected{% endif %}>{{ lbl }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Sesión</label>
+        <select name="sesion" class="form-select" data-debounce="0">
+          <option value="">Todas</option>
+          {% for s in sesiones %}
+          <option value="{{ s.pk }}" {% if s.pk|stringformat:"s" == sesion_id %}selected{% endif %}>
+            #{{ s.pk }} — {{ s.fecha_apertura|date:"d/m/Y" }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Desde</label>
+        <input type="date" name="desde" class="form-control" value="{{ desde }}">
+      </div>
+      <div class="col-6 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Hasta</label>
+        <input type="date" name="hasta" class="form-control" value="{{ hasta }}">
+      </div>
+      <div class="col-auto ms-auto d-flex gap-2 align-items-end flex-wrap">
+        <div class="date-shortcuts">
+          <a href="?periodo=hoy" class="btn btn-outline-secondary {% if periodo == 'hoy' %}active{% endif %}">Hoy</a>
+          <a href="?periodo=semana" class="btn btn-outline-secondary {% if periodo == 'semana' %}active{% endif %}">Semana</a>
+          <a href="?periodo=mes" class="btn btn-outline-secondary {% if periodo == 'mes' %}active{% endif %}">Mes</a>
+        </div>
+        <button type="submit" class="btn btn-primary d-flex align-items-center gap-1">
+          <i data-lucide="search"></i>Filtrar
+        </button>
+        <a href="{% url 'lista_movimientos_caja' %}" class="btn btn-outline-secondary">Limpiar</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Tabla -->
+<div class="card">
+  <div class="card-header">
+    <span class="text-muted small">{{ total }} movimiento{{ total|pluralize:"s" }}</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table">
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Tipo</th>
+          <th>Concepto</th>
+          <th class="text-end">Monto</th>
+          <th>Forma Pago</th>
+          <th>Origen</th>
+          <th>Sesión</th>
+          <th>Fecha</th>
+          <th style="white-space:nowrap">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in page_obj %}
+        <tr>
+          <td class="fw-semibold">{{ m.codigo }}</td>
+          <td>
+            <span class="badge-estado {% if m.tipo == 'ingreso' %}badge-entregado{% else %}badge-inactivo{% endif %}">
+              {{ m.get_tipo_display }}
+            </span>
+          </td>
+          <td>{{ m.get_concepto_display }}</td>
+          <td class="text-end fw-semibold">Bs. {{ m.monto|floatformat:2 }}</td>
+          <td>{{ m.get_forma_pago_display }}</td>
+          <td>
+            <span class="badge-estado {% if m.origen == 'automatico' %}badge-alquilado{% else %}badge-pendiente{% endif %}">
+              {{ m.get_origen_display }}
+            </span>
+          </td>
+          <td>
+            {% if m.sesion %}
+              <a href="{% url 'detalle_sesion_caja' m.sesion.pk %}" class="text-decoration-none">#{{ m.sesion.pk }}</a>
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td style="white-space:nowrap">{{ m.fecha|date:"d/m/Y H:i" }}</td>
+          <td style="white-space:nowrap">
+            <div class="btn-actions">
+              <a href="{% url 'detalle_movimiento_caja' m.pk %}" class="btn btn-sm btn-icon btn-ghost-primary" title="Ver">
+                <i data-lucide="eye"></i>
+              </a>
+              {% if m.origen == 'manual' and not m.movimiento_reverso_id and not m.tiene_reverso %}
+              <button type="button"
+                      class="btn btn-sm btn-icon btn-outline-danger"
+                      title="Anular"
+                      data-bs-toggle="modal"
+                      data-bs-target="#modalAnularMov"
+                      data-pk="{{ m.pk }}"
+                      data-codigo="{{ m.codigo }}"
+                      data-monto="{{ m.monto|floatformat:2 }}">
+                <i data-lucide="ban"></i>
+              </button>
+              {% elif m.tiene_reverso %}
+              <span class="badge-estado badge-inactivo ms-1" title="Anulado">Anulado</span>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="9">
+            <div class="empty-state">
+              <i data-lucide="banknote" style="width:2.5rem;height:2.5rem;opacity:.3;display:block;margin:0 auto .75rem"></i>
+              No hay movimientos en el período seleccionado.
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer d-flex align-items-center">
+    <p class="m-0 text-muted small">
+      {% if page_obj.paginator.num_pages > 1 %}
+        Mostrando <strong>{{ page_obj.start_index }}–{{ page_obj.end_index }}</strong> de <strong>{{ total }}</strong>
+      {% else %}
+        <strong>{{ total }}</strong> movimiento{{ total|pluralize:"s" }}
+      {% endif %}
+    </p>
+    <nav class="ms-auto">
+      <ul class="pagination pagination-sm m-0">
+        {% if page_obj.has_previous %}
+          <li class="page-item">
+            <a class="page-link" href="?page=1&q={{ q }}&tipo={{ tipo }}&concepto={{ concepto }}&forma_pago={{ forma_pago }}&origen={{ origen }}&sesion={{ sesion_id }}&desde={{ desde }}&hasta={{ hasta }}&periodo={{ periodo }}">«</a>
+          </li>
+          <li class="page-item">
+            <a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&tipo={{ tipo }}&concepto={{ concepto }}&forma_pago={{ forma_pago }}&origen={{ origen }}&sesion={{ sesion_id }}&desde={{ desde }}&hasta={{ hasta }}&periodo={{ periodo }}">‹</a>
+          </li>
+        {% endif %}
+        <li class="page-item active">
+          <span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+        </li>
+        {% if page_obj.has_next %}
+          <li class="page-item">
+            <a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&tipo={{ tipo }}&concepto={{ concepto }}&forma_pago={{ forma_pago }}&origen={{ origen }}&sesion={{ sesion_id }}&desde={{ desde }}&hasta={{ hasta }}&periodo={{ periodo }}">›</a>
+          </li>
+          <li class="page-item">
+            <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&tipo={{ tipo }}&concepto={{ concepto }}&forma_pago={{ forma_pago }}&origen={{ origen }}&sesion={{ sesion_id }}&desde={{ desde }}&hasta={{ hasta }}&periodo={{ periodo }}">»</a>
+          </li>
+        {% endif %}
+      </ul>
+    </nav>
+  </div>
+</div>
+
+<!-- Modal de confirmación de anulación -->
+<div class="modal fade" id="modalAnularMov" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Confirmar anulación</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-1">¿Anular el movimiento <strong id="modalAnularCodigo"></strong>?</p>
+        <p class="text-muted small mb-0">Se creará un movimiento inverso de <strong>Bs. <span id="modalAnularMonto"></span></strong> que cancelará su efecto en la caja.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <form id="formAnularMov" method="post" action="" class="d-inline">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-danger">Confirmar anulación</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% block extra_js %}
+<script>
+  document.getElementById('modalAnularMov').addEventListener('show.bs.modal', function(e) {
+    var btn = e.relatedTarget;
+    document.getElementById('modalAnularCodigo').textContent = btn.dataset.codigo;
+    document.getElementById('modalAnularMonto').textContent = btn.dataset.monto;
+    document.getElementById('formAnularMov').action =
+      '/caja/movimientos/' + btn.dataset.pk + '/revertir/';
+  });
+</script>
+{% endblock %}
+{% endblock %}

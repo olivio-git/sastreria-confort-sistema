@@ -1,20 +1,33 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}Eliminar Transacción{% endblock %}
 {% block contenido %}
-<div class="container py-4">
-    <h2 class="mb-4">Eliminar Transacción: {{ transaccion.codigo }}</h2>
-    {% if messages %}
-        <div class="alert {% if 'error' in message.tags %}alert-danger{% else %}alert-info{% endif %}">
-            {% for message in messages %}
-                {{ message }}
-            {% endfor %}
+<div class="row justify-content-center">
+  <div class="col-12 col-sm-8 col-md-5 col-lg-4">
+    <div class="card card-md">
+      <div class="card-status-top bg-danger"></div>
+      <div class="card-body text-center py-4">
+        <div class="mb-3 text-danger">
+          <i data-lucide="banknote" style="width:3rem;height:3rem;opacity:.7"></i>
         </div>
-    {% endif %}
-    <p>¿Estás seguro de que deseas eliminar la transacción <strong>{{ transaccion.codigo }}</strong> con descripción <strong>{{ transaccion.descripcion|truncatechars:50 }}</strong> del <strong>{{ transaccion.fecha|date:"d/m/Y" }}</strong>?</p>
-    <form method="post">
-        {% csrf_token %}
-        <button type="submit" class="btn btn-danger">Eliminar</button>
-        <a href="{% url 'lista_transacciones' %}" class="btn btn-secondary">Cancelar</a>
-    </form>
+        <h3 class="card-title mb-1">¿Eliminar Transacción?</h3>
+        <p class="text-muted mb-0">
+          <strong>{{ transaccion.codigo }}</strong><br>
+          {{ transaccion.descripcion|truncatechars:50 }}<br>
+          <small>{{ transaccion.fecha|date:"d/m/Y" }} — Esta acción no se puede deshacer.</small>
+        </p>
+      </div>
+      <div class="card-footer d-flex justify-content-center gap-3">
+        <a href="{% url 'lista_transacciones' %}" class="btn btn-outline-secondary">
+          <i data-lucide="x"></i>Cancelar
+        </a>
+        <form method="post" class="d-inline">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-danger">
+            <i data-lucide="trash-2"></i>Eliminar
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
 </div>
 {% endblock %}

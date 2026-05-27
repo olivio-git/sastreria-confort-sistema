@@ -1,0 +1,188 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Movimiento {{ movimiento.codigo }}{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="file-text" class="me-2 text-muted"></i>Movimiento {{ movimiento.codigo }}
+        <span class="badge-estado ms-2 {% if movimiento.tipo == 'ingreso' %}badge-entregado{% else %}badge-inactivo{% endif %}">
+          {{ movimiento.get_tipo_display }}
+        </span>
+        {% if movimiento.fue_reversado %}
+          <span class="badge-estado badge-inactivo ms-1">Reversado</span>
+        {% endif %}
+      </h2>
+    </div>
+    <div class="col-auto ms-auto">
+      <a href="{% url 'lista_movimientos_caja' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left" class="me-1"></i>Volver
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+<div class="row g-3">
+  <!-- Datos del movimiento -->
+  <div class="col-12 col-lg-8">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Datos del movimiento</h3>
+      </div>
+      <div class="card-body">
+        <div class="datagrid">
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Código</div>
+            <div class="datagrid-content fw-semibold">{{ movimiento.codigo }}</div>
+          </div>
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Tipo</div>
+            <div class="datagrid-content">
+              <span class="badge-estado {% if movimiento.tipo == 'ingreso' %}badge-entregado{% else %}badge-inactivo{% endif %}">
+                {{ movimiento.get_tipo_display }}
+              </span>
+            </div>
+          </div>
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Concepto</div>
+            <div class="datagrid-content">{{ movimiento.get_concepto_display }}</div>
+          </div>
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Monto</div>
+            <div class="datagrid-content">
+              <span class="fw-bold {% if movimiento.tipo == 'ingreso' %}text-success{% else %}text-danger{% endif %}" style="font-size:1.2rem">
+                {% if movimiento.tipo == 'ingreso' %}+{% else %}−{% endif %}
+                Bs. {{ movimiento.monto|floatformat:2 }}
+              </span>
+            </div>
+          </div>
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Forma de Pago</div>
+            <div class="datagrid-content">{{ movimiento.get_forma_pago_display }}</div>
+          </div>
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Origen</div>
+            <div class="datagrid-content">
+              <span class="badge-estado {% if movimiento.origen == 'automatico' %}badge-alquilado{% else %}badge-pendiente{% endif %}">
+                {{ movimiento.get_origen_display }}
+              </span>
+            </div>
+          </div>
+          {% if movimiento.descripcion %}
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Descripción</div>
+            <div class="datagrid-content">{{ movimiento.descripcion }}</div>
+          </div>
+          {% endif %}
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Sesión</div>
+            <div class="datagrid-content">
+              {% if movimiento.sesion %}
+                <a href="{% url 'detalle_sesion_caja' movimiento.sesion.pk %}" class="text-decoration-none">
+                  Sesión #{{ movimiento.sesion.pk }}
+                </a>
+              {% else %}
+                <span class="text-muted">Sin sesión</span>
+              {% endif %}
+            </div>
+          </div>
+          {% if movimiento.cliente %}
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Cliente</div>
+            <div class="datagrid-content">{{ movimiento.cliente }}</div>
+          </div>
+          {% endif %}
+          {% if movimiento.tipo_gasto %}
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Tipo de Gasto</div>
+            <div class="datagrid-content">{{ movimiento.tipo_gasto }}</div>
+          </div>
+          {% endif %}
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Fecha</div>
+            <div class="datagrid-content">{{ movimiento.fecha|date:"d/m/Y H:i" }}</div>
+          </div>
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Registrado por</div>
+            <div class="datagrid-content">{{ movimiento.usuario|default:"—" }}</div>
+          </div>
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Creado</div>
+            <div class="datagrid-content">{{ movimiento.creado|date:"d/m/Y H:i" }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Estado de reversión -->
+  <div class="col-12 col-lg-4">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Estado de reversión</h3>
+      </div>
+      <div class="card-body">
+        {% if puede_reversar %}
+          <p class="text-muted small mb-3">Este movimiento puede ser anulado. Se creará un movimiento inverso que cancelará su efecto en la caja.</p>
+          <button type="button" class="btn btn-danger w-100" data-bs-toggle="modal" data-bs-target="#modalReversar">
+            <i data-lucide="rotate-ccw" class="me-1"></i>Anular este movimiento
+          </button>
+        {% elif movimiento.fue_reversado %}
+          <div class="alert alert-secondary mb-0">
+            <i data-lucide="info" class="me-2"></i>
+            Este movimiento fue anulado — el reverso anuló su efecto en la caja.
+          </div>
+        {% elif movimiento.movimiento_reverso %}
+          <div class="alert alert-warning mb-0">
+            <i data-lucide="triangle-alert" class="me-2"></i>
+            Este movimiento es un reverso — no puede ser anulado nuevamente.
+          </div>
+        {% elif movimiento.origen == 'automatico' %}
+          <div class="alert alert-info mb-0">
+            <i data-lucide="lock" class="me-2"></i>
+            Los movimientos automáticos no se anulan aquí. Para revertir el efecto, realiza la cancelación desde el módulo de servicio correspondiente (alquiler, venta, confección, etc.).
+          </div>
+        {% else %}
+          <div class="text-muted small">No se puede anular este movimiento.</div>
+        {% endif %}
+
+        {% if movimiento.movimiento_reverso %}
+          <hr>
+          <p class="text-muted small mb-1">Movimiento reverso asociado:</p>
+          <a href="{% url 'detalle_movimiento_caja' movimiento.movimiento_reverso.pk %}" class="btn btn-outline-secondary btn-sm w-100">
+            Ver {{ movimiento.movimiento_reverso.codigo }}
+          </a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de confirmación de reversión -->
+{% if puede_reversar %}
+<div class="modal fade" id="modalReversar" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Confirmar anulación</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-1">¿Anular el movimiento <strong>{{ movimiento.codigo }}</strong>?</p>
+        <p class="text-muted small mb-0">Se creará un movimiento inverso de <strong>Bs. {{ movimiento.monto|floatformat:2 }}</strong> que cancelará su efecto en la caja.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <form method="post" action="{% url 'revertir_movimiento_caja' movimiento.pk %}" class="d-inline">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-danger">Confirmar anulación</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

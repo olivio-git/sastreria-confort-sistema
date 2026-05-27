@@ -1,104 +1,128 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}Inventario{% endblock %}
-{% block contenido %}
-<div class="page-header">
-  <h1 class="page-title"><i class="bi bi-box-seam me-2"></i>Inventario</h1>
-  <div class="d-flex gap-2">
-    <button class="btn btn-outline-secondary btn-sm" data-col-toggle="tablaInventario">
-      <i class="bi bi-layout-three-columns me-1"></i>Columnas
-    </button>
-    <a href="{% url 'crear_inventario' %}" class="btn btn-success btn-sm">
-      <i class="bi bi-plus-lg me-1"></i>Nuevo Artículo
-    </a>
-  </div>
-</div>
 
-<form method="get" class="filter-bar" id="filterForm">
-  <div class="filter-group" style="flex:1;min-width:200px">
-    <label>Buscar</label>
-    <input type="text" name="q" class="form-control" placeholder="Código, artículo…" value="{{ q }}" data-debounce="400">
-  </div>
-  <div class="filter-group">
-    <label>Estado</label>
-    <select name="estado" class="form-select" data-debounce="0">
-      <option value="ACT" {% if estado == 'ACT' %}selected{% endif %}>Activo</option>
-      <option value="BAJ" {% if estado == 'BAJ' %}selected{% endif %}>Baja</option>
-      <option value="" {% if not estado %}selected{% endif %}>Todos</option>
-    </select>
-  </div>
-  <div class="filter-group justify-content-end">
-    <label class="invisible">.</label>
-    <div class="d-flex gap-2">
-      <button type="submit" class="btn btn-primary btn-sm" data-filter-btn><i class="bi bi-search me-1"></i>Filtrar</button>
-      <a href="{% url 'lista_inventario' %}" class="btn btn-outline-secondary btn-sm">Limpiar</a>
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title"><i data-lucide="package" class="me-2 text-muted"></i>Inventario</h2>
+    </div>
+    <div class="col-auto ms-auto d-flex gap-2">
+      <button class="btn btn-outline-secondary" data-col-toggle="tablaInventario">
+        <i data-lucide="layout-list"></i>Columnas
+      </button>
+      <a href="{% url 'crear_inventario' %}" class="btn btn-success">
+        <i data-lucide="plus"></i>Nuevo Artículo
+      </a>
     </div>
   </div>
-  <input type="hidden" name="orden" value="{{ orden }}">
-</form>
+</div>
+{% endblock %}
 
-<div class="d-flex justify-content-end mb-2">
-  <a href="{{ orden_toggle_url }}" class="btn btn-outline-secondary btn-sm" title="Cambiar orden">
-    {% if orden == 'desc' %}<i class="bi bi-sort-down me-1"></i>Más reciente primero
-    {% else %}<i class="bi bi-sort-up me-1"></i>Más antiguo primero{% endif %}
-  </a>
+{% block contenido %}
+<!-- Filtros -->
+<div class="card mb-3">
+  <div class="card-body">
+    <form method="get" class="row g-2 align-items-end" id="filterForm">
+      <div class="col-12 col-md-4">
+        <label class="form-label small mb-1 fw-semibold text-muted">Buscar</label>
+        <input type="text" name="q" class="form-control" placeholder="Código, artículo…" value="{{ q }}" data-debounce="400">
+      </div>
+      <div class="col-12 col-sm-6 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Estado</label>
+        <select name="estado" class="form-select" data-debounce="0">
+          <option value="ACT" {% if estado == 'ACT' %}selected{% endif %}>Activo</option>
+          <option value="BAJ" {% if estado == 'BAJ' %}selected{% endif %}>Baja</option>
+          <option value="" {% if not estado %}selected{% endif %}>Todos</option>
+        </select>
+      </div>
+      <div class="col-auto ms-auto d-flex gap-2 align-items-end">
+        <button type="submit" class="btn btn-primary d-flex align-items-center gap-1" data-filter-btn>
+          <i data-lucide="search"></i>Filtrar
+        </button>
+        <a href="{% url 'lista_inventario' %}" class="btn btn-outline-secondary">Limpiar</a>
+      </div>
+      <input type="hidden" name="orden" value="{{ orden }}">
+    </form>
+  </div>
 </div>
 
-<div class="table-wrapper">
-  <table class="table table-hover" id="tablaInventario">
-    <thead>
-      <tr>
-        <th>Código</th>
-        <th>Artículo</th>
-        <th>Categoría</th>
-        <th>Cant.</th>
-        <th>Costo</th>
-        <th>Precio</th>
-        <th>Ingreso</th>
-        <th>Estado</th>
-        <th data-no-toggle>Acciones</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for inv in page_obj %}
-      <tr>
-        <td class="fw-semibold">{{ inv.codigo }}</td>
-        <td>{{ inv.articulo }}</td>
-        <td>{{ inv.categoria|default:"—" }}</td>
-        <td>{{ inv.cantidad }}</td>
-        <td>{{ inv.costo|floatformat:2|default:"—" }}</td>
-        <td>{{ inv.precio|floatformat:2 }}</td>
-        <td>{{ inv.fecha_ingreso|date:"d/m/Y" }}</td>
-        <td>
-          <span class="badge-estado {% if inv.estado == 'ACT' %}badge-entregado{% else %}badge-inactivo{% endif %}">
-            {{ inv.get_estado_display }}
-          </span>
-        </td>
-        <td>
-          <div class="btn-actions">
-            <a href="{% url 'editar_inventario' inv.id %}" class="btn btn-sm btn-outline-primary" title="Editar"><i class="bi bi-pencil"></i></a>
-            {% if inv.estado == 'ACT' %}
-            <a href="{% url 'dar_baja_inventario' inv.id %}" class="btn btn-sm btn-outline-warning" title="Dar de baja"><i class="bi bi-arrow-down-circle"></i></a>
-            {% endif %}
-            <a href="{% url 'eliminar_inventario' inv.id %}" class="btn btn-sm btn-outline-danger" title="Eliminar"><i class="bi bi-trash"></i></a>
-          </div>
-        </td>
-      </tr>
-      {% empty %}
-      <tr>
-        <td colspan="9">
-          <div class="empty-state">
-            <i class="bi bi-box d-block"></i>
-            No hay artículos{% if q %} que coincidan con "{{ q }}"{% endif %}.
-          </div>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  <div class="pagination-bar">
-    <span>{{ total }} artículo{{ total|pluralize }}</span>
-    <nav>
-      <ul class="pagination pagination-sm mb-0">
+<!-- Tabla -->
+<div class="card">
+  <div class="card-header d-flex align-items-center">
+    <span class="text-muted small">{{ total }} artículo{{ total|pluralize }}</span>
+    <div class="ms-auto">
+      <a href="{{ orden_toggle_url }}" class="btn btn-outline-secondary" title="Cambiar orden">
+        {% if orden == 'desc' %}<i data-lucide="arrow-down-wide-narrow"></i>Más reciente primero
+        {% else %}<i data-lucide="arrow-up-narrow-wide"></i>Más antiguo primero{% endif %}
+      </a>
+    </div>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table" id="tablaInventario">
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Artículo</th>
+          <th>Categoría</th>
+          <th class="text-center">Cant.</th>
+          <th class="text-end">Costo</th>
+          <th class="text-end">Precio</th>
+          <th>Ingreso</th>
+          <th>Estado</th>
+          <th data-no-toggle style="white-space:nowrap">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for inv in page_obj %}
+        <tr>
+          <td class="fw-semibold">{{ inv.codigo }}</td>
+          <td>{{ inv.articulo }}</td>
+          <td class="text-muted">{{ inv.categoria|default:"—" }}</td>
+          <td class="text-center">{{ inv.cantidad }}</td>
+          <td class="text-end">{{ inv.costo|floatformat:2|default:"—" }}</td>
+          <td class="text-end fw-semibold">{{ inv.precio|floatformat:2 }}</td>
+          <td>{{ inv.fecha_ingreso|date:"d/m/Y" }}</td>
+          <td>
+            <span class="badge-estado {% if inv.estado == 'ACT' %}badge-entregado{% else %}badge-inactivo{% endif %}">
+              {{ inv.get_estado_display }}
+            </span>
+          </td>
+          <td>
+            <div class="btn-actions">
+              <a href="{% url 'editar_inventario' inv.id %}" class="btn btn-sm btn-icon btn-ghost-primary" title="Editar">
+                <i data-lucide="pencil"></i>
+              </a>
+              {% if inv.estado == 'ACT' %}
+              <a href="{% url 'dar_baja_inventario' inv.id %}" class="btn btn-sm btn-icon btn-ghost-warning" title="Dar de baja">
+                <i data-lucide="arrow-down-circle"></i>
+              </a>
+              {% endif %}
+              <button type="button" class="btn btn-sm btn-icon btn-ghost-danger" title="Eliminar"
+                data-delete-url="{% url 'eliminar_inventario' inv.id %}"
+                data-delete-name="{{ inv }}"><i data-lucide="trash-2"></i></button>
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="9">
+            <div class="empty-state">
+              <i data-lucide="package" style="width:2.5rem;height:2.5rem;opacity:.3;display:block;margin:0 auto .75rem"></i>
+              No hay artículos{% if q %} que coincidan con "{{ q }}"{% endif %}.
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer d-flex align-items-center">
+    <p class="m-0 text-muted small">
+      Mostrando <strong>{{ page_obj.start_index }}–{{ page_obj.end_index }}</strong> de <strong>{{ total }}</strong>
+    </p>
+    <nav class="ms-auto">
+      <ul class="pagination pagination-sm m-0">
         {% if page_obj.has_previous %}
           <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&estado={{ estado }}&orden={{ orden }}">«</a></li>
           <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&estado={{ estado }}&orden={{ orden }}">‹</a></li>

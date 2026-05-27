@@ -1,139 +1,193 @@
 {% extends 'misastreria/base.html' %}
-{% load static %}
-
-{% block titulo %}Reporte de Transacciones{% endblock %}
+{% block titulo %}Movimientos de Caja{% endblock %}
 
 {% block contenido %}
-<div class="container-fluid py-4">
-    <div class="row mb-4">
-        <div class="col-12 text-center">
-            <h1 class="display-6 fw-bold text-primary mb-1">SISTEMA DE GESTION SASTRERIA CONFORT Y MAS</h1>
-            <h2 class="h3 text-secondary">REPORTE DE TRANSACCIONES</h2>
-        </div>
-    </div>
 
-    <div class="card shadow mb-4">
-        <div class="card-header py-3 bg-gradient-primary text-white">
-            <h6 class="m-0 font-weight-bold">Filtros de Reporte</h6>
-        </div>
-        <div class="card-body">
-            <form method="GET" action="{% url 'reporte_transacciones' %}" id="filter-form">
-                <div class="row g-3 align-items-end">
-                    <div class="col-md-3">
-                        <label for="fecha_desde" class="form-label">Fecha Desde:</label>
-                        <input type="date" class="form-control" id="fecha_desde" name="fecha_desde" value="{{ selected_fecha_desde }}">
-                    </div>
-                    <div class="col-md-3">
-                        <label for="fecha_hasta" class="form-label">Fecha Hasta:</label>
-                        <input type="date" class="form-control" id="fecha_hasta" name="fecha_hasta" value="{{ selected_fecha_hasta }}">
-                    </div>
-                    <div class="col-md-3">
-                        <label for="tipo_transaccion" class="form-label">Tipo de Transacción:</label>
-                        <select class="form-select" id="tipo_transaccion" name="tipo_transaccion">
-                            <option value="" {% if not selected_tipo_transaccion %}selected{% endif %}>Todas</option>
-                            {% for key, value in tipo_transaccion_choices %}
-                                <option value="{{ key }}" {% if selected_tipo_transaccion|stringformat:"s" == key|stringformat:"s" %}selected{% endif %}>{{ value }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="col-md-3">
-                        <label for="tipo_servicio" class="form-label">Tipo de Servicio:</label>
-                        <select class="form-select" id="tipo_servicio" name="tipo_servicio">
-                            <option value="" {% if not selected_tipo_servicio %}selected{% endif %}>Todos</option>
-                            {% for key, value in tipo_servicio_choices %}
-                                <option value="{{ key }}" {% if selected_tipo_servicio|stringformat:"s" == key|stringformat:"s" %}selected{% endif %}>{{ value }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="col-md-4">
-                        <label for="descripcion" class="form-label">Descripción (contiene):</label>
-                        <input type="text" class="form-control" id="descripcion" name="descripcion" value="{{ selected_descripcion }}" placeholder="Ej. pago alquiler, compra tela">
-                    </div>
-                    <div class="col-md-8 text-end">
-                        <button type="submit" class="btn btn-primary me-2"><i class="bi bi-filter me-1"></i> Aplicar Filtros</button>
-                        <a href="{% url 'reporte_transacciones' %}" class="btn btn-secondary"><i class="bi bi-x-circle me-1"></i> Limpiar Filtros</a>
-                    </div>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <div class="card shadow mb-4">
-        <div class="card-header py-3 d-flex justify-content-between align-items-center bg-gradient-primary text-white">
-            <h6 class="m-0 font-weight-bold">Resultados del Reporte</h6>
-            <div>
-                <button type="button" class="btn btn-success me-2" onclick="exportReport('excel')"><i class="bi bi-file-earmark-excel me-1"></i> Exportar a Excel</button>
-                <button type="button" class="btn btn-danger" onclick="exportReport('pdf')"><i class="bi bi-file-earmark-pdf me-1"></i> Exportar a PDF</button>
-            </div>
-        </div>
-        <div class="card-body">
-            {% if transacciones %}
-            <div class="table-responsive">
-                <table class="table table-bordered table-striped" width="100%" cellspacing="0">
-                    <thead class="bg-light">
-                        <tr>
-                            <th>Código</th>
-                            <th>Tipo Transacción</th>
-                            <th>Descripción</th>
-                            <th>Tipo Servicio</th>
-                            <th>Fecha</th>
-                            <th>Cantidad</th>
-                            <th>Monto (Bs.)</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for transaccion in transacciones %}
-                        <tr>
-                            <td>{{ transaccion.codigo }}</td>
-                            <td>{{ transaccion.get_tipo_transaccion_display }}</td>
-                            <td>{{ transaccion.descripcion }}</td>
-                            <td>{{ transaccion.get_tipo_servicio_display }}</td>
-                            <td>{{ transaccion.fecha|date:"d/m/Y" }}</td>
-                            <td>{{ transaccion.cantidad }}</td>
-                            <td>{{ transaccion.monto|floatformat:2 }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                    <tfoot>
-                        <tr>
-                            <th colspan="6" class="text-end text-primary">Total Ingresos:</th>
-                            <th class="text-success">Bs. {{ total_ingresos|floatformat:2 }}</th>
-                        </tr>
-                        <tr>
-                            <th colspan="6" class="text-end text-primary">Total Gastos:</th>
-                            <th class="text-danger">Bs. {{ total_gastos|floatformat:2 }}</th>
-                        </tr>
-                        <tr class="table-info">
-                            <th colspan="6" class="text-end text-primary">Saldo Neto:</th>
-                            <th class="fw-bold {% if saldo_neto >= 0 %}text-success{% else %}text-danger{% endif %}">Bs. {{ saldo_neto|floatformat:2 }}</th>
-                        </tr>
-                    </tfoot>
-                </table>
-            </div>
-            {% else %}
-            <p class="text-center text-muted">No se encontraron transacciones para los filtros aplicados.</p>
-            {% endif %}
-        </div>
-    </div>
+<!-- Page header -->
+<div class="page-header">
+  <h1 class="page-title">
+    <i class="bi bi-wallet2 me-2"></i>Movimientos de Caja
+  </h1>
 </div>
 
-<script>
-    function exportReport(format) {
-        const form = document.getElementById('filter-form');
-        const originalAction = form.action;
-        const originalMethod = form.method;
+<!-- Data validity banner -->
+{% if mostrar_banner %}
+<div class="alert alert-info mb-3" style="border-color:var(--info)">
+  <i class="bi bi-info-circle me-2"></i>
+  Los datos de caja están disponibles desde el <strong>{{ fecha_migracion|date:"d/m/Y" }}</strong>.
+  Períodos anteriores pueden estar incompletos.
+</div>
+{% endif %}
 
-        const exportInput = document.createElement('input');
-        exportInput.type = 'hidden';
-        exportInput.name = 'export_format';
-        exportInput.value = format;
-        form.appendChild(exportInput);
+<!-- Filter bar -->
+<form method="get" class="filter-bar" id="filterForm">
+  <!-- Period shortcuts -->
+  <div class="filter-group">
+    <label class="invisible">.</label>
+    <div class="date-shortcuts">
+      <a href="?periodo=hoy" class="btn btn-outline-secondary btn-sm {% if periodo == 'hoy' %}active{% endif %}">Hoy</a>
+      <a href="?periodo=semana" class="btn btn-outline-secondary btn-sm {% if periodo == 'semana' %}active{% endif %}">Semana</a>
+      <a href="?periodo=mes" class="btn btn-outline-secondary btn-sm {% if periodo == 'mes' or not periodo %}active{% endif %}">Mes</a>
+    </div>
+  </div>
 
-        form.submit();
+  <!-- Custom date range -->
+  <div class="filter-group">
+    <label>Desde</label>
+    <input type="date" name="desde" class="form-control"
+           value="{% if periodo == 'custom' %}{{ desde }}{% endif %}"
+           onchange="this.form.querySelector('[name=periodo]').value='custom'">
+  </div>
+  <div class="filter-group">
+    <label>Hasta</label>
+    <input type="date" name="hasta" class="form-control"
+           value="{% if periodo == 'custom' %}{{ hasta }}{% endif %}"
+           onchange="this.form.querySelector('[name=periodo]').value='custom'">
+  </div>
+  <input type="hidden" name="periodo" value="{{ periodo }}">
 
-        form.removeChild(exportInput);
-        form.action = originalAction;
-        form.method = originalMethod;
-    }
-</script>
+  <!-- Tipo filter -->
+  <div class="filter-group">
+    <label>Tipo</label>
+    <select name="tipo" class="form-select" data-debounce="0">
+      <option value="" {% if not tipo_filter %}selected{% endif %}>Todos</option>
+      <option value="ingreso" {% if tipo_filter == 'ingreso' %}selected{% endif %}>Ingreso</option>
+      <option value="egreso" {% if tipo_filter == 'egreso' %}selected{% endif %}>Egreso</option>
+    </select>
+  </div>
+
+  <!-- Concepto filter -->
+  <div class="filter-group">
+    <label>Concepto</label>
+    <select name="concepto" class="form-select" data-debounce="0">
+      <option value="" {% if not concepto_filter %}selected{% endif %}>Todos</option>
+      {% for key, label in concepto_choices %}
+        <option value="{{ key }}" {% if concepto_filter == key %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <!-- Clear -->
+  <div class="filter-group justify-content-end">
+    <label class="invisible">.</label>
+    <a href="{% url 'reporte_transacciones' %}" class="btn btn-outline-secondary">Limpiar</a>
+  </div>
+</form>
+
+<!-- Summary cards -->
+<div class="row g-3 mb-3">
+  <div class="col-sm-4">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body py-3">
+        <div class="d-flex align-items-center gap-2 mb-1">
+          <i class="bi bi-arrow-down-circle" style="color:var(--success)"></i>
+          <span class="text-muted small">Total Ingresos</span>
+        </div>
+        <div class="fs-4 fw-semibold" style="color:var(--success)">
+          Bs. {{ total_ingresos|floatformat:2 }}
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-4">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body py-3">
+        <div class="d-flex align-items-center gap-2 mb-1">
+          <i class="bi bi-arrow-up-circle" style="color:var(--danger)"></i>
+          <span class="text-muted small">Total Egresos</span>
+        </div>
+        <div class="fs-4 fw-semibold" style="color:var(--danger)">
+          Bs. {{ total_egresos|floatformat:2 }}
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-4">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body py-3">
+        <div class="d-flex align-items-center gap-2 mb-1">
+          <i class="bi bi-wallet2" style="color:{% if saldo >= 0 %}var(--success){% else %}var(--danger){% endif %}"></i>
+          <span class="text-muted small">Saldo Neto</span>
+        </div>
+        <div class="fs-4 fw-semibold {% if saldo >= 0 %}text-success{% else %}text-danger{% endif %}">
+          {% if saldo >= 0 %}+{% endif %}Bs. {{ saldo|floatformat:2 }}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Table -->
+<div class="table-wrapper">
+  <table class="table table-hover">
+    <thead>
+      <tr>
+        <th>Fecha</th>
+        <th>Concepto</th>
+        <th>Tipo</th>
+        <th>Forma de pago</th>
+        <th class="text-end">Monto</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for mov in page_obj %}
+      <tr>
+        <td class="text-muted small">{{ mov.fecha|date:"d/m/Y H:i" }}</td>
+        <td>
+          {% for key, label in concepto_choices %}
+            {% if key == mov.concepto %}{{ label }}{% endif %}
+          {% endfor %}
+        </td>
+        <td>
+          <span class="badge-estado {% if mov.tipo == 'ingreso' %}badge-entregado{% else %}badge-pendiente{% endif %}">
+            {{ mov.tipo|capfirst }}
+          </span>
+        </td>
+        <td class="text-muted">{{ mov.get_forma_pago_display|default:"—" }}</td>
+        <td class="text-end fw-semibold {% if mov.tipo == 'ingreso' %}text-success{% else %}text-danger{% endif %}">
+          {% if mov.tipo == 'egreso' %}−{% endif %}Bs. {{ mov.monto|floatformat:2 }}
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="5">
+          <div class="empty-state">
+            <i class="bi bi-inbox d-block"></i>
+            No hay movimientos para los filtros aplicados.
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <!-- Pagination bar -->
+  <div class="pagination-bar">
+    <span>{{ total }} registro{{ total|pluralize }}</span>
+    <nav>
+      <ul class="pagination pagination-sm mb-0">
+        {% if page_obj.has_previous %}
+          <li class="page-item">
+            <a class="page-link" href="?page=1&periodo={{ periodo }}&tipo={{ tipo_filter }}&concepto={{ concepto_filter }}&desde={{ desde }}&hasta={{ hasta }}">«</a>
+          </li>
+          <li class="page-item">
+            <a class="page-link" href="?page={{ page_obj.previous_page_number }}&periodo={{ periodo }}&tipo={{ tipo_filter }}&concepto={{ concepto_filter }}&desde={{ desde }}&hasta={{ hasta }}">‹</a>
+          </li>
+        {% endif %}
+        <li class="page-item active">
+          <span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+        </li>
+        {% if page_obj.has_next %}
+          <li class="page-item">
+            <a class="page-link" href="?page={{ page_obj.next_page_number }}&periodo={{ periodo }}&tipo={{ tipo_filter }}&concepto={{ concepto_filter }}&desde={{ desde }}&hasta={{ hasta }}">›</a>
+          </li>
+          <li class="page-item">
+            <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&periodo={{ periodo }}&tipo={{ tipo_filter }}&concepto={{ concepto_filter }}&desde={{ desde }}&hasta={{ hasta }}">»</a>
+          </li>
+        {% endif %}
+      </ul>
+    </nav>
+  </div>
+</div>
+
 {% endblock %}

@@ -1,43 +1,234 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}Dashboard{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="layout-dashboard" class="me-2 text-muted"></i>Dashboard
+      </h2>
+      <div class="text-muted mt-1 small">Bienvenido, <strong>{{ user.username }}</strong></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
 {% block contenido %}
 
-<div class="page-header">
-  <h1 class="page-title"><i class="bi bi-grid me-2"></i>Dashboard</h1>
-  <span class="text-muted">Bienvenido, {{ user.username }}</span>
+<!-- ===== Analytics del mes ===== -->
+<div class="mb-4">
+  <h5 class="text-muted small fw-semibold text-uppercase mb-3" style="letter-spacing:.05em">
+    <i class="bi bi-bar-chart-line me-1"></i>Análisis del Mes
+  </h5>
+
+  <!-- KPI cards -->
+  <div class="row g-3 mb-3">
+    <!-- Ingresos del mes -->
+    <div class="col-sm-6 col-xl-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-cash-coin" style="color:var(--success);font-size:1.25rem"></i>
+            <span class="text-muted small">Ingresos del mes</span>
+          </div>
+          <div class="fs-3 fw-semibold">Bs. {{ kpis.ingresos_mes|floatformat:2 }}</div>
+          <div class="mt-1">
+            {% if kpis.delta_pct is None %}
+              <span class="text-muted small">Sin datos mes anterior</span>
+            {% elif kpis.delta_pct >= 0 %}
+              <span class="badge" style="background:rgba(16,185,129,.15);color:var(--success)">+{{ kpis.delta_pct }}%</span>
+              <span class="text-muted small ms-1">vs mes anterior</span>
+            {% else %}
+              <span class="badge" style="background:rgba(239,68,68,.15);color:var(--danger)">{{ kpis.delta_pct }}%</span>
+              <span class="text-muted small ms-1">vs mes anterior</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Egresos del mes -->
+    <div class="col-sm-6 col-xl-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-arrow-up-down" style="color:var(--danger);font-size:1.25rem"></i>
+            <span class="text-muted small">Egresos del mes</span>
+          </div>
+          <div class="fs-3 fw-semibold">Bs. {{ kpis.egresos_mes|floatformat:2 }}</div>
+          <div class="mt-1">
+            <span class="text-muted small">
+              Anterior: Bs. {{ kpis.ingresos_anterior|floatformat:2 }}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Servicios activos -->
+    <div class="col-sm-6 col-xl-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-activity" style="color:var(--primary);font-size:1.25rem"></i>
+            <span class="text-muted small">Servicios activos</span>
+          </div>
+          <div class="fs-3 fw-semibold">{{ kpis.servicios_activos }}</div>
+          <div class="mt-1">
+            <span class="text-muted small">Alquileres + reparaciones + confecciones</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Clientes nuevos -->
+    <div class="col-sm-6 col-xl-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-person-plus" style="color:var(--info);font-size:1.25rem"></i>
+            <span class="text-muted small">Clientes nuevos</span>
+          </div>
+          <div class="fs-3 fw-semibold">{{ kpis.clientes_nuevos }}</div>
+          <div class="mt-1">
+            <span class="text-muted small">Este mes</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Charts row -->
+  <div class="row g-3 mb-3">
+    <!-- Trend bar chart -->
+    <div class="col-lg-8">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-header border-0 pb-0">
+          <h6 class="card-title mb-0 fw-semibold text-muted">Tendencia semanal (8 semanas)</h6>
+        </div>
+        <div class="card-body">
+          {% if chart_trend %}
+            <div style="position:relative;height:220px">
+              <canvas id="trendChart"></canvas>
+            </div>
+          {% else %}
+            <div class="d-flex align-items-center justify-content-center" style="height:220px">
+              <p class="text-muted mb-0"><i class="bi bi-bar-chart me-2"></i>Sin datos disponibles</p>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <!-- Donut chart -->
+    <div class="col-lg-4">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-header border-0 pb-0">
+          <h6 class="card-title mb-0 fw-semibold text-muted">Ingresos por servicio</h6>
+        </div>
+        <div class="card-body">
+          {% if chart_donut %}
+            <div style="position:relative;height:220px">
+              <canvas id="donutChart"></canvas>
+            </div>
+          {% else %}
+            <div class="d-flex align-items-center justify-content-center" style="height:220px">
+              <p class="text-muted mb-0"><i class="bi bi-pie-chart me-2"></i>Sin datos este mes</p>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
-<!-- Resumen rápido -->
+<!-- JSON data for charts -->
+{{ chart_trend|json_script:"chart-trend-data" }}
+{{ chart_donut|json_script:"chart-donut-data" }}
+
+<!-- ===== Sección operativa ===== -->
+<!-- Stat cards -->
 <div class="row g-3 mb-4">
   <div class="col-sm-6 col-md-4">
     <a href="{% url 'lista_reparaciones' %}?estado=pendiente" class="text-decoration-none">
-      <div class="form-card d-flex align-items-center gap-3">
-        <div style="font-size:2rem;color:var(--warning)"><i class="bi bi-tools"></i></div>
-        <div>
-          <div class="fw-semibold fs-4">{{ reparaciones_pendientes }}</div>
-          <div class="text-muted small">Reparaciones pendientes</div>
+      <div class="card card-sm h-100">
+        <div class="card-body">
+          <div class="row align-items-center">
+            <div class="col-auto">
+              <span class="avatar avatar-md bg-warning-lt text-warning">
+                <i data-lucide="wrench"></i>
+              </span>
+            </div>
+            <div class="col">
+              <div class="h2 mb-0">{{ reparaciones_pendientes }}</div>
+              <div class="text-muted small">Reparaciones pendientes</div>
+            </div>
+          </div>
         </div>
       </div>
     </a>
   </div>
   <div class="col-sm-6 col-md-4">
     <a href="{% url 'lista_alquileres' %}?estado=alquilado" class="text-decoration-none">
-      <div class="form-card d-flex align-items-center gap-3">
-        <div style="font-size:2rem;color:var(--primary)"><i class="bi bi-bag"></i></div>
-        <div>
-          <div class="fw-semibold fs-4">{{ alquileres_activos }}</div>
-          <div class="text-muted small">Alquileres activos</div>
+      <div class="card card-sm h-100">
+        <div class="card-body">
+          <div class="row align-items-center">
+            <div class="col-auto">
+              <span class="avatar avatar-md bg-primary-lt text-primary">
+                <i data-lucide="shopping-bag"></i>
+              </span>
+            </div>
+            <div class="col">
+              <div class="h2 mb-0">{{ alquileres_activos }}</div>
+              <div class="text-muted small">Alquileres activos</div>
+            </div>
+          </div>
         </div>
       </div>
     </a>
   </div>
   <div class="col-sm-6 col-md-4">
     <a href="{% url 'lista_ordenes' %}" class="text-decoration-none">
-      <div class="form-card d-flex align-items-center gap-3">
-        <div style="font-size:2rem;color:var(--info)"><i class="bi bi-gear"></i></div>
-        <div>
-          <div class="fw-semibold fs-4">{{ ordenes_activas }}</div>
-          <div class="text-muted small">Órdenes en producción</div>
+      <div class="card card-sm h-100">
+        <div class="card-body">
+          <div class="row align-items-center">
+            <div class="col-auto">
+              <span class="avatar avatar-md bg-info-lt text-info">
+                <i data-lucide="settings"></i>
+              </span>
+            </div>
+            <div class="col">
+              <div class="h2 mb-0">{{ ordenes_activas }}</div>
+              <div class="text-muted small">Órdenes en producción</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </a>
+  </div>
+  <div class="col-sm-6 col-md-4">
+    <a href="{% url 'resumen_caja' %}?periodo=hoy" class="text-decoration-none">
+      <div class="card card-sm h-100">
+        <div class="card-body">
+          <div class="row align-items-center">
+            <div class="col-auto">
+              <span class="avatar avatar-md {% if caja_hoy.saldo >= 0 %}bg-success-lt text-success{% else %}bg-danger-lt text-danger{% endif %}">
+                <i data-lucide="wallet"></i>
+              </span>
+            </div>
+            <div class="col">
+              <div class="h2 mb-0">Bs. {{ caja_hoy.saldo|floatformat:2 }}</div>
+              <div class="text-muted small">
+                Caja hoy
+                {% if caja_hoy.sesion %}
+                  <span class="badge bg-success ms-1">Sesión abierta</span>
+                {% else %}
+                  <span class="badge bg-secondary ms-1">Sin sesión</span>
+                {% endif %}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </a>
@@ -46,145 +237,241 @@
 
 <!-- Alertas de stock -->
 {% if prendas_alerta or insumos_alerta %}
-<div class="form-card mb-4" style="border-left:4px solid var(--warning)">
-  <h6 class="fw-semibold mb-3" style="color:var(--warning)">
-    <i class="bi bi-exclamation-triangle me-2"></i>Alertas de stock mínimo
-  </h6>
-  <div class="row g-3">
-    {% if prendas_alerta %}
-    <div class="col-md-6">
-      <p class="text-muted small mb-2 fw-semibold">Prendas bajo mínimo</p>
-      <div class="table-responsive">
-        <table class="table table-sm">
-          <thead><tr><th>Prenda</th><th>Stock</th><th>Mínimo</th></tr></thead>
-          <tbody>
-            {% for p in prendas_alerta %}
-            <tr>
-              <td><a href="{% url 'editar_prenda' p.id %}" class="text-decoration-none">{{ p.nombre }}</a></td>
-              <td class="fw-semibold" style="color:var(--danger)">{{ p.cantidad }}</td>
-              <td class="text-muted">{{ p.stock_minimo }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+<div class="card mb-4">
+  <div class="card-status-top bg-warning"></div>
+  <div class="card-header">
+    <h3 class="card-title d-flex align-items-center gap-2">
+      <i data-lucide="triangle-alert" style="color:var(--tblr-warning)"></i>
+      Alertas de stock mínimo
+    </h3>
+  </div>
+  <div class="card-body">
+    <div class="row g-3">
+      {% if prendas_alerta %}
+      <div class="col-md-6">
+        <p class="text-muted small mb-2 fw-semibold">Prendas bajo mínimo</p>
+        <div class="table-responsive">
+          <table class="table table-sm table-vcenter">
+            <thead><tr><th>Prenda</th><th class="text-end">Stock</th><th class="text-end">Mínimo</th></tr></thead>
+            <tbody>
+              {% for p in prendas_alerta %}
+              <tr>
+                <td><a href="{% url 'editar_prenda' p.id %}" class="text-decoration-none">{{ p.nombre }}</a></td>
+                <td class="text-end fw-semibold text-danger">{{ p.cantidad }}</td>
+                <td class="text-end text-muted">{{ p.stock_minimo }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
-    {% endif %}
-    {% if insumos_alerta %}
-    <div class="col-md-6">
-      <p class="text-muted small mb-2 fw-semibold">Insumos bajo mínimo</p>
-      <div class="table-responsive">
-        <table class="table table-sm">
-          <thead><tr><th>Insumo</th><th>Stock</th><th>Mínimo</th></tr></thead>
-          <tbody>
-            {% for ins in insumos_alerta %}
-            <tr>
-              <td><a href="{% url 'editar_insumo' ins.id %}" class="text-decoration-none">{{ ins.articulo }}</a></td>
-              <td class="fw-semibold" style="color:var(--danger)">{{ ins.cantidad }}</td>
-              <td class="text-muted">{{ ins.stock_minimo }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+      {% endif %}
+      {% if insumos_alerta %}
+      <div class="col-md-6">
+        <p class="text-muted small mb-2 fw-semibold">Insumos bajo mínimo</p>
+        <div class="table-responsive">
+          <table class="table table-sm table-vcenter">
+            <thead><tr><th>Insumo</th><th class="text-end">Stock</th><th class="text-end">Mínimo</th></tr></thead>
+            <tbody>
+              {% for ins in insumos_alerta %}
+              <tr>
+                <td><a href="{% url 'editar_insumo' ins.id %}" class="text-decoration-none">{{ ins.articulo }}</a></td>
+                <td class="text-end fw-semibold text-danger">{{ ins.cantidad }}</td>
+                <td class="text-end text-muted">{{ ins.stock_minimo }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
       </div>
+      {% endif %}
     </div>
-    {% endif %}
   </div>
 </div>
 {% endif %}
 
 <!-- Accesos rápidos -->
 <div class="row g-3">
-  {% with accesos=accesos_rapidos %}
-  <div class="col-6 col-sm-4 col-md-3">
-    <a href="{% url 'lista_empleados' %}" class="text-decoration-none">
-      <div class="form-card text-center py-3">
-        <i class="bi bi-people-fill d-block mb-2" style="font-size:1.6rem;color:var(--primary)"></i>
-        <span class="small fw-semibold">Empleados</span>
+  {% with items=accesos_rapidos %}
+
+  <div class="col-6 col-sm-4 col-md-3 col-lg-2">
+    <a href="{% url 'lista_empleados' %}" class="card text-decoration-none h-100">
+      <div class="card-body text-center py-3 px-2">
+        <div class="avatar avatar-sm bg-primary-lt text-primary mb-2">
+          <i data-lucide="id-card"></i>
+        </div>
+        <div class="small fw-semibold text-body">Empleados</div>
       </div>
     </a>
   </div>
-  <div class="col-6 col-sm-4 col-md-3">
-    <a href="{% url 'lista_clientes' %}" class="text-decoration-none">
-      <div class="form-card text-center py-3">
-        <i class="bi bi-person-lines-fill d-block mb-2" style="font-size:1.6rem;color:var(--primary)"></i>
-        <span class="small fw-semibold">Clientes</span>
+
+  <div class="col-6 col-sm-4 col-md-3 col-lg-2">
+    <a href="{% url 'lista_clientes' %}" class="card text-decoration-none h-100">
+      <div class="card-body text-center py-3 px-2">
+        <div class="avatar avatar-sm bg-primary-lt text-primary mb-2">
+          <i data-lucide="users"></i>
+        </div>
+        <div class="small fw-semibold text-body">Clientes</div>
       </div>
     </a>
   </div>
-  <div class="col-6 col-sm-4 col-md-3">
-    <a href="{% url 'lista_reparaciones' %}" class="text-decoration-none">
-      <div class="form-card text-center py-3">
-        <i class="bi bi-tools d-block mb-2" style="font-size:1.6rem;color:var(--primary)"></i>
-        <span class="small fw-semibold">Reparaciones</span>
+
+  <div class="col-6 col-sm-4 col-md-3 col-lg-2">
+    <a href="{% url 'lista_reparaciones' %}" class="card text-decoration-none h-100">
+      <div class="card-body text-center py-3 px-2">
+        <div class="avatar avatar-sm bg-warning-lt text-warning mb-2">
+          <i data-lucide="wrench"></i>
+        </div>
+        <div class="small fw-semibold text-body">Reparaciones</div>
       </div>
     </a>
   </div>
-  <div class="col-6 col-sm-4 col-md-3">
-    <a href="{% url 'lista_ventas' %}" class="text-decoration-none">
-      <div class="form-card text-center py-3">
-        <i class="bi bi-cart-fill d-block mb-2" style="font-size:1.6rem;color:var(--primary)"></i>
-        <span class="small fw-semibold">Ventas</span>
+
+  <div class="col-6 col-sm-4 col-md-3 col-lg-2">
+    <a href="{% url 'lista_ventas' %}" class="card text-decoration-none h-100">
+      <div class="card-body text-center py-3 px-2">
+        <div class="avatar avatar-sm bg-success-lt text-success mb-2">
+          <i data-lucide="shopping-cart"></i>
+        </div>
+        <div class="small fw-semibold text-body">Ventas</div>
       </div>
     </a>
   </div>
-  <div class="col-6 col-sm-4 col-md-3">
-    <a href="{% url 'lista_confecciones' %}" class="text-decoration-none">
-      <div class="form-card text-center py-3">
-        <i class="bi bi-scissors d-block mb-2" style="font-size:1.6rem;color:var(--primary)"></i>
-        <span class="small fw-semibold">Confecciones</span>
+
+  <div class="col-6 col-sm-4 col-md-3 col-lg-2">
+    <a href="{% url 'lista_confecciones' %}" class="card text-decoration-none h-100">
+      <div class="card-body text-center py-3 px-2">
+        <div class="avatar avatar-sm bg-purple-lt text-purple mb-2">
+          <i data-lucide="scissors"></i>
+        </div>
+        <div class="small fw-semibold text-body">Confecciones</div>
       </div>
     </a>
   </div>
-  <div class="col-6 col-sm-4 col-md-3">
-    <a href="{% url 'lista_alquileres' %}" class="text-decoration-none">
-      <div class="form-card text-center py-3">
-        <i class="bi bi-bag-fill d-block mb-2" style="font-size:1.6rem;color:var(--primary)"></i>
-        <span class="small fw-semibold">Alquileres</span>
+
+  <div class="col-6 col-sm-4 col-md-3 col-lg-2">
+    <a href="{% url 'lista_alquileres' %}" class="card text-decoration-none h-100">
+      <div class="card-body text-center py-3 px-2">
+        <div class="avatar avatar-sm bg-primary-lt text-primary mb-2">
+          <i data-lucide="calendar"></i>
+        </div>
+        <div class="small fw-semibold text-body">Alquileres</div>
       </div>
     </a>
   </div>
-  <div class="col-6 col-sm-4 col-md-3">
-    <a href="{% url 'lista_ordenes' %}" class="text-decoration-none">
-      <div class="form-card text-center py-3">
-        <i class="bi bi-gear d-block mb-2" style="font-size:1.6rem;color:var(--primary)"></i>
-        <span class="small fw-semibold">Producción</span>
+
+  <div class="col-6 col-sm-4 col-md-3 col-lg-2">
+    <a href="{% url 'lista_ordenes' %}" class="card text-decoration-none h-100">
+      <div class="card-body text-center py-3 px-2">
+        <div class="avatar avatar-sm bg-info-lt text-info mb-2">
+          <i data-lucide="settings"></i>
+        </div>
+        <div class="small fw-semibold text-body">Producción</div>
       </div>
     </a>
   </div>
-  <div class="col-6 col-sm-4 col-md-3">
-    <a href="{% url 'lista_prendas' %}" class="text-decoration-none">
-      <div class="form-card text-center py-3">
-        <i class="bi bi-box-seam d-block mb-2" style="font-size:1.6rem;color:var(--primary)"></i>
-        <span class="small fw-semibold">Prendas</span>
+
+  <div class="col-6 col-sm-4 col-md-3 col-lg-2">
+    <a href="{% url 'lista_prendas' %}" class="card text-decoration-none h-100">
+      <div class="card-body text-center py-3 px-2">
+        <div class="avatar avatar-sm bg-teal-lt text-teal mb-2">
+          <i data-lucide="shopping-bag"></i>
+        </div>
+        <div class="small fw-semibold text-body">Prendas</div>
       </div>
     </a>
   </div>
-  <div class="col-6 col-sm-4 col-md-3">
-    <a href="{% url 'lista_insumos' %}" class="text-decoration-none">
-      <div class="form-card text-center py-3">
-        <i class="bi bi-box d-block mb-2" style="font-size:1.6rem;color:var(--primary)"></i>
-        <span class="small fw-semibold">Insumos</span>
+
+  <div class="col-6 col-sm-4 col-md-3 col-lg-2">
+    <a href="{% url 'lista_insumos' %}" class="card text-decoration-none h-100">
+      <div class="card-body text-center py-3 px-2">
+        <div class="avatar avatar-sm bg-teal-lt text-teal mb-2">
+          <i data-lucide="package"></i>
+        </div>
+        <div class="small fw-semibold text-body">Insumos</div>
       </div>
     </a>
   </div>
-  <div class="col-6 col-sm-4 col-md-3">
-    <a href="{% url 'lista_transacciones' %}" class="text-decoration-none">
-      <div class="form-card text-center py-3">
-        <i class="bi bi-currency-dollar d-block mb-2" style="font-size:1.6rem;color:var(--primary)"></i>
-        <span class="small fw-semibold">Transacciones</span>
+
+  <div class="col-6 col-sm-4 col-md-3 col-lg-2">
+    <a href="{% url 'lista_transacciones' %}" class="card text-decoration-none h-100">
+      <div class="card-body text-center py-3 px-2">
+        <div class="avatar avatar-sm bg-success-lt text-success mb-2">
+          <i data-lucide="banknote"></i>
+        </div>
+        <div class="small fw-semibold text-body">Transacciones</div>
       </div>
     </a>
   </div>
-  <div class="col-6 col-sm-4 col-md-3">
-    <a href="{% url 'reporte_ventas' %}" class="text-decoration-none">
-      <div class="form-card text-center py-3">
-        <i class="bi bi-bar-chart-fill d-block mb-2" style="font-size:1.6rem;color:var(--primary)"></i>
-        <span class="small fw-semibold">Reportes</span>
+
+  <div class="col-6 col-sm-4 col-md-3 col-lg-2">
+    <a href="{% url 'reporte_ventas' %}" class="card text-decoration-none h-100">
+      <div class="card-body text-center py-3 px-2">
+        <div class="avatar avatar-sm bg-azure-lt text-azure mb-2">
+          <i data-lucide="bar-chart-3"></i>
+        </div>
+        <div class="small fw-semibold text-body">Reportes</div>
       </div>
     </a>
   </div>
+
   {% endwith %}
 </div>
 
+{% endblock %}
+
+{% block extra_js %}
+{% load static %}
+<script src="{% static 'js/chart.min.js' %}"></script>
+<script>
+// Hex values match CSS vars: --success #10b981, --danger #ef4444, --primary #2563eb
+// --warning #f59e0b, --info #06b6d4
+const trendData = JSON.parse(document.getElementById('chart-trend-data').textContent);
+const donutData = JSON.parse(document.getElementById('chart-donut-data').textContent);
+
+if (trendData.length > 0) {
+  new Chart(document.getElementById('trendChart'), {
+    type: 'bar',
+    data: {
+      labels: trendData.map(d => d.label),
+      datasets: [
+        {
+          label: 'Ingresos',
+          data: trendData.map(d => d.ingresos),
+          backgroundColor: '#10b981'
+        },
+        {
+          label: 'Egresos',
+          data: trendData.map(d => d.egresos),
+          backgroundColor: '#ef4444'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'top' } },
+      scales: { y: { beginAtZero: true } }
+    }
+  });
+}
+
+if (donutData.length > 0) {
+  new Chart(document.getElementById('donutChart'), {
+    type: 'doughnut',
+    data: {
+      labels: donutData.map(d => d.label),
+      datasets: [{
+        data: donutData.map(d => d.value),
+        backgroundColor: ['#2563eb', '#10b981', '#f59e0b', '#ef4444']
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom' } }
+    }
+  });
+}
+</script>
 {% endblock %}

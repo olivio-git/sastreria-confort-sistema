@@ -1,0 +1,216 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Reparación {{ reparacion.codigo }}{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'lista_reparaciones' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left"></i>Volver
+      </a>
+    </div>
+    <div class="col">
+      <div class="page-pretitle">Reparaciones</div>
+      <h2 class="page-title">
+        <i data-lucide="wrench" class="me-2 text-muted"></i>
+        {{ reparacion.codigo }}
+        <span class="badge-estado badge-{{ reparacion.estado }} ms-2">{{ reparacion.get_estado_display }}</span>
+      </h2>
+    </div>
+    <div class="col-auto ms-auto d-flex gap-2">
+      <a href="{% url 'editar_reparacion' reparacion.id %}" class="btn btn-outline-primary">
+        <i data-lucide="pencil" class="me-1"></i>Editar
+      </a>
+      <a href="{% url 'exportar_recibo_reparacion_pdf' reparacion.id %}" class="btn btn-outline-secondary">
+        <i data-lucide="file-text" class="me-1"></i>PDF
+      </a>
+      {% if reparacion.estado == 'pendiente' %}
+      <form method="post" action="{% url 'reparacion_en_proceso' reparacion.id %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-outline-info">
+          <i data-lucide="play-circle" class="me-1"></i>En Proceso
+        </button>
+      </form>
+      {% endif %}
+      {% if reparacion.estado != 'entregado' %}
+      <form method="post" action="{% url 'marcar_entregado' reparacion.id %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-success">
+          <i data-lucide="check-circle" class="me-1"></i>Entregar
+        </button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+<div class="row g-3">
+
+  <!-- Columna izquierda: Datos + Ítems -->
+  <div class="col-12 col-lg-7">
+
+    <div class="card mb-3">
+      <div class="card-header">
+        <h3 class="card-title">Datos de la reparación</h3>
+      </div>
+      <div class="card-body">
+        <div class="datagrid">
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Cliente</div>
+            <div class="datagrid-content">
+              {% if reparacion.cliente %}
+                <a href="{% url 'historial_cliente' reparacion.cliente.id %}" class="text-decoration-none">{{ reparacion.cliente }}</a>
+              {% else %}—{% endif %}
+            </div>
+          </div>
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Empleado</div>
+            <div class="datagrid-content">{{ reparacion.empleado|default:"—" }}</div>
+          </div>
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Fecha de entrega</div>
+            <div class="datagrid-content">{{ reparacion.fecha_entrega|date:"d/m/Y" }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {% if items %}
+    <div class="card mb-3">
+      <div class="card-header">
+        <h3 class="card-title">Ítems</h3>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+          <thead>
+            <tr>
+              <th>Prenda</th>
+              <th>Reparación</th>
+              <th class="text-end">Costo</th>
+              <th>Detalles</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+            <tr>
+              <td>{{ item.tipo_prenda }}</td>
+              <td>{{ item.tipo_reparacion }}</td>
+              <td class="text-end">{% if item.costo %}Bs {{ item.costo|floatformat:2 }}{% else %}—{% endif %}</td>
+              <td class="text-muted small">{{ item.detalles|default:"—" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+  </div>
+
+  <!-- Columna derecha: Pagos -->
+  <div class="col-12 col-lg-5">
+
+    <!-- Widget Total | Pagado | Saldo -->
+    <div class="card mb-3">
+      <div class="card-body">
+        <div class="row g-3 text-center">
+          <div class="col-4">
+            <div class="text-muted small mb-1">Total</div>
+            <div class="fw-bold fs-5">Bs. {{ total|floatformat:2 }}</div>
+          </div>
+          <div class="col-4">
+            <div class="text-muted small mb-1">Pagado</div>
+            <div class="fw-bold fs-5 text-success">Bs. {{ pagado|floatformat:2 }}</div>
+          </div>
+          <div class="col-4">
+            <div class="text-muted small mb-1">Saldo</div>
+            <div class="fw-bold fs-5 {% if saldo > 0 %}text-danger{% else %}text-success{% endif %}">
+              Bs. {{ saldo|floatformat:2 }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Formulario de pago -->
+    {% if saldo > 0 %}
+    <div class="card mb-3">
+      <div class="card-header">
+        <h3 class="card-title">Registrar pago</h3>
+      </div>
+      <div class="card-body">
+        <form method="post" action="{% url 'agregar_pago_reparacion' reparacion.id %}">
+          {% csrf_token %}
+          <div class="mb-3">
+            <label class="form-label fw-semibold">{{ form.monto.label }}</label>
+            {{ form.monto }}
+            {% if form.monto.errors %}
+              <div class="invalid-feedback d-block">{{ form.monto.errors.0 }}</div>
+            {% endif %}
+            <div class="form-text text-muted">Saldo pendiente: <strong>Bs. {{ saldo|floatformat:2 }}</strong></div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">{{ form.forma_pago.label }}</label>
+            {{ form.forma_pago }}
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">{{ form.descripcion.label }}</label>
+            {{ form.descripcion }}
+          </div>
+          <button type="submit" class="btn btn-success w-100">
+            <i data-lucide="plus-circle" class="me-1"></i>Registrar pago
+          </button>
+        </form>
+      </div>
+    </div>
+    {% else %}
+    <div class="alert alert-success mb-3">
+      <i data-lucide="check-circle" class="me-2"></i>
+      Completamente pagado.
+    </div>
+    {% endif %}
+
+    <!-- Historial de pagos -->
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Historial de pagos</h3>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Forma</th>
+              <th class="text-end">Monto</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for pago in pagos %}
+            <tr>
+              <td>
+                <div>{{ pago.fecha|date:"d/m/Y" }}</div>
+                <small class="text-muted">{{ pago.get_concepto_display }}</small>
+              </td>
+              <td>{{ pago.get_forma_pago_display }}</td>
+              <td class="text-end fw-semibold text-success">Bs. {{ pago.monto|floatformat:2 }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="3">
+                <div class="empty-state">
+                  <i data-lucide="credit-card" class="d-block"></i>
+                  Sin pagos registrados.
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

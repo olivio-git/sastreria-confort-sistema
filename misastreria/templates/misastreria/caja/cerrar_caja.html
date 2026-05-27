@@ -1,0 +1,144 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Cerrar Sesión #{{ sesion.pk }}{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="lock" class="me-2 text-muted"></i>Cerrar Sesión #{{ sesion.pk }}
+      </h2>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+<div class="row g-3">
+  <!-- Estado actual -->
+  <div class="col-12 col-lg-5">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Estado actual de la caja</h3>
+      </div>
+      <div class="card-body">
+        <div class="text-center mb-3">
+          <div class="text-muted small mb-1">Saldo del sistema</div>
+          <div class="display-5 fw-bold text-success">Bs. {{ saldo_sistema|floatformat:2 }}</div>
+          <div class="text-muted small mt-1">Saldo operativo (no incluye garantías).</div>
+        </div>
+        {% if sesion.saldo_garantias %}
+        <div class="alert alert-info py-2 mb-3">
+          <i data-lucide="shield" class="me-2"></i>
+          <strong>Garantías retenidas: Bs. {{ sesion.saldo_garantias|floatformat:2 }}</strong>
+          — este monto es de clientes, no cuenta en el saldo operativo.
+        </div>
+        {% endif %}
+        <hr>
+        <div class="datagrid">
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Apertura</div>
+            <div class="datagrid-content">{{ sesion.fecha_apertura|date:"d/m/Y H:i" }}</div>
+          </div>
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Monto Apertura</div>
+            <div class="datagrid-content fw-semibold">Bs. {{ sesion.monto_apertura|floatformat:2 }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Arqueo -->
+    <div class="card mt-3">
+      <div class="card-header">
+        <h3 class="card-title">Arqueo por forma de pago</h3>
+      </div>
+      <div class="card-body">
+        {% include 'misastreria/caja/_partials/arqueo.html' with arqueo=arqueo %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Formulario de cierre -->
+  <div class="col-12 col-lg-7">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Datos de cierre</h3>
+      </div>
+      <div class="card-body">
+        <form method="post">
+          {% csrf_token %}
+          {% if form.non_field_errors %}
+          <div class="alert alert-danger">
+            {% for error in form.non_field_errors %}
+              <div>{{ error }}</div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold" for="{{ form.monto_cierre_declarado.id_for_label }}">
+              Monto contado al cierre (Bs.) <span class="text-danger">*</span>
+            </label>
+            {{ form.monto_cierre_declarado }}
+            {% if form.monto_cierre_declarado.errors %}
+              <div class="text-danger small mt-1">{{ form.monto_cierre_declarado.errors.0 }}</div>
+            {% endif %}
+            <div class="form-text text-muted">Ingresa el total en efectivo que tienes físicamente.</div>
+          </div>
+
+          <!-- Diferencia en tiempo real -->
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Diferencia calculada</label>
+            <div id="diferencia-display" class="fw-bold text-muted" style="font-size:1.1rem">
+              — ingresa el monto para calcular
+            </div>
+          </div>
+
+          <div id="diferencia-warning" class="alert alert-warning" style="display:none">
+            <i data-lucide="triangle-alert" class="me-2"></i>
+            Hay una diferencia significativa. Por favor explica en Observaciones.
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold" for="{{ form.observaciones.id_for_label }}">
+              Observaciones{% if not form.observaciones.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}
+            </label>
+            {{ form.observaciones }}
+            {% if form.observaciones.errors %}
+              <div class="text-danger small mt-1">{{ form.observaciones.errors.0 }}</div>
+            {% endif %}
+            <div class="form-text text-muted">Requeridas si existe diferencia entre el monto contado y el sistema.</div>
+          </div>
+
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-danger">
+              <i data-lucide="lock" class="me-1"></i>Confirmar Cierre
+            </button>
+            <a href="{% url 'detalle_sesion_caja' sesion.pk %}" class="btn btn-outline-secondary">Cancelar</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const saldoSistema = parseFloat("{{ saldo_sistema }}");
+const inputMonto = document.getElementById('id_monto_cierre_declarado');
+const difEl = document.getElementById('diferencia-display');
+const warnEl = document.getElementById('diferencia-warning');
+
+if (inputMonto) {
+  inputMonto.addEventListener('input', function() {
+    const declarado = parseFloat(this.value) || 0;
+    const diferencia = declarado - saldoSistema;
+    difEl.textContent = (diferencia >= 0 ? '+' : '') + 'Bs. ' + diferencia.toFixed(2);
+    difEl.className = 'fw-bold ' + (diferencia >= 0 ? 'text-success' : 'text-danger');
+    warnEl.style.display = Math.abs(diferencia) > 50 ? '' : 'none';
+  });
+}
+</script>
+{% endblock %}

@@ -1,0 +1,73 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Abrir Sesión de Caja{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="lock-open" class="me-2 text-muted"></i>Abrir Sesión de Caja
+      </h2>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+{% if sesion_existente %}
+<div class="alert alert-danger d-flex align-items-center mb-3">
+  <i data-lucide="triangle-alert" class="me-2"></i>
+  <div>
+    Ya hay una sesión abierta (<strong>#{{ sesion_existente.pk }}</strong>).
+    Ciérrala antes de abrir una nueva.
+    <a href="{% url 'detalle_sesion_caja' sesion_existente.pk %}" class="alert-link ms-2">Ver sesión activa</a>
+  </div>
+</div>
+{% endif %}
+
+<div class="card" style="max-width:560px">
+  <div class="card-header">
+    <h3 class="card-title">Nueva sesión</h3>
+  </div>
+  <div class="card-body">
+    <form method="post">
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+      <div class="alert alert-danger">
+        {% for error in form.non_field_errors %}
+          <div>{{ error }}</div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <div class="mb-3">
+        <label class="form-label fw-semibold" for="{{ form.monto_apertura.id_for_label }}">
+          Monto de apertura (Bs.) <span class="text-danger">*</span>
+        </label>
+        {{ form.monto_apertura }}
+        {% if form.monto_apertura.errors %}
+          <div class="text-danger small mt-1">{{ form.monto_apertura.errors.0 }}</div>
+        {% endif %}
+        <div class="form-text text-muted">Total en efectivo disponible al abrir la caja.</div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label fw-semibold" for="{{ form.observaciones.id_for_label }}">
+          Observaciones{% if not form.observaciones.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}
+        </label>
+        {{ form.observaciones }}
+        {% if form.observaciones.errors %}
+          <div class="text-danger small mt-1">{{ form.observaciones.errors.0 }}</div>
+        {% endif %}
+      </div>
+
+      <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-success" {% if sesion_existente %}disabled{% endif %}>
+          <i data-lucide="lock-open" class="me-1"></i>Abrir Caja
+        </button>
+        <a href="{% url 'lista_sesiones_caja' %}" class="btn btn-outline-secondary">Cancelar</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

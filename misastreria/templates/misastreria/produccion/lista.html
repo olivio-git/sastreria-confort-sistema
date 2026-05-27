@@ -1,114 +1,155 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}Producción{% endblock %}
-{% block contenido %}
-<div class="page-header">
-  <h1 class="page-title"><i class="bi bi-scissors me-2"></i>Órdenes de Producción</h1>
-  <a href="{% url 'crear_orden' %}" class="btn btn-success btn-sm">
-    <i class="bi bi-plus-lg me-1"></i>Nueva Orden
-  </a>
-</div>
 
-<form method="get" class="filter-bar" id="filterForm">
-  <div class="filter-group" style="flex:1;min-width:180px">
-    <label>Buscar</label>
-    <input type="text" name="q" class="form-control" placeholder="Código, descripción, responsable…"
-           value="{{ q }}" data-debounce="400">
-  </div>
-  <div class="filter-group">
-    <label>Estado</label>
-    <select name="estado" class="form-select" data-debounce="0">
-      <option value="">Todos</option>
-      {% for val, label in estado_choices %}
-        <option value="{{ val }}" {% if estado == val %}selected{% endif %}>{{ label }}</option>
-      {% endfor %}
-    </select>
-  </div>
-  <div class="filter-group">
-    <label>Desde</label>
-    <input type="date" name="desde" class="form-control" value="{{ desde }}">
-  </div>
-  <div class="filter-group">
-    <label>Hasta</label>
-    <input type="date" name="hasta" class="form-control" value="{{ hasta }}">
-  </div>
-  <div class="filter-group justify-content-end">
-    <label class="invisible">.</label>
-    <div class="d-flex gap-2 flex-wrap">
-      <div class="date-shortcuts">
-        <a href="?periodo=semana" class="btn btn-outline-secondary {% if periodo == 'semana' %}active{% endif %}">Semana</a>
-        <a href="?periodo=mes" class="btn btn-outline-secondary {% if periodo == 'mes' %}active{% endif %}">Mes</a>
-        <a href="?periodo=3meses" class="btn btn-outline-secondary {% if periodo == '3meses' or not periodo %}active{% endif %}">3 meses</a>
-      </div>
-      <a href="{% url 'lista_ordenes' %}" class="btn btn-outline-secondary">Limpiar</a>
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title"><i data-lucide="scissors" class="me-2 text-muted"></i>Órdenes de Producción</h2>
+    </div>
+    <div class="col-auto ms-auto">
+      <a href="{% url 'crear_orden' %}" class="btn btn-success">
+        <i data-lucide="plus"></i>Nueva Orden
+      </a>
     </div>
   </div>
-</form>
+</div>
+{% endblock %}
 
-<div class="table-wrapper">
-  <table class="table table-hover">
-    <thead>
-      <tr>
-        <th>Código</th>
-        <th>Descripción</th>
-        <th>Estado</th>
-        <th>Responsable</th>
-        <th>Confección</th>
-        <th>Insumos</th>
-        <th>F. Inicio</th>
-        <th>F. Estimada</th>
-        <th data-no-toggle>Acciones</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for o in page_obj %}
-      <tr>
-        <td class="fw-semibold">{{ o.codigo }}</td>
-        <td>{{ o.descripcion|truncatechars:50 }}</td>
-        <td>
-          <span class="badge-estado badge-{{ o.estado }}">{{ o.get_estado_display }}</span>
-        </td>
-        <td>{{ o.empleado|default:"—" }}</td>
-        <td>
-          {% if o.confeccion %}
-            <a href="{% url 'editar_confeccion' o.confeccion.id %}" class="text-decoration-none">{{ o.confeccion.codigo }}</a>
-          {% else %}—{% endif %}
-        </td>
-        <td>{{ o.insumos.count }}</td>
-        <td>{{ o.fecha_inicio|date:"d/m/Y" }}</td>
-        <td>{{ o.fecha_estimada|date:"d/m/Y"|default:"—" }}</td>
-        <td>
-          <div class="btn-actions">
-            <a href="{% url 'editar_orden' o.id %}" class="btn btn-sm btn-outline-primary" title="Editar"><i class="bi bi-pencil"></i></a>
-            {% if o.estado != 'terminado' %}
-            <form method="post" action="{% url 'avanzar_estado_orden' o.id %}" style="display:inline">
-              {% csrf_token %}
-              <button type="submit" class="btn btn-sm btn-outline-success" title="{% if o.estado == 'corte' %}Pasar a Costura{% else %}Marcar Terminado{% endif %}">
-                <i class="bi bi-arrow-right-circle"></i>
-              </button>
-            </form>
-            {% else %}
-            <span class="btn btn-sm btn-outline-secondary disabled" title="Terminado"><i class="bi bi-check-circle"></i></span>
-            {% endif %}
-            <a href="{% url 'eliminar_orden' o.id %}" class="btn btn-sm btn-outline-danger" title="Eliminar"><i class="bi bi-trash"></i></a>
-          </div>
-        </td>
-      </tr>
-      {% empty %}
-      <tr>
-        <td colspan="9">
-          <div class="empty-state">
-            <i class="bi bi-scissors d-block"></i>
-            No hay órdenes de producción en el período seleccionado.
-          </div>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  <div class="pagination-bar">
-    <span>{{ total }} orden{{ total|pluralize:"es" }}</span>
-    <nav>
-      <ul class="pagination pagination-sm mb-0">
+{% block contenido %}
+<!-- Filtros -->
+<div class="card mb-3">
+  <div class="card-body">
+    <form method="get" class="row g-2 align-items-end" id="filterForm">
+      <div class="col-12 col-md-4">
+        <label class="form-label small mb-1 fw-semibold text-muted">Buscar</label>
+        <input type="text" name="q" class="form-control" placeholder="Código, descripción, responsable…"
+               value="{{ q }}" data-debounce="400">
+      </div>
+      <div class="col-12 col-sm-6 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Estado</label>
+        <select name="estado" class="form-select" data-debounce="0">
+          <option value="">Todos</option>
+          {% for val, label in estado_choices %}
+            <option value="{{ val }}" {% if estado == val %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Desde</label>
+        <input type="date" name="desde" class="form-control" value="{{ desde }}">
+      </div>
+      <div class="col-6 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Hasta</label>
+        <input type="date" name="hasta" class="form-control" value="{{ hasta }}">
+      </div>
+      <div class="col-auto ms-auto d-flex gap-2 align-items-end flex-wrap">
+        <div class="d-flex gap-1">
+          <a href="?periodo=semana" class="btn btn-outline-secondary {% if periodo == 'semana' %}active{% endif %}">Semana</a>
+          <a href="?periodo=mes" class="btn btn-outline-secondary {% if periodo == 'mes' %}active{% endif %}">Mes</a>
+          <a href="?periodo=3meses" class="btn btn-outline-secondary {% if periodo == '3meses' or not periodo %}active{% endif %}">3 meses</a>
+        </div>
+        <a href="{% url 'lista_ordenes' %}" class="btn btn-outline-secondary">Limpiar</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Tabla -->
+<div class="card">
+  <div class="card-header d-flex align-items-center">
+    <span class="text-muted small">{{ total }} orden{{ total|pluralize:"es" }}</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table">
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Descripción</th>
+          <th>Tipo</th>
+          <th>Estado</th>
+          <th>Responsable</th>
+          <th>Confección / Prenda</th>
+          <th class="text-center">Insumos</th>
+          <th>F. Inicio</th>
+          <th>F. Estimada</th>
+          <th data-no-toggle style="white-space:nowrap">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for o in page_obj %}
+        <tr>
+          <td class="fw-semibold">{{ o.codigo }}</td>
+          <td class="text-muted">{{ o.descripcion|truncatechars:50 }}</td>
+          <td><span class="badge-estado badge-tipo-{{ o.tipo }}">{{ o.get_tipo_display }}</span></td>
+          <td><span class="badge-estado badge-{{ o.estado }}">{{ o.get_estado_display }}</span></td>
+          <td>{{ o.empleado|default:"—" }}</td>
+          <td>
+            {% if o.tipo == 'stock' and o.prenda_inventario %}
+              {{ o.prenda_inventario.nombre }} {{ o.prenda_inventario.talla }} &times; {{ o.cantidad }}
+            {% elif o.confeccion %}
+              <a href="{% url 'editar_confeccion' o.confeccion.id %}" class="text-decoration-none fw-semibold">{{ o.confeccion.codigo }}</a>
+            {% else %}—{% endif %}
+          </td>
+          <td class="text-center">{{ o.insumos.count }}</td>
+          <td>{{ o.fecha_inicio|date:"d/m/Y" }}</td>
+          <td>{{ o.fecha_estimada|date:"d/m/Y"|default:"—" }}</td>
+          <td>
+            <div class="btn-actions">
+              <a href="{% url 'editar_orden' o.id %}" class="btn btn-sm btn-icon btn-ghost-primary" title="Editar">
+                <i data-lucide="pencil"></i>
+              </a>
+              {% if o.estado != 'terminado' %}
+                {% if o.tipo == 'stock' and o.estado == 'costura' %}
+                <button type="button" class="btn btn-sm btn-icon btn-ghost-success"
+                  title="Terminar orden"
+                  data-bs-toggle="modal"
+                  data-bs-target="#modalTerminarStock"
+                  data-url="{% url 'avanzar_estado_orden' o.id %}"
+                  data-codigo="{{ o.codigo }}"
+                  data-cantidad="{{ o.cantidad }}"
+                  data-prenda="{{ o.prenda_inventario.nombre }} {{ o.prenda_inventario.talla }}">
+                  <i data-lucide="check-circle"></i>
+                </button>
+                {% else %}
+                <form method="post" action="{% url 'avanzar_estado_orden' o.id %}" style="display:inline">
+                  {% csrf_token %}
+                  <button type="submit" class="btn btn-sm btn-icon btn-ghost-success"
+                          title="{% if o.estado == 'corte' %}Pasar a Costura{% else %}Marcar Terminado{% endif %}">
+                    <i data-lucide="arrow-right-circle"></i>
+                  </button>
+                </form>
+                {% endif %}
+              {% else %}
+              <span class="btn btn-sm btn-icon btn-ghost-secondary disabled" title="Terminado">
+                <i data-lucide="check-circle"></i>
+              </span>
+              {% endif %}
+              <button type="button" class="btn btn-sm btn-icon btn-ghost-danger" title="Eliminar"
+                data-delete-url="{% url 'eliminar_orden' o.id %}"
+                data-delete-name="{{ o }}"><i data-lucide="trash-2"></i></button>
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="10">
+            <div class="empty-state">
+              <i data-lucide="scissors" style="width:2.5rem;height:2.5rem;opacity:.3;display:block;margin:0 auto .75rem"></i>
+              No hay órdenes de producción en el período seleccionado.
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer d-flex align-items-center">
+    <p class="m-0 text-muted small">
+      Mostrando <strong>{{ page_obj.start_index }}–{{ page_obj.end_index }}</strong> de <strong>{{ total }}</strong>
+    </p>
+    <nav class="ms-auto">
+      <ul class="pagination pagination-sm m-0">
         {% if page_obj.has_previous %}
           <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}">«</a></li>
           <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}">‹</a></li>
@@ -122,4 +163,40 @@
     </nav>
   </div>
 </div>
+
+<!-- Modal confirmación terminar orden stock -->
+<div class="modal fade" id="modalTerminarStock" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-2"></i>Confirmar terminación</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p>¿Terminar la orden <strong id="modal-orden-codigo"></strong>?</p>
+        <p>Se crearán <strong id="modal-cantidad"></strong> item(s) de <strong id="modal-prenda"></strong> en el inventario.</p>
+        <p class="text-danger small"><i class="bi bi-info-circle me-1"></i>Esta acción no se puede deshacer.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+        <form id="modal-form-terminar" method="post" action="">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-danger btn-sm">Sí, terminar</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('modalTerminarStock').addEventListener('show.bs.modal', function(e) {
+  var btn = e.relatedTarget;
+  document.getElementById('modal-orden-codigo').textContent = btn.dataset.codigo;
+  document.getElementById('modal-cantidad').textContent = btn.dataset.cantidad;
+  document.getElementById('modal-prenda').textContent = btn.dataset.prenda;
+  document.getElementById('modal-form-terminar').action = btn.dataset.url;
+});
+</script>
 {% endblock %}

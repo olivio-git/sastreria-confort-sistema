@@ -1,0 +1,263 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Alquiler {{ alquiler.codigo }}{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'lista_alquileres' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left"></i>Volver
+      </a>
+    </div>
+    <div class="col">
+      <div class="page-pretitle">Alquileres</div>
+      <h2 class="page-title">
+        <i data-lucide="shopping-bag" class="me-2 text-muted"></i>
+        {{ alquiler.codigo }}
+        {% if alquiler.estado == 'alquilado' or alquiler.estado == 'devuelto' or alquiler.estado == 'reservado' %}
+          <span class="badge-estado badge-{{ alquiler.estado }} ms-2">{{ alquiler.estado_display }}</span>
+        {% else %}
+          <span class="badge bg-{{ alquiler.estado_color }} {% if alquiler.estado_color == 'warning' %}text-dark{% else %}text-white{% endif %} ms-2">{{ alquiler.estado_display }}</span>
+        {% endif %}
+      </h2>
+    </div>
+    <div class="col-auto ms-auto d-flex gap-2">
+      <a href="{% url 'editar_alquiler' alquiler.id %}" class="btn btn-outline-primary">
+        <i data-lucide="pencil" class="me-1"></i>Editar
+      </a>
+      <a href="{% url 'exportar_comprobante_alquiler_pdf' alquiler.id %}" class="btn btn-outline-secondary">
+        <i data-lucide="file-text" class="me-1"></i>PDF
+      </a>
+      {% if alquiler.estado == 'reservado' %}
+      <a href="{% url 'confirmar_reserva' alquiler.id %}" class="btn btn-success">
+        <i data-lucide="check-circle" class="me-1"></i>Confirmar Reserva
+      </a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+<div class="row g-3">
+
+  <!-- Columna izquierda: Datos + Ítems -->
+  <div class="col-12 col-lg-7">
+
+    <!-- Datos del alquiler -->
+    <div class="card mb-3">
+      <div class="card-header">
+        <h3 class="card-title">Datos del alquiler</h3>
+      </div>
+      <div class="card-body">
+        <div class="datagrid">
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Cliente</div>
+            <div class="datagrid-content">
+              {% if alquiler.cliente %}
+                <a href="{% url 'historial_cliente' alquiler.cliente.id %}" class="text-decoration-none">{{ alquiler.cliente }}</a>
+              {% else %}—{% endif %}
+            </div>
+          </div>
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Empleado</div>
+            <div class="datagrid-content">{{ alquiler.empleado|default:"—" }}</div>
+          </div>
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Fecha alquiler</div>
+            <div class="datagrid-content">{{ alquiler.fecha_alquiler|date:"d/m/Y" }}</div>
+          </div>
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Fecha devolución</div>
+            <div class="datagrid-content">
+              {{ alquiler.fecha_devolucion|date:"d/m/Y" }}
+              {% if alquiler.hora_devolucion %}<small class="text-muted d-block">{{ alquiler.hora_devolucion|time:"H:i" }}</small>{% endif %}
+              {% if alquiler.con_recargo %}<span class="badge bg-danger text-white ms-1">Recargo</span>{% endif %}
+            </div>
+          </div>
+          {% if alquiler.garantia_tipo %}
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Garantía</div>
+            <div class="datagrid-content">
+              {% if alquiler.garantia_tipo == 'efectivo' or alquiler.garantia_tipo == 'qr' or alquiler.garantia_tipo == 'transferencia' %}
+                <span class="badge bg-green-lt">{{ alquiler.get_garantia_tipo_display }} Bs.{{ alquiler.garantia_monto|floatformat:2 }}</span>
+              {% elif alquiler.garantia_tipo == 'descripcion' %}
+                <span class="text-muted small">{{ alquiler.garantia|default:"—" }}</span>
+              {% endif %}
+            </div>
+          </div>
+          {% endif %}
+          {% if alquiler.notas %}
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Notas</div>
+            <div class="datagrid-content">{{ alquiler.notas }}</div>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Ítems alquilados -->
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Ítems alquilados</h3>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+          <thead>
+            <tr>
+              <th>Código</th>
+              <th>Prenda</th>
+              <th class="text-end">Precio</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+            <tr>
+              <td><code>{{ item.prenda_item.codigo_item }}</code></td>
+              <td>
+                {{ item.prenda_item.prenda.nombre }}
+                {% if item.grupo_conjunto %}
+                  <span class="badge-conjunto" title="Conjunto {{ item.grupo_conjunto }}">
+                    <i class="bi bi-layers"></i>{{ item.grupo_conjunto }}
+                  </span>
+                {% endif %}
+              </td>
+              <td class="text-end fw-semibold">Bs. {{ item.precio_unitario|floatformat:2 }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="3">
+                <div class="empty-state">
+                  <i data-lucide="package" class="d-block"></i>
+                  Sin ítems registrados.
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+          {% if items %}
+          <tfoot>
+            <tr>
+              <td colspan="2" class="text-end text-muted fw-semibold">Total</td>
+              <td class="text-end fw-bold">Bs. {{ total|floatformat:2 }}</td>
+            </tr>
+          </tfoot>
+          {% endif %}
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Columna derecha: Pagos -->
+  <div class="col-12 col-lg-5">
+
+    <!-- Widget Total | Pagado | Saldo -->
+    <div class="card mb-3">
+      <div class="card-body">
+        <div class="row g-3 text-center">
+          <div class="col-4">
+            <div class="text-muted small mb-1">Total</div>
+            <div class="fw-bold fs-5">Bs. {{ total|floatformat:2 }}</div>
+          </div>
+          <div class="col-4">
+            <div class="text-muted small mb-1">Pagado</div>
+            <div class="fw-bold fs-5 text-success">Bs. {{ pagado|floatformat:2 }}</div>
+          </div>
+          <div class="col-4">
+            <div class="text-muted small mb-1">Saldo</div>
+            <div class="fw-bold fs-5 {% if saldo > 0 %}text-danger{% else %}text-success{% endif %}">
+              Bs. {{ saldo|floatformat:2 }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Formulario de pago -->
+    {% if saldo > 0 %}
+    <div class="card mb-3">
+      <div class="card-header">
+        <h3 class="card-title">Registrar pago</h3>
+      </div>
+      <div class="card-body">
+        <form method="post" action="{% url 'agregar_pago_alquiler' alquiler.id %}">
+          {% csrf_token %}
+          <div class="mb-3">
+            <label class="form-label fw-semibold">{{ form.monto.label }}</label>
+            {{ form.monto }}
+            {% if form.monto.errors %}
+              <div class="invalid-feedback d-block">{{ form.monto.errors.0 }}</div>
+            {% endif %}
+            <div class="form-text text-muted">Saldo pendiente: <strong>Bs. {{ saldo|floatformat:2 }}</strong></div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">{{ form.forma_pago.label }}</label>
+            {{ form.forma_pago }}
+            {% if form.forma_pago.errors %}
+              <div class="invalid-feedback d-block">{{ form.forma_pago.errors.0 }}</div>
+            {% endif %}
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">{{ form.descripcion.label }}</label>
+            {{ form.descripcion }}
+            {% if form.descripcion.errors %}
+              <div class="invalid-feedback d-block">{{ form.descripcion.errors.0 }}</div>
+            {% endif %}
+          </div>
+          <button type="submit" class="btn btn-success w-100">
+            <i data-lucide="plus-circle" class="me-1"></i>Registrar pago
+          </button>
+        </form>
+      </div>
+    </div>
+    {% else %}
+    <div class="alert alert-success mb-3">
+      <i data-lucide="check-circle" class="me-2"></i>
+      Completamente pagado.
+    </div>
+    {% endif %}
+
+    <!-- Historial de pagos -->
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Historial de pagos</h3>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Forma</th>
+              <th class="text-end">Monto</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for pago in pagos %}
+            <tr>
+              <td>
+                <div>{{ pago.fecha|date:"d/m/Y" }}</div>
+                <small class="text-muted">{{ pago.get_concepto_display }}</small>
+              </td>
+              <td>{{ pago.get_forma_pago_display }}</td>
+              <td class="text-end fw-semibold text-success">Bs. {{ pago.monto|floatformat:2 }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="3">
+                <div class="empty-state">
+                  <i data-lucide="credit-card" class="d-block"></i>
+                  Sin pagos registrados.
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

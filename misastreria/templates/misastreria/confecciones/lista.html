@@ -1,132 +1,178 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}Confecciones{% endblock %}
-{% block contenido %}
-<div class="page-header">
-  <h1 class="page-title"><i class="bi bi-scissors me-2"></i>Confecciones</h1>
-  <div class="d-flex gap-2">
-    <button class="btn btn-outline-secondary btn-sm" data-col-toggle="tablaConfecciones">
-      <i class="bi bi-layout-three-columns me-1"></i>Columnas
-    </button>
-    <a href="{% url 'crear_confeccion' %}" class="btn btn-success btn-sm">
-      <i class="bi bi-plus-lg me-1"></i>Nueva Confección
-    </a>
-  </div>
-</div>
 
-<form method="get" class="filter-bar" id="filterForm">
-  <input type="hidden" name="periodo" value="{{ periodo }}">
-  <div class="filter-group" style="flex:1;min-width:180px">
-    <label>Buscar</label>
-    <input type="text" name="q" class="form-control" placeholder="Código, cliente, CI…"
-           value="{{ q }}" data-debounce="400">
-  </div>
-  <div class="filter-group">
-    <label>Prenda</label>
-    <select name="tipo_prenda" class="form-select" data-debounce="0">
-      <option value="">Todas</option>
-      {% for val, lbl in tipo_prenda_choices %}
-      <option value="{{ val }}" {% if val == tipo_prenda %}selected{% endif %}>{{ lbl }}</option>
-      {% endfor %}
-    </select>
-  </div>
-  <div class="filter-group">
-    <label>Estado</label>
-    <select name="estado" class="form-select" data-debounce="0">
-      <option value="">Todos</option>
-      {% for val, lbl in estado_choices %}
-      <option value="{{ val }}" {% if val == estado %}selected{% endif %}>{{ lbl }}</option>
-      {% endfor %}
-    </select>
-  </div>
-  <div class="filter-group">
-    <label>Desde</label>
-    <input type="date" name="desde" class="form-control" value="{{ desde }}">
-  </div>
-  <div class="filter-group">
-    <label>Hasta</label>
-    <input type="date" name="hasta" class="form-control" value="{{ hasta }}">
-  </div>
-  <div class="filter-group justify-content-end">
-    <label class="invisible">.</label>
-    <div class="d-flex gap-2 flex-wrap">
-      <div class="date-shortcuts">
-        <a href="?periodo=semana" class="btn btn-outline-secondary {% if periodo == 'semana' %}active{% endif %}">Semana</a>
-        <a href="?periodo=mes" class="btn btn-outline-secondary {% if periodo == 'mes' %}active{% endif %}">Mes</a>
-        <a href="?periodo=3meses" class="btn btn-outline-secondary {% if periodo == '3meses' %}active{% endif %}">3 meses</a>
-      </div>
-      <button type="submit" class="btn btn-primary btn-sm" data-filter-btn><i class="bi bi-search me-1"></i>Filtrar</button>
-      <a href="{% url 'lista_confecciones' %}" class="btn btn-outline-secondary">Limpiar</a>
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title"><i data-lucide="scissors" class="me-2 text-muted"></i>Confecciones</h2>
+    </div>
+    <div class="col-auto ms-auto d-flex gap-2">
+      <button class="btn btn-outline-secondary" data-col-toggle="tablaConfecciones">
+        <i data-lucide="layout-list"></i>Columnas
+      </button>
+      <a href="{% url 'crear_confeccion' %}" class="btn btn-success">
+        <i data-lucide="plus"></i>Nueva Confección
+      </a>
     </div>
   </div>
-  <input type="hidden" name="orden" value="{{ orden }}">
-</form>
+</div>
+{% endblock %}
 
-<div class="d-flex justify-content-end mb-2">
-  <a href="{{ orden_toggle_url }}" class="btn btn-outline-secondary btn-sm" title="Cambiar orden">
-    {% if orden == 'desc' %}<i class="bi bi-sort-down me-1"></i>Más reciente primero
-    {% else %}<i class="bi bi-sort-up me-1"></i>Más antiguo primero{% endif %}
-  </a>
+{% block contenido %}
+<div class="card mb-3">
+  <div class="card-body">
+    <form method="get" class="row g-2 align-items-end" id="filterForm">
+      <input type="hidden" name="periodo" value="{{ periodo }}">
+      <div class="col-12 col-md-2">
+        <label class="small mb-1 fw-semibold text-muted">Buscar</label>
+        <input type="text" name="q" class="form-control" placeholder="Código…"
+               value="{{ q }}" data-debounce="400">
+      </div>
+      <div class="col-12 col-md-3">
+        <label class="small mb-1 fw-semibold text-muted">Cliente</label>
+        <div style="position:relative">
+          <input type="text" data-cliente-search="filter_cliente_id"
+                 data-endpoint="{% url 'buscar_clientes' %}"
+                 data-autosubmit="1"
+                 class="form-control" placeholder="Todos los clientes" autocomplete="off">
+          <input type="hidden" name="cliente_id" id="filter_cliente_id" value="{{ cliente_id }}">
+        </div>
+      </div>
+      <div class="col-12 col-md-3">
+        <label class="small mb-1 fw-semibold text-muted">Empleado</label>
+        <div style="position:relative">
+          <input type="text" data-empleado-search="filter_empleado_id"
+                 data-endpoint="{% url 'buscar_empleados' %}"
+                 data-autosubmit="1"
+                 class="form-control" placeholder="Todos" autocomplete="off">
+          <input type="hidden" name="empleado_id" id="filter_empleado_id" value="{{ empleado_id }}">
+        </div>
+      </div>
+      <div class="col-6 col-md-auto">
+        <label class="small mb-1 fw-semibold text-muted">Prenda</label>
+        <select name="tipo_prenda" class="form-select" data-debounce="0">
+          <option value="">Todas</option>
+          {% for opt in tipo_prenda_opts %}
+          <option value="{{ opt.id }}" {% if opt.id|stringformat:"s" == tipo_prenda %}selected{% endif %}>{{ opt.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-auto">
+        <label class="small mb-1 fw-semibold text-muted">Estado</label>
+        <select name="estado" class="form-select" data-debounce="0">
+          <option value="">Todos</option>
+          {% for val, lbl in estado_choices %}
+          <option value="{{ val }}" {% if val == estado %}selected{% endif %}>{{ lbl }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-auto">
+        <label class="small mb-1 fw-semibold text-muted">Desde</label>
+        <input type="date" name="desde" class="form-control" value="{{ desde }}">
+      </div>
+      <div class="col-6 col-md-auto">
+        <label class="small mb-1 fw-semibold text-muted">Hasta</label>
+        <input type="date" name="hasta" class="form-control" value="{{ hasta }}">
+      </div>
+      <div class="col-12 col-md-auto d-flex gap-2 flex-wrap align-items-end">
+        <div class="date-shortcuts d-flex gap-1">
+          <a href="?periodo=semana" class="btn btn-outline-secondary {% if periodo == 'semana' %}active{% endif %}">Semana</a>
+          <a href="?periodo=mes" class="btn btn-outline-secondary {% if periodo == 'mes' %}active{% endif %}">Mes</a>
+          <a href="?periodo=3meses" class="btn btn-outline-secondary {% if periodo == '3meses' %}active{% endif %}">3 meses</a>
+        </div>
+        <button type="submit" class="btn btn-primary d-flex align-items-center gap-1" data-filter-btn>
+          <i data-lucide="search"></i>Filtrar
+        </button>
+        <a href="{% url 'lista_confecciones' %}" class="btn btn-outline-secondary">Limpiar</a>
+      </div>
+      <input type="hidden" name="orden" value="{{ orden }}">
+    </form>
+  </div>
 </div>
 
-<div class="table-wrapper">
-  <table class="table table-hover" id="tablaConfecciones">
-    <thead>
-      <tr>
-        <th>Código</th>
-        <th>Cliente</th>
-        <th>Prenda</th>
-        <th>Color</th>
-        <th>Precio</th>
-        <th>Saldo</th>
-        <th>Entrega</th>
-        <th>Empleado</th>
-        <th>Estado</th>
-        <th data-no-toggle>Acciones</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for c in page_obj %}
-      <tr>
-        <td class="fw-semibold">{{ c.codigo }}</td>
-        <td>
-          {% if c.cliente %}
-            <a href="{% url 'historial_cliente' c.cliente.id %}" class="text-decoration-none">{{ c.cliente }}</a>
-          {% else %}—{% endif %}
-        </td>
-        <td>{{ c.tipos_prenda_display|default:"—" }}</td>
-        <td>{{ c.color }}</td>
-        <td>{{ c.precio|floatformat:2 }}</td>
-        <td>{{ c.saldo|floatformat:2 }}</td>
-        <td>{{ c.fecha_entrega|date:"d/m/Y"|default:"—" }}</td>
-        <td>{{ c.empleado|default:"—" }}</td>
-        <td><span class="badge-estado badge-{{ c.estado }}">{{ c.get_estado_display }}</span></td>
-        <td>
-          <div class="btn-actions">
-            <a href="{% url 'editar_confeccion' c.id %}" class="btn btn-sm btn-outline-primary" title="Editar"><i class="bi bi-pencil"></i></a>
-            <a href="{% url 'exportar_recibo_confeccion_pdf' c.id %}" class="btn btn-sm btn-outline-secondary" title="PDF"><i class="bi bi-file-pdf"></i></a>
-            {% if c.estado != 'entregado' %}
-            <a href="{% url 'entregar_confeccion' c.id %}" class="btn btn-sm btn-outline-success" title="Entregar"><i class="bi bi-check-circle"></i></a>
+<div class="card">
+  <div class="card-header d-flex align-items-center">
+    <span class="text-muted small">{{ total }} confección{{ total|pluralize:"es" }}</span>
+    <div class="ms-auto">
+      <a href="{{ orden_toggle_url }}" class="btn btn-outline-secondary" title="Cambiar orden">
+        {% if orden == 'desc' %}<i data-lucide="arrow-down-wide-narrow"></i>Más reciente primero
+        {% else %}<i data-lucide="arrow-up-wide-narrow"></i>Más antiguo primero{% endif %}
+      </a>
+    </div>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table" id="tablaConfecciones">
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Cliente</th>
+          <th>Prenda</th>
+          <th>Color</th>
+          <th>Precio</th>
+          <th>Saldo</th>
+          <th>Entrega</th>
+          <th>Empleado</th>
+          <th>Estado</th>
+          <th data-no-toggle>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in page_obj %}
+        <tr>
+          <td class="fw-semibold">{{ c.codigo }}</td>
+          <td>
+            {% if c.cliente %}
+              <a href="{% url 'historial_cliente' c.cliente.id %}" class="text-decoration-none">{{ c.cliente }}</a>
+            {% else %}—{% endif %}
+          </td>
+          <td>{{ c.tipos_prenda_display|default:"—" }}</td>
+          <td>{{ c.color }}</td>
+          <td>{{ c.precio|floatformat:2 }}</td>
+          <td>{{ c.saldo_caja|floatformat:2 }}</td>
+          <td>{{ c.fecha_entrega|date:"d/m/Y"|default:"—" }}</td>
+          <td>{{ c.empleado|default:"—" }}</td>
+          <td>
+            <span class="badge-estado badge-{{ c.estado }}">{{ c.get_estado_display }}</span>
+            {% if c.garantia_estado == 'vigente' %}
+              <span class="badge bg-success text-white ms-1" title="Garantía hasta {{ c.garantia_hasta|date:'d/m/Y' }}">Garantía</span>
+            {% elif c.garantia_estado == 'vencida' %}
+              <span class="badge bg-secondary text-white ms-1" title="Garantía venció {{ c.garantia_hasta|date:'d/m/Y' }}">Garantía vencida</span>
+            {% elif c.garantia_meses %}
+              <span class="badge bg-warning text-dark ms-1" title="{{ c.garantia_meses }} mes{{ c.garantia_meses|pluralize:'es' }} al entregar">Garantía pendiente</span>
             {% endif %}
-            <a href="{% url 'eliminar_confeccion' c.id %}" class="btn btn-sm btn-outline-danger" title="Eliminar"><i class="bi bi-trash"></i></a>
-          </div>
-        </td>
-      </tr>
-      {% empty %}
-      <tr>
-        <td colspan="10">
-          <div class="empty-state">
-            <i class="bi bi-scissors d-block"></i>
-            No hay confecciones en el período seleccionado.
-          </div>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  <div class="pagination-bar">
-    <span>{{ total }} confección{{ total|pluralize:"es" }}</span>
-    <nav>
-      <ul class="pagination pagination-sm mb-0">
+          </td>
+          <td>
+            <div class="btn-actions">
+              <a href="{% url 'detalle_confeccion' c.id %}" class="btn btn-sm btn-icon btn-ghost-info" title="Detalle"><i data-lucide="eye"></i></a>
+              <a href="{% url 'editar_confeccion' c.id %}" class="btn btn-sm btn-icon btn-ghost-primary" title="Editar"><i data-lucide="pencil"></i></a>
+              <a href="{% url 'exportar_recibo_confeccion_pdf' c.id %}" class="btn btn-sm btn-icon btn-ghost-secondary" title="PDF"><i data-lucide="file-text"></i></a>
+              {% if c.estado != 'entregado' %}
+              <a href="{% url 'entregar_confeccion' c.id %}" class="btn btn-sm btn-icon btn-ghost-success" title="Entregar"><i data-lucide="check-circle"></i></a>
+              {% endif %}
+              <button type="button" class="btn btn-sm btn-icon btn-ghost-danger" title="Eliminar"
+                data-delete-url="{% url 'eliminar_confeccion' c.id %}"
+                data-delete-name="{{ c }}"><i data-lucide="trash-2"></i></button>
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="10">
+            <div class="empty-state">
+              <i data-lucide="scissors" class="d-block"></i>
+              No hay confecciones en el período seleccionado.
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer d-flex align-items-center">
+    <p class="m-0 text-muted small">Mostrando <strong>{{ page_obj.start_index }}–{{ page_obj.end_index }}</strong> de <strong>{{ total }}</strong></p>
+    <nav class="ms-auto">
+      <ul class="pagination pagination-sm m-0">
         {% if page_obj.has_previous %}
           <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&tipo_prenda={{ tipo_prenda }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}&orden={{ orden }}">«</a></li>
           <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&tipo_prenda={{ tipo_prenda }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}&orden={{ orden }}">‹</a></li>

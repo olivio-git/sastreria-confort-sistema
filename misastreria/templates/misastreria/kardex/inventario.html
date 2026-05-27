@@ -1,0 +1,154 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Kardex — {{ prenda.nombre }}{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="#" onclick="history.back(); return false;" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Volver
+      </a>
+    </div>
+    <div class="col-auto">
+      <a href="{% url 'detalle_prenda' prenda.id %}" class="btn btn-outline-secondary">
+        <i class="bi bi-eye"></i> Detalle SKU
+      </a>
+    </div>
+    <div class="col">
+      <div class="page-pretitle">Kardex de Inventario</div>
+      <h2 class="page-title">
+        <i class="bi bi-clock-history me-2 text-muted"></i>
+        {{ prenda.nombre }}
+      </h2>
+      <div class="text-muted small mt-1">
+        <code>{{ prenda.codigo }}</code>
+        {% if prenda.talla %}&nbsp;·&nbsp; T{{ prenda.talla }}{% endif %}
+        {% if prenda.color %}&nbsp;·&nbsp; {{ prenda.color }}{% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+
+<!-- Stat cards -->
+<div class="row g-3 mb-3">
+  <div class="col-6 col-md-3">
+    <div class="card text-center">
+      <div class="card-body py-3">
+        <div class="h2 mb-1 text-success">{{ resumen.disponible }}</div>
+        <div><span class="badge-estado badge-devuelto">Disponibles</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card text-center">
+      <div class="card-body py-3">
+        <div class="h2 mb-1 text-azure">{{ resumen.alquilado }}</div>
+        <div><span class="badge-estado badge-alquilado">Alquilados</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card text-center">
+      <div class="card-body py-3">
+        <div class="h2 mb-1">{{ resumen.vendido }}</div>
+        <div><span class="badge-estado badge-entregado">Vendidos</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card text-center">
+      <div class="card-body py-3">
+        <div class="h2 mb-1 text-danger">{{ resumen.baja }}</div>
+        <div><span class="badge-estado badge-inactivo">De Baja</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Items table -->
+<div class="card">
+  <div class="card-header d-flex align-items-center">
+    <h3 class="card-title mb-0">Items físicos del SKU</h3>
+    <span class="ms-3 text-muted small">{{ resumen.total }} unidad{{ resumen.total|pluralize:"es" }}</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table">
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Tipo</th>
+          <th>Condición</th>
+          <th>Estado</th>
+          <th>Vendido</th>
+          <th class="text-center"># Alquileres</th>
+          <th class="text-center"># Ventas</th>
+          <th>Ubicación</th>
+          <th>Notas</th>
+          <th data-no-toggle style="white-space:nowrap">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in items %}
+        <tr>
+          <td>
+            <a href="{% url 'kardex_item' row.obj.codigo_item %}">
+              <code>{{ row.obj.codigo_item }}</code>
+            </a>
+          </td>
+          <td>
+            {% if row.obj.tipo == 'alquiler' %}
+              <span class="badge-estado badge-alquilado">Alquiler</span>
+            {% else %}
+              <span class="badge-estado badge-entregado">Venta</span>
+            {% endif %}
+          </td>
+          <td>{{ row.obj.get_condicion_display }}</td>
+          <td>
+            {% if row.obj.estado == 'disponible' %}
+              <span class="badge-estado badge-devuelto">Disponible</span>
+            {% elif row.obj.estado == 'alquilado' %}
+              <span class="badge-estado badge-alquilado">Alquilado</span>
+            {% else %}
+              <span class="badge-estado badge-inactivo">Baja</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.is_vendido %}
+              <span class="badge-estado badge-entregado">Vendido</span>
+            {% else %}
+              —
+            {% endif %}
+          </td>
+          <td class="text-center">{{ row.count_alquileres }}</td>
+          <td class="text-center">{{ row.count_ventas }}</td>
+          <td>{{ row.obj.ubicacion|default:"—" }}</td>
+          <td class="text-muted small">{{ row.obj.notas|truncatechars:40 }}</td>
+          <td style="white-space:nowrap">
+            <div class="btn-actions">
+              <a href="{% url 'kardex_item' row.obj.codigo_item %}"
+                 class="btn btn-sm btn-icon btn-ghost-primary"
+                 title="Ver kardex del item">
+                <i class="bi bi-clock-history"></i>
+              </a>
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="10">
+            <div class="empty-state">
+              <i class="bi bi-box-seam d-block" style="font-size:2.5rem;opacity:.3;text-align:center;margin-bottom:.75rem"></i>
+              No hay items registrados para este SKU.
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

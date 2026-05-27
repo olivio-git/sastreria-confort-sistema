@@ -1,0 +1,310 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Sesión #{{ sesion.pk }}{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="wallet" class="me-2 text-muted"></i>Sesión #{{ sesion.pk }}
+        <span class="badge-estado ms-2 {% if sesion.estado == 'abierta' %}badge-entregado{% else %}badge-inactivo{% endif %}">
+          {{ sesion.get_estado_display }}
+        </span>
+      </h2>
+    </div>
+    <div class="col-auto ms-auto d-flex gap-2">
+      {% if sesion.estado == 'abierta' %}
+      <a href="{% url 'crear_movimiento_caja' %}?sesion={{ sesion.pk }}" class="btn btn-success">
+        <i data-lucide="plus" class="me-1"></i>Nuevo Movimiento
+      </a>
+      <a href="{% url 'cerrar_sesion_caja' sesion.pk %}" class="btn btn-danger">
+        <i data-lucide="lock" class="me-1"></i>Cerrar Caja
+      </a>
+      {% endif %}
+      <a href="{% url 'lista_sesiones_caja' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left" class="me-1"></i>Volver a sesiones
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+<!-- KPI tiles -->
+<div class="row g-2 mb-2">
+  <div class="col-6 col-sm-3">
+    <div class="card card-sm">
+      <div class="card-body py-2 px-3">
+        <div class="text-muted" style="font-size:.72rem">Apertura</div>
+        <div class="fw-semibold">Bs. {{ sesion.monto_apertura|floatformat:2 }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-sm-3">
+    <div class="card card-sm">
+      <div class="card-body py-2 px-3">
+        <div class="text-muted" style="font-size:.72rem">Ingresos</div>
+        <div class="fw-semibold text-success">Bs. {{ sesion.total_ingresos|floatformat:2 }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-sm-3">
+    <div class="card card-sm">
+      <div class="card-body py-2 px-3">
+        <div class="text-muted" style="font-size:.72rem">Egresos</div>
+        <div class="fw-semibold text-danger">Bs. {{ sesion.total_egresos|floatformat:2 }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-sm-3">
+    <div class="card card-sm">
+      <div class="card-body py-2 px-3">
+        <div class="text-muted" style="font-size:.72rem">Saldo sistema</div>
+        <div class="fw-bold" style="font-size:1rem">Bs. {{ sesion.saldo_sistema|floatformat:2 }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Detalles + Arqueo -->
+<div class="row g-2 mb-2">
+  <div class="col-12 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body py-2 px-3">
+        <table class="table table-sm table-borderless mb-0" style="font-size:.85rem">
+          <tbody>
+            <tr>
+              <td class="text-muted ps-0" style="width:40%">Estado</td>
+              <td class="pe-0">
+                <span class="badge-estado {% if sesion.estado == 'abierta' %}badge-entregado{% else %}badge-inactivo{% endif %}">
+                  {{ sesion.get_estado_display }}
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td class="text-muted ps-0">Apertura</td>
+              <td class="pe-0">{{ sesion.fecha_apertura|date:"d/m/Y H:i" }}</td>
+            </tr>
+            {% if sesion.fecha_cierre %}
+            <tr>
+              <td class="text-muted ps-0">Cierre</td>
+              <td class="pe-0">{{ sesion.fecha_cierre|date:"d/m/Y H:i" }}</td>
+            </tr>
+            {% endif %}
+            {% if sesion.diferencia is not None %}
+            <tr>
+              <td class="text-muted ps-0">Diferencia</td>
+              <td class="pe-0 fw-semibold {% if sesion.diferencia > 0 %}text-success{% elif sesion.diferencia < 0 %}text-danger{% else %}text-muted{% endif %}">
+                {% if sesion.diferencia > 0 %}+{% endif %}Bs. {{ sesion.diferencia|floatformat:2 }}
+              </td>
+            </tr>
+            {% endif %}
+            {% if sesion.saldo_garantias %}
+            <tr>
+              <td class="text-muted ps-0">Garantías</td>
+              <td class="pe-0 text-info fw-semibold">Bs. {{ sesion.saldo_garantias|floatformat:2 }}</td>
+            </tr>
+            {% endif %}
+            <tr>
+              <td class="text-muted ps-0">Abrió</td>
+              <td class="pe-0">{{ sesion.usuario_apertura }}</td>
+            </tr>
+            {% if sesion.usuario_cierre %}
+            <tr>
+              <td class="text-muted ps-0">Cerró</td>
+              <td class="pe-0">{{ sesion.usuario_cierre }}</td>
+            </tr>
+            {% endif %}
+            {% if sesion.observaciones %}
+            <tr>
+              <td class="text-muted ps-0">Obs.</td>
+              <td class="pe-0">{{ sesion.observaciones }}</td>
+            </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-12 col-lg-4">
+    <div class="card h-100">
+      <div class="card-header py-2">
+        <h3 class="card-title" style="font-size:.85rem">Arqueo por forma de pago</h3>
+      </div>
+      <div class="card-body p-0">
+        {% include 'misastreria/caja/_partials/arqueo.html' with arqueo=arqueo %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Tabs: Movimientos / Garantías -->
+<ul class="nav nav-tabs mt-3" role="tablist">
+  <li class="nav-item">
+    <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-movimientos" type="button" role="tab">
+      Movimientos <span class="small">({{ movimientos|length }})</span>
+    </button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-garantias" type="button" role="tab">
+      Garantías{% if sesion.saldo_garantias %} <span class="small">(Bs. {{ sesion.saldo_garantias|floatformat:2 }})</span>{% endif %}
+    </button>
+  </li>
+</ul>
+<div class="card" style="border-top-left-radius:0">
+  <div class="tab-content">
+
+    <!-- Tab Movimientos -->
+    <div class="tab-pane fade show active" id="tab-movimientos" role="tabpanel">
+      <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+          <thead>
+            <tr>
+              <th>Código</th>
+              <th>Tipo</th>
+              <th>Concepto</th>
+              <th class="text-end">Monto</th>
+              <th>Forma Pago</th>
+              <th>Fecha</th>
+              <th style="white-space:nowrap">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in movimientos %}
+            {% if m.concepto != 'garantia_alquiler' and m.concepto != 'garantia_devolucion' %}
+            <tr>
+              <td class="fw-semibold">{{ m.codigo }}</td>
+              <td>
+                <span class="badge-estado {% if m.tipo == 'ingreso' %}badge-entregado{% else %}badge-inactivo{% endif %}">
+                  {{ m.get_tipo_display }}
+                </span>
+              </td>
+              <td>{{ m.get_concepto_display }}</td>
+              <td class="text-end fw-semibold {% if m.tipo == 'ingreso' %}text-success{% else %}text-danger{% endif %}">
+                Bs. {{ m.monto|floatformat:2 }}
+              </td>
+              <td>{{ m.get_forma_pago_display }}</td>
+              <td style="white-space:nowrap">{{ m.fecha|date:"d/m/Y H:i" }}</td>
+              <td style="white-space:nowrap">
+                <div class="btn-actions">
+                  <a href="{% url 'detalle_movimiento_caja' m.pk %}" class="btn btn-sm btn-icon btn-ghost-primary" title="Ver">
+                    <i data-lucide="eye"></i>
+                  </a>
+                  {% if m.origen == 'manual' and not m.movimiento_reverso_id and not m.tiene_reverso %}
+                  <button type="button"
+                          class="btn btn-sm btn-icon btn-outline-danger"
+                          title="Anular"
+                          data-bs-toggle="modal"
+                          data-bs-target="#modalAnularMov"
+                          data-pk="{{ m.pk }}"
+                          data-codigo="{{ m.codigo }}"
+                          data-monto="{{ m.monto|floatformat:2 }}">
+                    <i data-lucide="ban"></i>
+                  </button>
+                  {% elif m.tiene_reverso %}
+                  <span class="badge-estado badge-inactivo" title="Anulado">Anulado</span>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+            {% endif %}
+            {% empty %}
+            <tr>
+              <td colspan="7">
+                <div class="empty-state">
+                  <i data-lucide="banknote" style="width:2.5rem;height:2.5rem;opacity:.3;display:block;margin:0 auto .75rem"></i>
+                  No hay movimientos en esta sesión.
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Tab Garantías -->
+    <div class="tab-pane fade" id="tab-garantias" role="tabpanel">
+      <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+          <thead>
+            <tr>
+              <th>Código</th>
+              <th>Concepto</th>
+              <th class="text-end">Monto</th>
+              <th>Forma Pago</th>
+              <th>Fecha</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in movimientos_garantia %}
+            <tr>
+              <td class="fw-semibold">{{ m.codigo }}</td>
+              <td>{{ m.get_concepto_display }}</td>
+              <td class="text-end fw-semibold {% if m.tipo == 'ingreso' %}text-info{% else %}text-warning{% endif %}">
+                {% if m.tipo == 'egreso' %}-{% endif %}Bs. {{ m.monto|floatformat:2 }}
+              </td>
+              <td>{{ m.get_forma_pago_display }}</td>
+              <td style="white-space:nowrap">{{ m.fecha|date:"d/m/Y H:i" }}</td>
+              <td style="white-space:nowrap">
+                <div class="btn-actions">
+                  <a href="{% url 'detalle_movimiento_caja' m.pk %}" class="btn btn-sm btn-icon btn-ghost-primary" title="Ver">
+                    <i data-lucide="eye"></i>
+                  </a>
+                </div>
+              </td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="6">
+                <div class="empty-state">
+                  <i data-lucide="shield" style="width:2.5rem;height:2.5rem;opacity:.3;display:block;margin:0 auto .75rem"></i>
+                  No hay garantías en esta sesión.
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Modal de confirmación de anulación -->
+<div class="modal fade" id="modalAnularMov" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Confirmar anulación</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-1">¿Anular el movimiento <strong id="modalAnularCodigo"></strong>?</p>
+        <p class="text-muted small mb-0">Se creará un movimiento inverso de <strong>Bs. <span id="modalAnularMonto"></span></strong> que cancelará su efecto en la caja.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <form id="formAnularMov" method="post" action="" class="d-inline">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-danger">Confirmar anulación</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% block extra_js %}
+<script>
+  document.getElementById('modalAnularMov').addEventListener('show.bs.modal', function(e) {
+    var btn = e.relatedTarget;
+    document.getElementById('modalAnularCodigo').textContent = btn.dataset.codigo;
+    document.getElementById('modalAnularMonto').textContent = btn.dataset.monto;
+    document.getElementById('formAnularMov').action =
+      '/caja/movimientos/' + btn.dataset.pk + '/revertir/';
+  });
+</script>
+{% endblock %}
+{% endblock %}

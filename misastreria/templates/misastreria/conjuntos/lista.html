@@ -1,0 +1,118 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Conjuntos{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title"><i class="bi bi-layers me-2"></i>Conjuntos</h2>
+    </div>
+    <div class="col-auto ms-auto">
+      <a href="{% url 'crear_conjunto' %}" class="btn btn-success">
+        <i class="bi bi-plus-lg me-1"></i>Nuevo Conjunto
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+<form method="get" class="filter-bar" id="filterForm">
+  <div class="filter-group" style="flex:1;min-width:180px">
+    <label>Buscar</label>
+    <input type="text" name="q" class="form-control"
+           placeholder="Nombre del conjunto…" value="{{ q }}" data-debounce="400">
+  </div>
+  <div class="filter-group">
+    <label>Estado</label>
+    <select name="activo" class="form-select" data-debounce="0">
+      <option value="">Todos</option>
+      <option value="True" {% if activo == 'True' %}selected{% endif %}>Activo</option>
+      <option value="False" {% if activo == 'False' %}selected{% endif %}>Inactivo</option>
+    </select>
+  </div>
+  <div class="filter-group justify-content-end">
+    <label class="invisible">.</label>
+    <a href="{% url 'lista_conjuntos' %}" class="btn btn-outline-secondary">Limpiar</a>
+  </div>
+</form>
+
+<div class="table-wrapper">
+  <table class="table table-hover">
+    <thead>
+      <tr>
+        <th>Nombre</th>
+        <th>Tipo</th>
+        <th>Precio sugerido</th>
+        <th>Slots</th>
+        <th>Estado</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for conjunto in page_obj %}
+      <tr>
+        <td class="fw-semibold">{{ conjunto.nombre }}</td>
+        <td>
+          {% if conjunto.tipo == 'alquiler' %}
+            <span class="badge-estado badge-alquilado">Alquiler</span>
+          {% else %}
+            <span class="badge-estado badge-entregado">Venta</span>
+          {% endif %}
+        </td>
+        <td>Bs. {{ conjunto.precio_sugerido }}</td>
+        <td>{{ conjunto.slots.count }}</td>
+        <td>
+          {% if conjunto.activo %}
+            <span class="badge-estado badge-entregado">Activo</span>
+          {% else %}
+            <span class="badge-estado badge-inactivo">Inactivo</span>
+          {% endif %}
+        </td>
+        <td>
+          <div class="btn-actions">
+            <a href="{% url 'editar_conjunto' conjunto.pk %}" class="btn btn-sm btn-outline-primary" title="Editar">
+              <i class="bi bi-pencil"></i>
+            </a>
+            {% if conjunto.activo %}
+            <a href="{% url 'eliminar_conjunto' conjunto.pk %}" class="btn btn-sm btn-outline-danger" title="Desactivar">
+              <i class="bi bi-x-circle"></i>
+            </a>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="6">
+          <div class="empty-state">
+            <i class="bi bi-layers d-block"></i>
+            No hay conjuntos registrados.
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="pagination-bar">
+    <span>{{ total }} registro{{ total|pluralize }}</span>
+    <nav>
+      <ul class="pagination pagination-sm mb-0">
+        {% if page_obj.has_previous %}
+          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&activo={{ activo }}">«</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&activo={{ activo }}">‹</a></li>
+        {% endif %}
+        <li class="page-item active">
+          <span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+        </li>
+        {% if page_obj.has_next %}
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&activo={{ activo }}">›</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&activo={{ activo }}">»</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+  </div>
+</div>
+
+{% endblock %}

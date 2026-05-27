@@ -1,125 +1,177 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}Alquileres{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title"><i data-lucide="shopping-bag" class="me-2 text-muted"></i>Alquileres</h2>
+    </div>
+    <div class="col-auto ms-auto d-flex gap-2">
+      <button class="btn btn-outline-secondary" data-col-toggle="tablaAlquileres">
+        <i data-lucide="layout-list"></i>Columnas
+      </button>
+      <a href="{% url 'crear_alquiler' %}" class="btn btn-success">
+        <i data-lucide="plus"></i>Nuevo Alquiler
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
 {% block contenido %}
-<div class="page-header">
-  <h1 class="page-title"><i class="bi bi-bag me-2"></i>Alquileres</h1>
-  <div class="d-flex gap-2">
-    <button class="btn btn-outline-secondary btn-sm" data-col-toggle="tablaAlquileres">
-      <i class="bi bi-layout-three-columns me-1"></i>Columnas
-    </button>
-    <a href="{% url 'crear_alquiler' %}" class="btn btn-success btn-sm">
-      <i class="bi bi-plus-lg me-1"></i>Nuevo Alquiler
-    </a>
+<div class="card mb-3">
+  <div class="card-body">
+    <form method="get" class="row g-2 align-items-end" id="filterForm">
+      <div class="col-12 col-md-3">
+        <label class="small mb-1 fw-semibold text-muted">Buscar</label>
+        <input type="text" name="q" class="form-control" placeholder="Código, prenda…"
+               value="{{ q }}" data-debounce="400">
+      </div>
+      <div class="col-12 col-md-3">
+        <label class="small mb-1 fw-semibold text-muted">Cliente</label>
+        <div style="position:relative">
+          <input type="text" data-cliente-search="filter_cliente_id"
+                 data-endpoint="{% url 'buscar_clientes' %}"
+                 data-autosubmit="1"
+                 class="form-control" placeholder="Todos los clientes" autocomplete="off">
+          <input type="hidden" name="cliente_id" id="filter_cliente_id" value="{{ cliente_id }}">
+        </div>
+      </div>
+      <div class="col-12 col-md" style="min-width:150px">
+        <label class="small mb-1 fw-semibold text-muted">Prenda</label>
+        <input type="text" name="prenda" class="form-control" placeholder="Nombre de prenda…"
+               value="{{ prenda }}" data-debounce="400">
+      </div>
+      <div class="col-6 col-md-auto">
+        <label class="small mb-1 fw-semibold text-muted">Estado</label>
+        <select name="estado" class="form-select" data-debounce="0">
+          <option value="">Todos</option>
+          {% for val, lbl in estado_choices %}
+          <option value="{{ val }}" {% if val == estado %}selected{% endif %}>{{ val|title }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-auto">
+        <label class="small mb-1 fw-semibold text-muted">Desde</label>
+        <input type="date" name="desde" class="form-control" value="{{ desde }}">
+      </div>
+      <div class="col-6 col-md-auto">
+        <label class="small mb-1 fw-semibold text-muted">Hasta</label>
+        <input type="date" name="hasta" class="form-control" value="{{ hasta }}">
+      </div>
+      <div class="col-12 col-md-auto d-flex gap-2 flex-wrap align-items-end">
+        <div class="date-shortcuts d-flex gap-1">
+          <a href="?periodo=semana" class="btn btn-outline-secondary {% if periodo == 'semana' %}active{% endif %}">Semana</a>
+          <a href="?periodo=mes" class="btn btn-outline-secondary {% if periodo == 'mes' %}active{% endif %}">Mes</a>
+          <a href="?periodo=3meses" class="btn btn-outline-secondary {% if periodo == '3meses' or not periodo %}active{% endif %}">3 meses</a>
+        </div>
+        <a href="{% url 'lista_alquileres' %}" class="btn btn-outline-secondary">Limpiar</a>
+      </div>
+    </form>
   </div>
 </div>
 
-<form method="get" class="filter-bar" id="filterForm">
-  <div class="filter-group" style="flex:1;min-width:180px">
-    <label>Buscar</label>
-    <input type="text" name="q" class="form-control" placeholder="Código, cliente…"
-           value="{{ q }}" data-debounce="400">
+<div class="card">
+  <div class="card-header d-flex align-items-center">
+    <span class="text-muted small">{{ total }} alquiler{{ total|pluralize:"es" }}</span>
   </div>
-  <div class="filter-group" style="min-width:150px">
-    <label>Prenda</label>
-    <input type="text" name="prenda" class="form-control" placeholder="Nombre de prenda…"
-           value="{{ prenda }}" data-debounce="400">
-  </div>
-  <div class="filter-group">
-    <label>Estado</label>
-    <select name="estado" class="form-select" data-debounce="0">
-      <option value="">Todos</option>
-      {% for val, lbl in estado_choices %}
-      <option value="{{ val }}" {% if val == estado %}selected{% endif %}>{{ lbl }}</option>
-      {% endfor %}
-    </select>
-  </div>
-  <div class="filter-group">
-    <label>Desde</label>
-    <input type="date" name="desde" class="form-control" value="{{ desde }}">
-  </div>
-  <div class="filter-group">
-    <label>Hasta</label>
-    <input type="date" name="hasta" class="form-control" value="{{ hasta }}">
-  </div>
-  <div class="filter-group justify-content-end">
-    <label class="invisible">.</label>
-    <div class="d-flex gap-2 flex-wrap">
-      <div class="date-shortcuts">
-        <a href="?periodo=semana" class="btn btn-outline-secondary {% if periodo == 'semana' %}active{% endif %}">Semana</a>
-        <a href="?periodo=mes" class="btn btn-outline-secondary {% if periodo == 'mes' %}active{% endif %}">Mes</a>
-        <a href="?periodo=3meses" class="btn btn-outline-secondary {% if periodo == '3meses' or not periodo %}active{% endif %}">3 meses</a>
-      </div>
-      <a href="{% url 'lista_alquileres' %}" class="btn btn-outline-secondary">Limpiar</a>
-    </div>
-  </div>
-</form>
-
-<div class="table-wrapper">
-  <table class="table table-hover" id="tablaAlquileres">
-    <thead>
-      <tr>
-        <th>Código</th>
-        <th>Cliente</th>
-        <th>Prendas</th>
-        <th class="text-end">Total</th>
-        <th>Alquiler</th>
-        <th>Devolución</th>
-        <th>Estado</th>
-        <th data-no-toggle>Acciones</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for a in page_obj %}
-      <tr>
-        <td class="fw-semibold">{{ a.codigo }}</td>
-        <td>
-          {% if a.cliente %}
-            <a href="{% url 'historial_cliente' a.cliente.id %}" class="text-decoration-none">{{ a.cliente }}</a>
-          {% else %}—{% endif %}
-        </td>
-        <td>
-          {% with items=a.items.all %}
-            {% if items %}
-              {% for item in items %}
-                <div class="small">{{ item.articulo }} × {{ item.cantidad }}</div>
-              {% endfor %}
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table" id="tablaAlquileres">
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Cliente</th>
+          <th>Prendas</th>
+          <th class="text-end">Total</th>
+          <th>Garantía</th>
+          <th>Alquiler</th>
+          <th>Devolución</th>
+          <th>Estado</th>
+          <th data-no-toggle>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in page_obj %}
+        <tr>
+          <td class="fw-semibold">{{ a.codigo }}</td>
+          <td>
+            {% if a.cliente %}
+              <a href="{% url 'historial_cliente' a.cliente.id %}" class="text-decoration-none">{{ a.cliente }}</a>
+            {% else %}—{% endif %}
+          </td>
+          <td>
+            {% with items=a.items.all %}
+              {% if items %}
+                {% for item in items %}
+                  <div class="small"><code>{{ item.prenda_item.codigo_item }}</code> — {{ item.prenda_item.prenda.nombre }}{% if item.grupo_conjunto %}<span class="badge-conjunto" title="Conjunto {{ item.grupo_conjunto }}"><i class="bi bi-layers"></i>{{ item.grupo_conjunto }}</span>{% endif %}</div>
+                {% endfor %}
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            {% endwith %}
+          </td>
+          <td class="text-end fw-semibold">{{ a.total|floatformat:2 }}</td>
+          <td>
+            {% if a.garantia_tipo == 'efectivo' or a.garantia_tipo == 'qr' or a.garantia_tipo == 'transferencia' %}
+              <span class="badge bg-green-lt text-nowrap">
+                {{ a.get_garantia_tipo_display }} Bs.{{ a.garantia_monto|floatformat:2 }}
+              </span>
+            {% elif a.garantia_tipo == 'descripcion' %}
+              <span class="text-muted small d-inline-block text-truncate" style="max-width:120px" title="{{ a.garantia }}">
+                {{ a.garantia|default:"—" }}
+              </span>
             {% else %}
               <span class="text-muted">—</span>
             {% endif %}
-          {% endwith %}
-        </td>
-        <td class="text-end fw-semibold">{{ a.total|floatformat:2 }}</td>
-        <td>{{ a.fecha_alquiler|date:"d/m/Y" }}</td>
-        <td>{{ a.fecha_devolucion|date:"d/m/Y" }}</td>
-        <td><span class="badge-estado badge-{{ a.estado }}">{{ a.get_estado_display }}</span></td>
-        <td>
-          <div class="btn-actions">
-            <a href="{% url 'editar_alquiler' a.id %}" class="btn btn-sm btn-outline-primary" title="Editar"><i class="bi bi-pencil"></i></a>
-            <a href="{% url 'exportar_comprobante_alquiler_pdf' a.id %}" class="btn btn-sm btn-outline-secondary" title="PDF"><i class="bi bi-file-pdf"></i></a>
-            <a href="{% url 'crear_confeccion' %}?desde_alquiler={{ a.id }}" class="btn btn-sm btn-outline-secondary" title="Confeccionar similar"><i class="bi bi-scissors"></i></a>
-            {% if a.estado == 'alquilado' %}
-            <a href="{% url 'devolver_alquiler' a.id %}" class="btn btn-sm btn-outline-success" title="Devolver"><i class="bi bi-arrow-return-left"></i></a>
+          </td>
+          <td>{{ a.fecha_alquiler|date:"d/m/Y" }}</td>
+          <td>
+            {{ a.fecha_devolucion|date:"d/m/Y" }}
+            {% if a.hora_devolucion %}<small class="text-muted d-block">{{ a.hora_devolucion|time:"H:i" }}</small>{% endif %}
+            {% if a.con_recargo %}<span class="badge bg-danger text-white ms-1" title="Pasó la hora de devolución">Recargo</span>{% endif %}
+          </td>
+          <td>
+            {% if a.estado == 'alquilado' or a.estado == 'devuelto' or a.estado == 'reservado' %}
+              <span class="badge-estado badge-{{ a.estado }}">{{ a.estado_display }}</span>
+            {% else %}
+              <span class="badge bg-{{ a.estado_color }} {% if a.estado_color == 'warning' %}text-dark{% else %}text-white{% endif %}">{{ a.estado_display }}</span>
             {% endif %}
-            <a href="{% url 'eliminar_alquiler' a.id %}" class="btn btn-sm btn-outline-danger" title="Eliminar"><i class="bi bi-trash"></i></a>
-          </div>
-        </td>
-      </tr>
-      {% empty %}
-      <tr>
-        <td colspan="8">
-          <div class="empty-state">
-            <i class="bi bi-bag-x d-block"></i>
-            No hay alquileres en el período seleccionado.
-          </div>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  <div class="pagination-bar">
-    <span>{{ total }} alquiler{{ total|pluralize:"es" }}</span>
-    <nav>
-      <ul class="pagination pagination-sm mb-0">
+          </td>
+          <td>
+            <div class="btn-actions">
+              <a href="{% url 'detalle_alquiler' a.id %}" class="btn btn-sm btn-icon btn-ghost-info" title="Detalle"><i data-lucide="eye"></i></a>
+              <a href="{% url 'editar_alquiler' a.id %}" class="btn btn-sm btn-icon btn-ghost-primary" title="Editar"><i data-lucide="pencil"></i></a>
+              <a href="{% url 'exportar_comprobante_alquiler_pdf' a.id %}" class="btn btn-sm btn-icon btn-ghost-secondary" title="PDF"><i data-lucide="file-text"></i></a>
+              <a href="{% url 'crear_confeccion' %}?desde_alquiler={{ a.id }}" class="btn btn-sm btn-icon btn-ghost-secondary" title="Confeccionar similar"><i data-lucide="scissors"></i></a>
+              {% if a.estado == 'alquilado' %}
+              <a href="{% url 'devolver_alquiler' a.id %}" class="btn btn-sm btn-icon btn-ghost-success" title="Devolver"><i data-lucide="rotate-cw"></i></a>
+              {% elif a.estado == 'reservado' %}
+              <a href="{% url 'confirmar_reserva' a.id %}" class="btn btn-sm btn-icon btn-ghost-success" title="Confirmar"><i data-lucide="check-circle"></i></a>
+              {% endif %}
+              <button type="button" class="btn btn-sm btn-icon btn-ghost-danger" title="Eliminar"
+                data-delete-url="{% url 'eliminar_alquiler' a.id %}"
+                data-delete-name="{{ a }}"><i data-lucide="trash-2"></i></button>
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="8">
+            <div class="empty-state">
+              <i data-lucide="shopping-bag" class="d-block"></i>
+              No hay alquileres en el período seleccionado.
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer d-flex align-items-center">
+    <p class="m-0 text-muted small">Mostrando <strong>{{ page_obj.start_index }}–{{ page_obj.end_index }}</strong> de <strong>{{ total }}</strong></p>
+    <nav class="ms-auto">
+      <ul class="pagination pagination-sm m-0">
         {% if page_obj.has_previous %}
           <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}">«</a></li>
           <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}">‹</a></li>

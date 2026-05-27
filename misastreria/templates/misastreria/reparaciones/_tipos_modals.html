@@ -1,0 +1,45 @@
+<!-- Modal: Nuevo tipo de prenda -->
+<div class="modal fade" id="modalNuevoTipoPrenda" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Nuevo tipo de prenda</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label">Nombre</label>
+          <input type="text" class="form-control" id="nuevoTipoPrendaNombre" placeholder="Ej: Ropa deportiva">
+        </div>
+        <div id="modalTipoPrendaError" class="text-danger small" style="display:none"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btnGuardarTipoPrenda">Guardar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Nuevo tipo de reparación -->
+<div class="modal fade" id="modalNuevoTipoReparacion" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Nuevo tipo de reparación</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label">Nombre</label>
+          <input type="text" class="form-control" id="nuevoTipoReparacionNombre" placeholder="Ej: Bordado">
+        </div>
+        <div id="modalTipoReparacionError" class="text-danger small" style="display:none"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btnGuardarTipoReparacion">Guardar</button>
+      </div>
+    </div>
+  </div>
+</div>

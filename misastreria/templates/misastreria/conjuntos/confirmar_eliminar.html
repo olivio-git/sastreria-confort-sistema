@@ -1,0 +1,47 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Desactivar Conjunto{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'lista_conjuntos' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left"></i>Volver
+      </a>
+    </div>
+    <div class="col">
+      <h2 class="page-title text-danger">
+        <i data-lucide="x-circle" class="me-2"></i>Desactivar Conjunto
+      </h2>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+<div class="row justify-content-center">
+  <div class="col-12 col-md-6 col-lg-5">
+    <div class="card border-danger">
+      <div class="card-body text-center py-4">
+        <div class="mb-3 text-danger">
+          <i data-lucide="alert-triangle" style="width:3rem;height:3rem"></i>
+        </div>
+        <h4 class="fw-semibold mb-1">¿Desactivar este conjunto?</h4>
+        <p class="text-muted mb-3">
+          El conjunto <strong>{{ conjunto.nombre }}</strong> será marcado como inactivo
+          y dejará de aparecer en los formularios de venta y alquiler.
+        </p>
+        <div class="d-flex justify-content-center gap-3">
+          <a href="{% url 'lista_conjuntos' %}" class="btn btn-outline-secondary">Cancelar</a>
+          <form method="post">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-danger">
+              <i data-lucide="x-circle" class="me-1"></i>Confirmar desactivación
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

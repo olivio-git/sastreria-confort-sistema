@@ -1,42 +1,69 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}Reporte de Artículos{% endblock %}
-{% block contenido %}
-<h1>Reporte de Artículos</h1>
-<form method="get" class="mb-3">
-    <div class="row">
-        <div class="col-md-4">
-            <label>Fecha Inicio</label>
-            <input type="date" name="fecha_inicio" class="form-control" value="{{ request.GET.fecha_inicio }}">
-        </div>
-        <div class="col-md-4">
-            <label>Fecha Fin</label>
-            <input type="date" name="fecha_fin" class="form-control" value="{{ request.GET.fecha_fin }}">
-        </div>
-        <div class="col-md-4 align-self-end">
-            <button type="submit" class="btn btn-primary">Filtrar</button>
-        </div>
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="package" class="me-2 text-muted"></i>Reporte de Artículos
+      </h2>
     </div>
-</form>
-<table class="table table-striped">
-    <thead>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <form method="get" class="row g-2 align-items-end" id="filterForm">
+      <div class="col-md-4">
+        <label class="form-label small mb-1 fw-semibold text-muted">Fecha Inicio</label>
+        <input type="date" name="fecha_inicio" class="form-control" value="{{ request.GET.fecha_inicio }}">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label small mb-1 fw-semibold text-muted">Fecha Fin</label>
+        <input type="date" name="fecha_fin" class="form-control" value="{{ request.GET.fecha_fin }}">
+      </div>
+      <div class="col-md-4">
+        <button type="submit" class="btn btn-primary">
+          <i data-lucide="search"></i>Filtrar
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table">
+      <thead>
         <tr>
-            <th>Código</th>
-            <th>Artículo</th>
-            <th>Cantidad</th>
-            <th>Fecha de Ingreso</th>
+          <th>Código</th>
+          <th>Nombre</th>
+          <th>Stock total</th>
+          <th>Tipo</th>
+          <th>Precio (Bs.)</th>
+          <th>Fecha Ingreso</th>
         </tr>
-    </thead>
-    <tbody>
-        {% for inventario in inventarios %}
+      </thead>
+      <tbody>
+        {% for articulo in articulos %}
         <tr>
-            <td>{{ inventario.codigo }}</td>
-            <td>{{ inventario.articulo }}</td>
-            <td>{{ inventario.cantidad }}</td>
-            <td>{{ inventario.fecha_ingreso|date:"d/m/Y" }}</td>
+          <td>{{ articulo.codigo }}</td>
+          <td>{{ articulo.nombre }}</td>
+          <td>{{ articulo.cantidad }}</td>
+          <td>{{ articulo.cantidad }}</td>
+          <td>{{ articulo.precio|floatformat:2 }}</td>
+          <td>{{ articulo.creado|date:"d/m/Y" }}</td>
         </tr>
         {% empty %}
-        <tr><td colspan="4">No hay artículos que coincidan con los filtros.</td></tr>
+        <tr><td colspan="6" class="text-center text-muted">No hay artículos en inventario.</td></tr>
         {% endfor %}
-    </tbody>
-</table>
+      </tbody>
+    </table>
+  </div>
+</div>
+
 {% endblock %}

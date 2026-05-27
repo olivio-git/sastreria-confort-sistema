@@ -1,22 +1,62 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}Confirmar Entrega: {{ confeccion.codigo }}{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'lista_confecciones' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left"></i>Volver
+      </a>
+    </div>
+    <div class="col">
+      <h2 class="page-title"><i data-lucide="check-circle" class="me-2 text-muted"></i>Confirmar Entrega</h2>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
 {% block contenido %}
-<div class="container py-4">
-    <h2 class="mb-4">Confirmar Entrega de Confección</h2>
-    {% if messages %}
-        <div class="alert {% if 'error' in messages.tags %}alert-danger{% else %}alert-info{% endif %}">
-            {% for message in messages %}
-                {{ message }}
-            {% endfor %}
+<div class="row justify-content-center">
+  <div class="col-12 col-sm-8 col-md-6 col-lg-5">
+    <div class="card">
+      <div class="card-header"><h3 class="card-title">Datos</h3></div>
+      <div class="card-body">
+        <p>¿Estás seguro de que deseas marcar la confección
+          <strong>{{ confeccion.codigo }}{% if confeccion.tipos_prenda_display %} - {{ confeccion.tipos_prenda_display }}{% endif %}</strong>
+          como entregada?</p>
+        {% if saldo_pendiente > 0 %}
+        <div class="alert alert-warning mb-0 py-2">
+          Saldo pendiente a cobrar: <strong>Bs {{ saldo_pendiente }}</strong>
         </div>
-    {% endif %}
-    <p>¿Estás seguro de que deseas marcar la confección <strong>{{ confeccion.codigo }} - {{ confeccion.get_tipo_prenda_display }}</strong> como entregada? Esta acción establecerá el saldo a 0.</p>
-    <form method="post">
-        {% csrf_token %}
-        <div class="mt-4">
-            <button type="submit" class="btn btn-success">Confirmar Entrega</button>
-            <a href="{% url 'lista_confecciones' %}" class="btn btn-secondary">Cancelar</a>
+        {% else %}
+        <div class="alert alert-success mb-0 py-2">
+          <i data-lucide="check-circle" class="me-1"></i>Completamente pagado.
         </div>
-    </form>
+        {% endif %}
+      </div>
+      <div class="card-footer">
+        <form method="post">
+          {% csrf_token %}
+          {% if saldo_pendiente > 0 %}
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Tipo de pago del saldo</label>
+            <select name="forma_pago" class="form-select">
+              {% for val, label in forma_pago_choices %}
+              <option value="{{ val }}" {% if val == confeccion.forma_pago %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          {% endif %}
+          <div class="d-flex justify-content-end gap-2">
+            <a href="{% url 'lista_confecciones' %}" class="btn btn-outline-secondary">Cancelar</a>
+            <button type="submit" class="btn btn-success d-flex align-items-center gap-1">
+              <i data-lucide="check"></i>Confirmar Entrega
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
 </div>
 {% endblock %}

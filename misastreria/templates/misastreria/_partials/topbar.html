@@ -1,0 +1,64 @@
+<div class="container-xl">
+  <div class="d-flex align-items-center gap-2 w-100">
+
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#sidebar-menu" aria-controls="sidebar-menu">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+
+    <div class="flex-fill"></div>
+
+    <!-- Estado de caja -->
+    {% if caja_sesion_activa %}
+    <a href="{% url 'resumen_caja' %}" class="topbar-badge topbar-badge-open d-none d-sm-flex" title="Ver resumen de caja">
+      <i class="bi bi-circle-fill"></i>
+      <span>Caja abierta</span>
+    </a>
+    {% else %}
+    <a href="{% url 'lista_sesiones_caja' %}" class="topbar-badge topbar-badge-closed d-none d-sm-flex" title="Abrir caja">
+      <i class="bi bi-circle"></i>
+      <span>Caja cerrada</span>
+    </a>
+    {% endif %}
+
+    <!-- Tema -->
+    <button id="themeToggle" type="button" class="topbar-icon-btn" title="Cambiar tema" aria-label="Cambiar tema">
+      <i class="bi bi-moon-fill topbar-moon"></i>
+      <i class="bi bi-sun-fill topbar-sun"></i>
+    </button>
+
+    <!-- User menu -->
+    <div class="nav-item dropdown">
+      <a href="#" class="nav-link d-flex align-items-center gap-2 px-2" data-bs-toggle="dropdown" aria-expanded="false">
+        <span class="avatar avatar-sm bg-blue-lt text-blue fw-bold">
+          {{ user.username|first|upper }}
+        </span>
+        <span class="d-none d-md-inline fw-medium">{{ user.username }}</span>
+        <i data-lucide="chevron-down" style="width:.9rem;height:.9rem;opacity:.6"></i>
+      </a>
+      <div class="dropdown-menu dropdown-menu-end shadow-sm">
+
+        <!-- Auto buscar -->
+        <div class="dropdown-item d-flex align-items-center justify-content-between gap-3" style="cursor:default">
+          <span class="text-muted small">Auto buscar</span>
+          <div class="form-check form-switch m-0">
+            <input class="form-check-input" type="checkbox" id="toggleAutoBuscar" style="cursor:pointer">
+          </div>
+        </div>
+        <script>
+          if (localStorage.getItem('auto_buscar') !== 'false')
+            document.getElementById('toggleAutoBuscar').checked = true;
+        </script>
+
+        <div class="dropdown-divider"></div>
+
+        <form action="{% url 'logout' %}" method="post">
+          {% csrf_token %}
+          <button type="submit" class="dropdown-item text-danger d-flex align-items-center gap-2">
+            <i data-lucide="log-out"></i> Cerrar sesión
+          </button>
+        </form>
+      </div>
+    </div>
+
+  </div>
+</div>

@@ -1,30 +1,56 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}Eliminar Orden{% endblock %}
-{% block contenido %}
-<div class="page-header">
-  <h1 class="page-title"><i class="bi bi-trash me-2"></i>Eliminar Orden de Producción</h1>
-</div>
 
-<div class="form-card" style="max-width:560px">
-  <p class="mb-3">¿Eliminar la orden <strong>{{ orden.codigo }}</strong>
-    — <em>{{ orden.descripcion|truncatechars:60 }}</em>?
-  </p>
-
-  {% if orden.insumos.all %}
-  <p class="text-muted mb-1">Se restaurará el stock de los siguientes insumos:</p>
-  <ul class="mb-3">
-    {% for ins in orden.insumos.all %}
-    <li>{{ ins.insumo }} × {{ ins.cantidad }}</li>
-    {% endfor %}
-  </ul>
-  {% endif %}
-
-  <form method="post">
-    {% csrf_token %}
-    <div class="d-flex gap-2">
-      <button type="submit" class="btn btn-danger"><i class="bi bi-trash me-1"></i>Eliminar</button>
-      <a href="{% url 'lista_ordenes' %}" class="btn btn-outline-secondary">Cancelar</a>
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'lista_ordenes' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left"></i>Volver
+      </a>
     </div>
-  </form>
+    <div class="col">
+      <h2 class="page-title text-danger"><i data-lucide="trash-2" class="me-2"></i>Eliminar Orden de Producción</h2>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+<div class="row justify-content-center">
+  <div class="col-12 col-sm-9 col-md-6 col-lg-5">
+    <div class="card card-md">
+      <div class="card-status-top bg-danger"></div>
+      <div class="card-body py-4">
+        <div class="mb-3 text-danger text-center">
+          <i data-lucide="trash-2" style="width:3rem;height:3rem;opacity:.7"></i>
+        </div>
+        <h3 class="card-title text-center mb-1">¿Eliminar esta orden?</h3>
+        <p class="text-muted text-center mb-0">
+          <strong>{{ orden.codigo }}</strong> — {{ orden.descripcion|truncatechars:60 }}
+        </p>
+        {% if orden.insumos.all %}
+        <hr class="my-3">
+        <p class="text-muted small mb-2">Se restaurará el stock de los siguientes insumos:</p>
+        <ul class="mb-0 small">
+          {% for ins in orden.insumos.all %}
+          <li>{{ ins.insumo }} × {{ ins.cantidad }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      <div class="card-footer d-flex justify-content-center gap-3">
+        <a href="{% url 'lista_ordenes' %}" class="btn btn-outline-secondary">
+          <i data-lucide="x"></i>Cancelar
+        </a>
+        <form method="post" class="d-inline">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-danger">
+            <i data-lucide="trash-2"></i>Eliminar
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
 </div>
 {% endblock %}

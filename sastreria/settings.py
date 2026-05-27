@@ -26,11 +26,11 @@ SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'your-secure-secret-key')
 #DEBUG = os.environ.get('DJANGO_DEBUG', 'False') == 'True'
 DEBUG = False
 
-ALLOWED_HOSTS = ['sastreriaconfort.com', 'www.sastreriaconfort.com']
+ALLOWED_HOSTS = ['fortiumtailor.com', 'www.fortiumtailor.com']
 
 CSRF_TRUSTED_ORIGINS = [
-    'https://sastreriaconfort.com',
-    'https://www.sastreriaconfort.com',
+    'https://fortiumtailor.com',
+    'https://www.fortiumtailor.com',
 ]
 
 
@@ -55,6 +55,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'misastreria.middleware.CajaAbiertaMiddleware',
 ]
 
 ROOT_URLCONF = 'sastreria.urls'
@@ -70,6 +71,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'misastreria.context_processors.caja_sesion',
             ],
         },
     },
@@ -90,9 +92,9 @@ WSGI_APPLICATION = 'sastreria.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'sastreri_sastreria_db',
-        'USER': 'sastreri_sastreria_user',
-        'PASSWORD': 'Sastreria2026',
+        'NAME': os.environ.get('DB_NAME', 'cpanelusr_db'),
+        'USER': os.environ.get('DB_USER', 'cpanelusr_user'),
+        'PASSWORD': os.environ.get('DB_PASSWORD', ''),
         'HOST': 'localhost',
         'PORT': '3306',
         'OPTIONS': {
@@ -127,7 +129,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'es'
 
-TIME_ZONE = 'America/Bogota'
+TIME_ZONE = 'America/La_Paz'
 
 USE_I18N = True
 
@@ -139,7 +141,7 @@ USE_TZ = True
 FORCE_SCRIPT_NAME = '/sistema'
 
 STATIC_URL = '/sistema/static/'
-STATICFILES_DIRS = [BASE_DIR / 'misastreria/static']
+STATICFILES_DIRS = []
 STATIC_ROOT = os.path.join(BASE_DIR, 'static')
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 STATICFILES_FINDERS = [

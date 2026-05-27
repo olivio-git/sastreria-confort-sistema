@@ -1,11 +1,33 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}Eliminar Cliente{% endblock %}
+
 {% block contenido %}
-<h1>Eliminar Cliente</h1>
-<p>¿Estás seguro de que deseas eliminar al cliente <strong>{{ cliente }}</strong>?</p>
-<form method="post">
-    {% csrf_token %}
-    <button type="submit" class="btn btn-danger">Eliminar</button>
-    <a href="{% url 'lista_clientes' %}" class="btn btn-secondary">Cancelar</a>
-</form>
+<div class="row justify-content-center">
+  <div class="col-12 col-sm-8 col-md-6 col-lg-4">
+    <div class="card card-md">
+      <div class="card-status-top bg-danger"></div>
+      <div class="card-body text-center py-4">
+        <div class="mb-3 text-danger">
+          <i data-lucide="user-x" style="width:3rem;height:3rem;opacity:.7"></i>
+        </div>
+        <h3 class="card-title mb-1">¿Eliminar cliente?</h3>
+        <p class="text-muted mb-0">
+          <strong>{{ cliente }}</strong><br>
+          <small>Esta acción no se puede deshacer.</small>
+        </p>
+      </div>
+      <div class="card-footer d-flex justify-content-center gap-3">
+        <a href="{% url 'lista_clientes' %}" class="btn btn-outline-secondary d-flex align-items-center gap-1">
+          <i data-lucide="x"></i>Cancelar
+        </a>
+        <form method="post" class="d-inline">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-danger d-flex align-items-center gap-1">
+            <i data-lucide="trash-2"></i>Eliminar
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}

@@ -1,0 +1,375 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Reportes de Caja{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="chart-bar" class="me-2 text-muted"></i>Reportes de Caja
+      </h2>
+    </div>
+    <div class="col-auto ms-auto d-flex gap-2">
+      <a href="{% url 'export_resumen_caja_pdf' %}?periodo={{ periodo }}&desde={{ desde }}&hasta={{ hasta }}"
+         class="btn btn-outline-secondary" title="Exportar PDF">
+        <i data-lucide="file-text" class="me-1"></i>PDF
+      </a>
+      <a href="{% url 'export_resumen_caja_excel' %}?periodo={{ periodo }}&desde={{ desde }}&hasta={{ hasta }}"
+         class="btn btn-outline-secondary" title="Exportar Excel">
+        <i data-lucide="file-spreadsheet" class="me-1"></i>Excel
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+<!-- Tabs -->
+<ul class="nav nav-tabs mb-3" id="cajaTabs" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active" id="tab-analitica" data-bs-toggle="tab" data-bs-target="#pane-analitica" type="button" role="tab">
+      <i data-lucide="chart-bar" style="width:1rem;height:1rem;vertical-align:middle" class="me-1"></i>Analítica
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-historial" data-bs-toggle="tab" data-bs-target="#pane-historial" type="button" role="tab">
+      <i data-lucide="list" style="width:1rem;height:1rem;vertical-align:middle" class="me-1"></i>Historial
+    </button>
+  </li>
+</ul>
+
+<div class="tab-content">
+<div class="tab-pane fade show active" id="pane-analitica" role="tabpanel">
+
+<!-- Filtros de período -->
+<div class="card mb-3">
+  <div class="card-body">
+    <form method="get" class="row g-2 align-items-end" id="filterForm">
+      <div class="col-12 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Desde</label>
+        <input type="date" name="desde" class="form-control" value="{{ desde }}" id="inputDesde">
+      </div>
+      <div class="col-12 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Hasta</label>
+        <input type="date" name="hasta" class="form-control" value="{{ hasta }}" id="inputHasta">
+      </div>
+      <input type="hidden" name="periodo" value="{{ periodo }}" id="hiddenPeriodo">
+      <div class="col-auto ms-auto d-flex gap-2 align-items-end flex-wrap">
+        <div class="date-shortcuts">
+          <a href="?periodo=hoy" class="btn btn-outline-secondary {% if periodo == 'hoy' %}active{% endif %}">Hoy</a>
+          <a href="?periodo=semana" class="btn btn-outline-secondary {% if periodo == 'semana' %}active{% endif %}">Semana</a>
+          <a href="?periodo=mes" class="btn btn-outline-secondary {% if periodo == 'mes' %}active{% endif %}">Mes</a>
+          <a href="?periodo=custom" class="btn btn-outline-secondary {% if periodo == 'custom' %}active{% endif %}" id="btnCustom">Personalizado</a>
+        </div>
+        <button type="submit" class="btn btn-primary d-flex align-items-center gap-1" id="btnFiltrar" style="{% if periodo != 'custom' %}display:none!important{% endif %}">
+          <i data-lucide="search"></i>Filtrar
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Totales -->
+<div class="mb-3">
+  {% include 'misastreria/caja/_partials/totales.html' with total_ingresos=total_ingresos total_egresos=total_egresos saldo=saldo %}
+</div>
+
+<div class="row g-3">
+  <!-- Flujo Diario -->
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Flujo Diario</h3>
+        <div class="ms-auto text-muted small">{{ desde }} — {{ hasta }}</div>
+      </div>
+      <div class="card-body">
+        {% if flujo_diario %}
+          <canvas id="flujoChart" height="80"></canvas>
+        {% else %}
+          <div class="empty-state">
+            <i data-lucide="bar-chart-2" style="width:2.5rem;height:2.5rem;opacity:.3;display:block;margin:0 auto .75rem"></i>
+            Sin datos de flujo en el período seleccionado.
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Desglose por Concepto -->
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Desglose por Concepto</h3>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+          <thead>
+            <tr>
+              <th>Concepto</th>
+              <th>Tipo</th>
+              <th class="text-end">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in breakdown_concepto %}
+            <tr>
+              <td>{{ row.label }}</td>
+              <td>
+                <span class="badge-estado {% if row.tipo == 'ingreso' %}badge-entregado{% else %}badge-inactivo{% endif %}">
+                  {{ row.tipo|capfirst }}
+                </span>
+              </td>
+              <td class="text-end fw-semibold {% if row.tipo == 'ingreso' %}text-success{% else %}text-danger{% endif %}">
+                Bs. {{ row.total|floatformat:2 }}
+              </td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="3" class="text-center text-muted py-3">Sin datos en este período.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Desglose por Forma de Pago -->
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Desglose por Forma de Pago</h3>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+          <thead>
+            <tr>
+              <th>Forma de Pago</th>
+              <th>Tipo</th>
+              <th class="text-end">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in breakdown_forma_pago %}
+            <tr>
+              <td class="text-capitalize">{{ row.forma_pago }}</td>
+              <td>
+                <span class="badge-estado {% if row.tipo == 'ingreso' %}badge-entregado{% else %}badge-inactivo{% endif %}">
+                  {{ row.tipo }}
+                </span>
+              </td>
+              <td class="text-end fw-semibold {% if row.tipo == 'ingreso' %}text-success{% else %}text-danger{% endif %}">
+                Bs. {{ row.total|floatformat:2 }}
+              </td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="3" class="text-center text-muted py-3">Sin datos en este período.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sesiones del período -->
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header d-flex align-items-center">
+        <h3 class="card-title">Sesiones del período</h3>
+        <div class="ms-auto">
+          <a href="{% url 'lista_movimientos_caja' %}?desde={{ desde }}&hasta={{ hasta }}" class="btn btn-outline-secondary btn-sm">
+            Ver todos los movimientos
+          </a>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Estado</th>
+              <th>Apertura</th>
+              <th>Cierre</th>
+              <th class="text-end">Monto Apertura</th>
+              <th class="text-end">Saldo Sistema</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in sesiones_periodo %}
+            <tr>
+              <td class="fw-semibold">{{ s.pk }}</td>
+              <td>
+                <span class="badge-estado {% if s.estado == 'abierta' %}badge-entregado{% else %}badge-inactivo{% endif %}">
+                  {{ s.get_estado_display }}
+                </span>
+              </td>
+              <td style="white-space:nowrap">{{ s.fecha_apertura|date:"d/m/Y H:i" }}</td>
+              <td style="white-space:nowrap">
+                {% if s.fecha_cierre %}{{ s.fecha_cierre|date:"d/m/Y H:i" }}{% else %}<span class="text-muted">—</span>{% endif %}
+              </td>
+              <td class="text-end">Bs. {{ s.monto_apertura|floatformat:2 }}</td>
+              <td class="text-end">Bs. {{ s.saldo_sistema|floatformat:2 }}</td>
+              <td>
+                <div class="btn-actions">
+                  <a href="{% url 'detalle_sesion_caja' s.pk %}" class="btn btn-sm btn-icon btn-ghost-primary" title="Ver">
+                    <i data-lucide="eye"></i>
+                  </a>
+                </div>
+              </td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="7" class="text-center text-muted py-3">Sin sesiones en este período.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>{# /pane-analitica #}
+
+<!-- Historial tab -->
+<div class="tab-pane fade" id="pane-historial" role="tabpanel">
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">Historial de movimientos — {{ desde }} al {{ hasta }}</h3>
+      <div class="ms-auto text-muted small">{{ movimientos_detalle|length }} movimiento{{ movimientos_detalle|length|pluralize }}</div>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-vcenter card-table">
+        <thead>
+          <tr>
+            <th>Código</th>
+            <th>Sesión</th>
+            <th>Tipo</th>
+            <th>Concepto</th>
+            <th class="text-end">Monto</th>
+            <th>Forma Pago</th>
+            <th>Fecha</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in movimientos_detalle %}
+          <tr>
+            <td class="fw-semibold">
+              <a href="{% url 'detalle_movimiento_caja' m.pk %}">{{ m.codigo }}</a>
+            </td>
+            <td>
+              {% if m.sesion %}
+                <a href="{% url 'detalle_sesion_caja' m.sesion.pk %}">#{{ m.sesion.pk }}</a>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+            <td>
+              <span class="badge-estado {% if m.tipo == 'ingreso' %}badge-entregado{% else %}badge-inactivo{% endif %}">
+                {{ m.get_tipo_display }}
+              </span>
+            </td>
+            <td>{{ m.get_concepto_display }}</td>
+            <td class="text-end fw-semibold {% if m.tipo == 'ingreso' %}text-success{% else %}text-danger{% endif %}">
+              Bs. {{ m.monto|floatformat:2 }}
+            </td>
+            <td>{{ m.get_forma_pago_display }}</td>
+            <td style="white-space:nowrap">{{ m.fecha|date:"d/m/Y H:i" }}</td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="7">
+              <div class="empty-state">
+                <i data-lucide="banknote" style="width:2.5rem;height:2.5rem;opacity:.3;display:block;margin:0 auto .75rem"></i>
+                Sin movimientos en el período seleccionado.
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>{# /pane-historial #}
+
+</div>{# /tab-content #}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Custom period: show filtrar button and date inputs when custom selected
+const btnCustom = document.getElementById('btnCustom');
+const btnFiltrar = document.getElementById('btnFiltrar');
+const hiddenPeriodo = document.getElementById('hiddenPeriodo');
+
+if (btnCustom) {
+  btnCustom.addEventListener('click', function(e) {
+    e.preventDefault();
+    hiddenPeriodo.value = 'custom';
+    btnFiltrar.style.display = '';
+  });
+}
+
+{% if flujo_diario %}
+// Flujo diario chart
+const flujoData = [
+  {% for d in flujo_diario %}
+  {
+    fecha: "{{ d.fecha|date:'d/m' }}",
+    ingresos: {{ d.ingresos|floatformat:2 }},
+    egresos: {{ d.egresos|floatformat:2 }}
+  }{% if not forloop.last %},{% endif %}
+  {% endfor %}
+];
+
+const ctx = document.getElementById('flujoChart');
+if (ctx && typeof Chart !== 'undefined') {
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: flujoData.map(d => d.fecha),
+      datasets: [
+        {
+          label: 'Ingresos',
+          data: flujoData.map(d => d.ingresos),
+          backgroundColor: 'rgba(16, 185, 129, 0.7)',
+          borderColor: 'rgba(16, 185, 129, 1)',
+          borderWidth: 1,
+        },
+        {
+          label: 'Egresos',
+          data: flujoData.map(d => d.egresos),
+          backgroundColor: 'rgba(239, 68, 68, 0.7)',
+          borderColor: 'rgba(239, 68, 68, 1)',
+          borderWidth: 1,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'top' }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: {
+            callback: function(val) { return 'Bs. ' + val.toFixed(2); }
+          }
+        }
+      }
+    }
+  });
+} else if (ctx) {
+  // Fallback: show table if Chart.js not available
+  const tableHtml = '<table class="table table-sm mt-2"><thead><tr><th>Fecha</th><th class="text-end text-success">Ingresos</th><th class="text-end text-danger">Egresos</th><th class="text-end">Neto</th></tr></thead><tbody>' +
+    flujoData.map(d => '<tr><td>' + d.fecha + '</td><td class="text-end">Bs. ' + d.ingresos.toFixed(2) + '</td><td class="text-end">Bs. ' + d.egresos.toFixed(2) + '</td><td class="text-end">Bs. ' + (d.ingresos - d.egresos).toFixed(2) + '</td></tr>').join('') +
+    '</tbody></table>';
+  ctx.outerHTML = tableHtml;
+}
+{% endif %}
+</script>
+{% endblock %}

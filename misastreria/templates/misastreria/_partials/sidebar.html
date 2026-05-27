@@ -1,0 +1,143 @@
+<div class="sc-sidebar-inner">
+
+  <!-- Brand -->
+  <div class="sc-brand">
+    <a href="{% url 'dashboard' %}" class="sc-brand-link">
+      <span class="sc-brand-icon"><i data-lucide="scissors"></i></span>
+      <span class="sc-brand-name">Fortium Tailor</span>
+    </a>
+    <button class="navbar-toggler sc-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#sidebar-menu" aria-expanded="false">
+      <i data-lucide="panel-left-close"></i>
+    </button>
+  </div>
+
+  <!-- Nav -->
+  <div class="collapse navbar-collapse sc-nav-collapse" id="sidebar-menu">
+    <nav class="sc-nav">
+
+      <!-- Principal -->
+      <a class="sc-nav-item {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}" href="{% url 'dashboard' %}">
+        <span class="sc-nav-icon"><i data-lucide="gauge"></i></span>
+        <span class="sc-nav-label">Dashboard</span>
+      </a>
+
+      <!-- Operaciones -->
+      <div class="sc-section-label">Operaciones</div>
+
+      <a class="sc-nav-item {% if 'cliente' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'lista_clientes' %}">
+        <span class="sc-nav-icon"><i data-lucide="users"></i></span>
+        <span class="sc-nav-label">Clientes</span>
+      </a>
+      <a class="sc-nav-item {% if 'reparacion' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'lista_reparaciones' %}">
+        <span class="sc-nav-icon"><i data-lucide="wrench"></i></span>
+        <span class="sc-nav-label">Reparaciones</span>
+      </a>
+      <a class="sc-nav-item {% if 'confeccion' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'lista_confecciones' %}">
+        <span class="sc-nav-icon"><i data-lucide="scissors"></i></span>
+        <span class="sc-nav-label">Confecciones</span>
+      </a>
+      <a class="sc-nav-item {% if 'alquiler' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'lista_alquileres' %}">
+        <span class="sc-nav-icon"><i data-lucide="calendar"></i></span>
+        <span class="sc-nav-label">Alquileres</span>
+      </a>
+      <a class="sc-nav-item {% if 'venta' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'lista_ventas' %}">
+        <span class="sc-nav-icon"><i data-lucide="shopping-cart"></i></span>
+        <span class="sc-nav-label">Ventas</span>
+      </a>
+
+      <a class="sc-nav-item {% if 'conjunto' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'lista_conjuntos' %}">
+        <span class="sc-nav-icon"><i data-lucide="layers"></i></span>
+        <span class="sc-nav-label">Conjuntos</span>
+      </a>
+
+      <!-- Inventario -->
+      <div class="sc-section-label">Inventario</div>
+
+      <a class="sc-nav-item {% if 'prenda' in request.resolver_match.url_name and request.resolver_match.url_name != 'items_proximos_baja' %}active{% endif %}" href="{% url 'lista_prendas' %}">
+        <span class="sc-nav-icon"><i data-lucide="shopping-bag"></i></span>
+        <span class="sc-nav-label">Prendas</span>
+      </a>
+      <a class="sc-nav-item {% if request.resolver_match.url_name == 'items_proximos_baja' %}active{% endif %}" href="{% url 'items_proximos_baja' %}">
+        <span class="sc-nav-icon"><i class="bi bi-exclamation-triangle"></i></span>
+        <span class="sc-nav-label">Prendas próx. baja</span>
+      </a>
+      <a class="sc-nav-item {% if 'insumo' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'lista_insumos' %}">
+        <span class="sc-nav-icon"><i data-lucide="package"></i></span>
+        <span class="sc-nav-label">Insumos</span>
+      </a>
+
+      <!-- Gestión -->
+      <div class="sc-section-label">Gestión</div>
+
+      <a class="sc-nav-item {% if 'empleado' in request.resolver_match.url_name or 'permiso' in request.resolver_match.url_name or 'falta' in request.resolver_match.url_name or request.resolver_match.url_name == 'reporte_dias_trabajados' %}active{% endif %}" href="{% url 'lista_empleados' %}">
+        <span class="sc-nav-icon"><i data-lucide="id-card"></i></span>
+        <span class="sc-nav-label">Empleados</span>
+      </a>
+      <a class="sc-nav-item {% if 'orden' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'lista_ordenes' %}">
+        <span class="sc-nav-icon"><i data-lucide="settings"></i></span>
+        <span class="sc-nav-label">Producción</span>
+      </a>
+      <!-- Caja -->
+      <div class="sc-section-label">Caja</div>
+
+      <a class="sc-nav-item {% if request.resolver_match.url_name == 'resumen_caja' %}active{% endif %}" href="{% url 'resumen_caja' %}">
+        <span class="sc-nav-icon"><i data-lucide="chart-bar"></i></span>
+        <span class="sc-nav-label">Reportes</span>
+      </a>
+      <a class="sc-nav-item {% if 'sesion' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'lista_sesiones_caja' %}">
+        <span class="sc-nav-icon"><i data-lucide="calendar-check"></i></span>
+        <span class="sc-nav-label">Sesiones</span>
+      </a>
+      <a class="sc-nav-item {% if 'tipo_gasto' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'lista_tipo_gasto' %}">
+        <span class="sc-nav-icon"><i data-lucide="tags"></i></span>
+        <span class="sc-nav-label">Conceptos de Gasto</span>
+      </a>
+
+      <!-- Reportes -->
+      <div class="sc-section-label">Reportes</div>
+
+      <button class="sc-nav-item sc-nav-group-trigger {% if 'reporte' in request.resolver_match.url_name and request.resolver_match.url_name != 'reporte_dias_trabajados' %}active{% endif %}"
+              data-bs-toggle="collapse" data-bs-target="#reportes-menu"
+              aria-expanded="{% if 'reporte' in request.resolver_match.url_name and request.resolver_match.url_name != 'reporte_dias_trabajados' %}true{% else %}false{% endif %}">
+        <span class="sc-nav-icon"><i data-lucide="bar-chart-2"></i></span>
+        <span class="sc-nav-label">Reportes</span>
+        <span class="sc-nav-chevron"><i data-lucide="chevron-right"></i></span>
+      </button>
+      <div class="collapse sc-nav-sub {% if 'reporte' in request.resolver_match.url_name and request.resolver_match.url_name != 'reporte_dias_trabajados' %}show{% endif %}" id="reportes-menu">
+        <a class="sc-nav-item sc-nav-sub-item {% if request.resolver_match.url_name == 'reporte_empleados' %}active{% endif %}" href="{% url 'reporte_empleados' %}">Empleados</a>
+        <a class="sc-nav-item sc-nav-sub-item {% if request.resolver_match.url_name == 'reporte_clientes' %}active{% endif %}" href="{% url 'reporte_clientes' %}">Clientes</a>
+        <a class="sc-nav-item sc-nav-sub-item {% if request.resolver_match.url_name == 'reporte_reparaciones' %}active{% endif %}" href="{% url 'reporte_reparaciones' %}">Reparaciones</a>
+        <a class="sc-nav-item sc-nav-sub-item {% if request.resolver_match.url_name == 'reporte_confecciones' %}active{% endif %}" href="{% url 'reporte_confecciones' %}">Confecciones</a>
+        <a class="sc-nav-item sc-nav-sub-item {% if request.resolver_match.url_name == 'reporte_alquileres' %}active{% endif %}" href="{% url 'reporte_alquileres' %}">Alquileres</a>
+        <a class="sc-nav-item sc-nav-sub-item {% if request.resolver_match.url_name == 'reporte_ventas' %}active{% endif %}" href="{% url 'reporte_ventas' %}">Ventas</a>
+        <a class="sc-nav-item sc-nav-sub-item {% if request.resolver_match.url_name == 'reporte_transacciones' %}active{% endif %}" href="{% url 'reporte_transacciones' %}">Transacciones</a>
+        <a class="sc-nav-item sc-nav-sub-item {% if request.resolver_match.url_name == 'reporte_inventario' %}active{% endif %}" href="{% url 'reporte_inventario' %}">Inventario</a>
+        <a class="sc-nav-item sc-nav-sub-item {% if request.resolver_match.url_name == 'reporte_articulos' %}active{% endif %}" href="{% url 'reporte_articulos' %}">Artículos</a>
+        <a class="sc-nav-item sc-nav-sub-item {% if request.resolver_match.url_name == 'reporte_stock' %}active{% endif %}" href="{% url 'reporte_stock' %}">Stock</a>
+        <a class="sc-nav-item sc-nav-sub-item {% if request.resolver_match.url_name == 'kardex_financiero' %}active{% endif %}" href="{% url 'kardex_financiero' %}">Ingresos</a>
+      </div>
+
+      <!-- Estadísticas -->
+      <div class="sc-section-label">Estadísticas</div>
+
+      <button class="sc-nav-item sc-nav-group-trigger {% if 'analitica' in request.resolver_match.url_name %}active{% endif %}"
+              data-bs-toggle="collapse" data-bs-target="#analitica-menu"
+              aria-expanded="{% if 'analitica' in request.resolver_match.url_name %}true{% else %}false{% endif %}">
+        <span class="sc-nav-icon"><i data-lucide="trending-up"></i></span>
+        <span class="sc-nav-label">Estadísticas</span>
+        <span class="sc-nav-chevron"><i data-lucide="chevron-right"></i></span>
+      </button>
+      <div class="collapse sc-nav-sub {% if 'analitica' in request.resolver_match.url_name %}show{% endif %}" id="analitica-menu">
+        <a class="sc-nav-item sc-nav-sub-item {% if request.resolver_match.url_name == 'analitica_items' %}active{% endif %}" href="{% url 'analitica_items' %}">Prendas más vendidas</a>
+        <a class="sc-nav-item sc-nav-sub-item {% if request.resolver_match.url_name == 'analitica_empleados' %}active{% endif %}" href="{% url 'analitica_empleados' %}">Trabajo por empleado</a>
+        <a class="sc-nav-item sc-nav-sub-item {% if request.resolver_match.url_name == 'analitica_clientes_ltv' %}active{% endif %}" href="{% url 'analitica_clientes_ltv' %}">Total por cliente</a>
+        <a class="sc-nav-item sc-nav-sub-item {% if request.resolver_match.url_name == 'analitica_operativas' %}active{% endif %}" href="{% url 'analitica_operativas' %}">Tiempos de servicio</a>
+        <a class="sc-nav-item sc-nav-sub-item {% if request.resolver_match.url_name == 'analitica_comparativas' %}active{% endif %}" href="{% url 'analitica_comparativas' %}">Este año vs. el anterior</a>
+        <a class="sc-nav-item sc-nav-sub-item {% if request.resolver_match.url_name == 'analitica_estacionalidad' %}active{% endif %}" href="{% url 'analitica_estacionalidad' %}">Meses más activos</a>
+        <a class="sc-nav-item sc-nav-sub-item {% if request.resolver_match.url_name == 'analitica_prendas_temporada' %}active{% endif %}" href="{% url 'analitica_prendas_temporada' %}">Prendas por temporada</a>
+      </div>
+
+    </nav>
+  </div>
+
+</div>

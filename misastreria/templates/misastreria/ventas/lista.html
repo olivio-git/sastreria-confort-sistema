@@ -1,96 +1,141 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}Ventas{% endblock %}
-{% block contenido %}
-<div class="page-header">
-  <h1 class="page-title"><i class="bi bi-cart me-2"></i>Ventas</h1>
-  <a href="{% url 'crear_venta' %}" class="btn btn-success btn-sm">
-    <i class="bi bi-plus-lg me-1"></i>Nueva Venta
-  </a>
-</div>
 
-<form method="get" class="filter-bar" id="filterForm">
-  <div class="filter-group" style="flex:1;min-width:180px">
-    <label>Buscar</label>
-    <input type="text" name="q" class="form-control" placeholder="Código, cliente, prenda…"
-           value="{{ q }}" data-debounce="400">
-  </div>
-  <div class="filter-group">
-    <label>Desde</label>
-    <input type="date" name="desde" class="form-control" value="{{ desde }}">
-  </div>
-  <div class="filter-group">
-    <label>Hasta</label>
-    <input type="date" name="hasta" class="form-control" value="{{ hasta }}">
-  </div>
-  <div class="filter-group justify-content-end">
-    <label class="invisible">.</label>
-    <div class="d-flex gap-2 flex-wrap">
-      <div class="date-shortcuts">
-        <a href="?periodo=semana" class="btn btn-outline-secondary {% if periodo == 'semana' %}active{% endif %}">Semana</a>
-        <a href="?periodo=mes" class="btn btn-outline-secondary {% if periodo == 'mes' %}active{% endif %}">Mes</a>
-        <a href="?periodo=3meses" class="btn btn-outline-secondary {% if periodo == '3meses' or not periodo %}active{% endif %}">3 meses</a>
-      </div>
-      <a href="{% url 'lista_ventas' %}" class="btn btn-outline-secondary">Limpiar</a>
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="shopping-cart" class="me-2 text-muted"></i>Ventas
+      </h2>
+    </div>
+    <div class="col-auto ms-auto d-flex gap-2">
+      <a href="{% url 'crear_venta' %}" class="btn btn-success">
+        <i data-lucide="plus"></i>Nueva Venta
+      </a>
     </div>
   </div>
-</form>
+</div>
+{% endblock %}
 
-<div class="table-wrapper">
-  <table class="table table-hover" id="tablaVentas">
-    <thead>
-      <tr>
-        <th>Código</th>
-        <th>Cliente</th>
-        <th>Empleado</th>
-        <th>Prendas</th>
-        <th class="text-end">Total</th>
-        <th>Fecha</th>
-        <th data-no-toggle>Acciones</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for v in page_obj %}
-      <tr>
-        <td class="fw-semibold">{{ v.codigo }}</td>
-        <td>
-          {% if v.cliente %}
-            <a href="{% url 'historial_cliente' v.cliente.id %}" class="text-decoration-none">{{ v.cliente }}</a>
-          {% else %}—{% endif %}
-        </td>
-        <td>{{ v.empleado|default:"—" }}</td>
-        <td>
-          {% for item in v.items.all %}
-            <span class="badge bg-light text-dark border me-1">{{ item.articulo.nombre }} ×{{ item.cantidad }}</span>
-          {% empty %}
-            <span class="text-muted">—</span>
-          {% endfor %}
-        </td>
-        <td class="text-end fw-semibold">{{ v.total|floatformat:2 }}</td>
-        <td>{{ v.fecha_venta|date:"d/m/Y" }}</td>
-        <td>
-          <div class="btn-actions">
-            <a href="{% url 'editar_venta' v.id %}" class="btn btn-sm btn-outline-primary" title="Editar"><i class="bi bi-pencil"></i></a>
-            <a href="{% url 'exportar_recibo_pdf' v.id %}" class="btn btn-sm btn-outline-secondary" title="PDF"><i class="bi bi-file-pdf"></i></a>
-            <a href="{% url 'eliminar_venta' v.id %}" class="btn btn-sm btn-outline-danger" title="Eliminar"><i class="bi bi-trash"></i></a>
-          </div>
-        </td>
-      </tr>
-      {% empty %}
-      <tr>
-        <td colspan="7">
-          <div class="empty-state">
-            <i class="bi bi-cart-x d-block"></i>
-            No hay ventas en el período seleccionado.
-          </div>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  <div class="pagination-bar">
-    <span>{{ total }} venta{{ total|pluralize }}</span>
-    <nav>
-      <ul class="pagination pagination-sm mb-0">
+{% block contenido %}
+<!-- Filtros -->
+<div class="card mb-3">
+  <div class="card-body">
+    <form method="get" class="row g-2 align-items-end" id="filterForm">
+      <div class="col-12 col-md-2">
+        <label class="form-label small mb-1 fw-semibold text-muted">Buscar</label>
+        <input type="text" name="q" class="form-control" placeholder="Código, prenda…"
+               value="{{ q }}" data-debounce="400">
+      </div>
+      <div class="col-12 col-md-3">
+        <label class="form-label small mb-1 fw-semibold text-muted">Cliente</label>
+        <div style="position:relative">
+          <input type="text" data-cliente-search="filter_cliente_id"
+                 data-endpoint="{% url 'buscar_clientes' %}"
+                 data-autosubmit="1"
+                 class="form-control" placeholder="Todos los clientes" autocomplete="off">
+          <input type="hidden" name="cliente_id" id="filter_cliente_id" value="{{ cliente_id }}">
+        </div>
+      </div>
+      <div class="col-12 col-md-3">
+        <label class="form-label small mb-1 fw-semibold text-muted">Empleado</label>
+        <div style="position:relative">
+          <input type="text" data-empleado-search="filter_empleado_id"
+                 data-endpoint="{% url 'buscar_empleados' %}"
+                 data-autosubmit="1"
+                 class="form-control" placeholder="Todos" autocomplete="off">
+          <input type="hidden" name="empleado_id" id="filter_empleado_id" value="{{ empleado_id }}">
+        </div>
+      </div>
+      <div class="col-6 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Desde</label>
+        <input type="date" name="desde" class="form-control" value="{{ desde }}">
+      </div>
+      <div class="col-6 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Hasta</label>
+        <input type="date" name="hasta" class="form-control" value="{{ hasta }}">
+      </div>
+      <div class="col-auto ms-auto d-flex gap-2 align-items-end flex-wrap">
+        <div class="date-shortcuts">
+          <a href="?periodo=semana" class="btn btn-outline-secondary {% if periodo == 'semana' %}active{% endif %}">Semana</a>
+          <a href="?periodo=mes" class="btn btn-outline-secondary {% if periodo == 'mes' %}active{% endif %}">Mes</a>
+          <a href="?periodo=3meses" class="btn btn-outline-secondary {% if periodo == '3meses' or not periodo %}active{% endif %}">3 meses</a>
+        </div>
+        <a href="{% url 'lista_ventas' %}" class="btn btn-outline-secondary">Limpiar</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Tabla -->
+<div class="card">
+  <div class="card-header d-flex align-items-center">
+    <span class="text-muted small">{{ total }} venta{{ total|pluralize }}</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table" id="tablaVentas">
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Cliente</th>
+          <th>Empleado</th>
+          <th>Prendas</th>
+          <th class="text-end">Total</th>
+          <th>Fecha</th>
+          <th data-no-toggle style="white-space:nowrap">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for v in page_obj %}
+        <tr>
+          <td class="fw-semibold">{{ v.codigo }}</td>
+          <td>
+            {% if v.cliente %}
+              <a href="{% url 'historial_cliente' v.cliente.id %}" class="text-decoration-none">{{ v.cliente }}</a>
+            {% else %}—{% endif %}
+          </td>
+          <td>{{ v.empleado|default:"—" }}</td>
+          <td>
+            {% with items=v.items.all %}
+              {% if items %}
+                {% for item in items %}
+                  <div class="small"><code>{{ item.prenda_item.codigo_item }}</code> — {{ item.prenda_item.prenda.nombre }}{% if item.grupo_conjunto %}<span class="badge-conjunto" title="Conjunto {{ item.grupo_conjunto }}"><i class="bi bi-layers"></i>{{ item.grupo_conjunto }}</span>{% endif %}</div>
+                {% endfor %}
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            {% endwith %}
+          </td>
+          <td class="text-end fw-semibold">{{ v.total|floatformat:2 }}</td>
+          <td>{{ v.fecha_venta|date:"d/m/Y" }}</td>
+          <td style="white-space:nowrap">
+            <div class="btn-actions">
+              <a href="{% url 'editar_venta' v.id %}" class="btn btn-sm btn-icon btn-ghost-primary" title="Editar"><i data-lucide="pencil"></i></a>
+              <a href="{% url 'exportar_recibo_pdf' v.id %}" class="btn btn-sm btn-icon btn-ghost-secondary" title="PDF"><i data-lucide="file-text"></i></a>
+              <button type="button" class="btn btn-sm btn-icon btn-ghost-danger" title="Eliminar"
+                data-delete-url="{% url 'eliminar_venta' v.id %}"
+                data-delete-name="{{ v }}"><i data-lucide="trash-2"></i></button>
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="7">
+            <div class="empty-state">
+              <i data-lucide="shopping-cart" style="width:2.5rem;height:2.5rem;opacity:.3;display:block;margin:0 auto .75rem"></i>
+              No hay ventas en el período seleccionado.
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer d-flex align-items-center">
+    <p class="m-0 text-muted small">Mostrando <strong>{{ page_obj.start_index }}–{{ page_obj.end_index }}</strong> de <strong>{{ total }}</strong></p>
+    <nav class="ms-auto">
+      <ul class="pagination pagination-sm m-0">
         {% if page_obj.has_previous %}
           <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}">«</a></li>
           <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}">‹</a></li>

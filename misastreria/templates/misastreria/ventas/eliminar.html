@@ -1,31 +1,41 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}Eliminar Venta{% endblock %}
 {% block contenido %}
-<div class="page-header">
-  <h1 class="page-title"><i class="bi bi-trash me-2"></i>Eliminar Venta</h1>
-</div>
-
-<div class="form-card" style="max-width:560px">
-  <p class="mb-3">¿Eliminar la venta <strong>{{ venta.codigo }}</strong>
-    {% if venta.cliente %}del cliente <strong>{{ venta.cliente }}</strong>{% endif %}
-    del <strong>{{ venta.fecha_venta|date:"d/m/Y" }}</strong>?
-  </p>
-
-  {% if venta.items.all %}
-  <p class="text-muted mb-1">Se restaurará el stock de las siguientes prendas:</p>
-  <ul class="mb-3">
-    {% for item in venta.items.all %}
-    <li>{{ item.articulo }} × {{ item.cantidad }}</li>
-    {% endfor %}
-  </ul>
-  {% endif %}
-
-  <form method="post">
-    {% csrf_token %}
-    <div class="d-flex gap-2">
-      <button type="submit" class="btn btn-danger"><i class="bi bi-trash me-1"></i>Eliminar</button>
-      <a href="{% url 'lista_ventas' %}" class="btn btn-outline-secondary">Cancelar</a>
+<div class="row justify-content-center">
+  <div class="col-12 col-sm-8 col-md-5 col-lg-4">
+    <div class="card card-md">
+      <div class="card-status-top bg-danger"></div>
+      <div class="card-body text-center py-4">
+        <div class="mb-3 text-danger">
+          <i data-lucide="shopping-cart" style="width:3rem;height:3rem;opacity:.7"></i>
+        </div>
+        <h3 class="card-title mb-1">¿Eliminar Venta?</h3>
+        <p class="text-muted mb-0">
+          <strong>{{ venta.codigo }}</strong>{% if venta.cliente %} — {{ venta.cliente }}{% endif %}
+          del <strong>{{ venta.fecha_venta|date:"d/m/Y" }}</strong><br>
+          <small>Esta acción no se puede deshacer.</small>
+        </p>
+        {% if venta.items.all %}
+        <p class="text-muted mt-2 mb-0 small">Se restaurará el stock de las siguientes prendas:</p>
+        <ul class="list-unstyled mt-1 mb-0 small text-muted">
+          {% for item in venta.items.all %}
+          <li><code>{{ item.prenda_item.codigo_item }}</code> — {{ item.prenda_item.prenda.nombre }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      <div class="card-footer d-flex justify-content-center gap-3">
+        <a href="{% url 'lista_ventas' %}" class="btn btn-outline-secondary">
+          <i data-lucide="x"></i>Cancelar
+        </a>
+        <form method="post" class="d-inline">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-danger">
+            <i data-lucide="trash-2"></i>Eliminar
+          </button>
+        </form>
+      </div>
     </div>
-  </form>
+  </div>
 </div>
 {% endblock %}

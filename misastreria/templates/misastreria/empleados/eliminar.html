@@ -1,13 +1,43 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}Eliminar Empleado{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'lista_empleados' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left"></i>Volver
+      </a>
+    </div>
+    <div class="col">
+      <h2 class="page-title text-danger"><i data-lucide="user-x" class="me-2"></i>Eliminar Empleado</h2>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
 {% block contenido %}
-<div class="container py-4" style="background-color: #f1f5f9;">
-    <h2 class="mb-4">Eliminar Empleado: {{ empleado }}</h2>
-    <p>¿Estás seguro de que deseas eliminar a {{ empleado }}?</p>
-    <form method="post">
-        {% csrf_token %}
-        <button type="submit" class="btn btn-danger">Eliminar</button>
-        <a href="{% url 'lista_empleados' %}" class="btn btn-secondary">Cancelar</a>
-    </form>
+<div class="row justify-content-center">
+  <div class="col-12 col-sm-8 col-md-5 col-lg-4">
+    <div class="card card-md">
+      <div class="card-status-top bg-danger"></div>
+      <div class="card-body text-center py-4">
+        <div class="mb-3 text-danger"><i data-lucide="user-x" style="width:3rem;height:3rem;opacity:.7"></i></div>
+        <h3 class="card-title mb-1">¿Eliminar empleado?</h3>
+        <p class="text-muted mb-0"><strong>{{ empleado }}</strong><br><small>Esta acción no se puede deshacer.</small></p>
+      </div>
+      <div class="card-footer d-flex justify-content-center gap-3">
+        <a href="{% url 'lista_empleados' %}" class="btn btn-outline-secondary">
+          <i data-lucide="x"></i>Cancelar
+        </a>
+        <form method="post" class="d-inline">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-danger">
+            <i data-lucide="trash-2"></i>Eliminar
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
 </div>
 {% endblock %}

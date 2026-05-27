@@ -4,11 +4,12 @@ from decimal import Decimal
 
 from django.core.management.base import BaseCommand
 
+from misastreria import kardex_events
 from misastreria.models import (
-    Empleado, Permiso, Falta,
+    TipoContrato, Empleado, Permiso, Falta,
     Cliente,
-    PrendaInventario, Insumo,
-    Reparacion,
+    PrendaInventario, PrendaItem, Insumo, TipoMaterial, UnidadMedida,
+    TipoPrenda, TipoReparacion, Reparacion,
     Confeccion, ConfeccionItem,
     Alquiler, AlquilerItem,
     Venta, VentaItem,
@@ -33,7 +34,7 @@ APELLIDOS = ['Mamani', 'Quispe', 'Choque', 'Lima', 'Flores', 'García', 'Condori
 
 
 class Command(BaseCommand):
-    help = 'Inserta datos de prueba masivos para Sastrería Confort'
+    help = 'Inserta datos de prueba masivos para Fortium Tailor'
 
     def handle(self, *args, **kwargs):
         self.stdout.write('Limpiando datos previos...')
@@ -69,6 +70,13 @@ class Command(BaseCommand):
         self.stdout.write('Creando transacciones...')
         self._crear_transacciones()
 
+        # Backfill kardex eventos para todos los items creados
+        self.stdout.write('Generando kardex eventos...')
+        total_kardex = 0
+        for item in PrendaItem.objects.prefetch_related('alquiler_items__alquiler__cliente', 'venta_items__venta__cliente').all():
+            total_kardex += kardex_events.backfill_item(item)
+        self.stdout.write(f'  {total_kardex} kardex evento(s) generado(s).')
+
         self.stdout.write(self.style.SUCCESS('✓ Datos de prueba creados exitosamente.'))
 
     # ------------------------------------------------------------------ #
@@ -88,13 +96,19 @@ class Command(BaseCommand):
         Permiso.objects.all().delete()
         Empleado.objects.all().delete()
         Cliente.objects.all().delete()
+        PrendaItem.objects.all().delete()  # Debe ir antes de PrendaInventario (CASCADE lo cubre, pero explícito para debug)
         PrendaInventario.objects.all().delete()
         Insumo.objects.all().delete()
 
     # ------------------------------------------------------------------ #
 
     def _crear_empleados(self):
-        # (nombres, ap, am, ci, tipo_contrato, fecha_baja)
+        # Obtener o crear TipoContrato por nombre
+        tc_cache = {}
+        for nombre_tc in ['Fijo', 'Contrato', 'Porcentaje']:
+            tc_cache[nombre_tc.lower()], _ = TipoContrato.objects.get_or_create(nombre=nombre_tc)
+
+        # (nombres, ap, am, ci, tipo_contrato_key, fecha_baja)
         datos = [
             ('Carlos',   'Mamani',  'Quispe',  '7123456', 'fijo',       None),
             ('Juan',     'Condori', 'Lima',     '7234567', 'fijo',       None),
@@ -108,10 +122,10 @@ class Command(BaseCommand):
             ('Marco',    'Huanca',  'Villca',   '8012345', 'contrato',   None),
         ]
         empleados = []
-        for nombres, ap, am, ci, contrato, fecha_baja in datos:
+        for nombres, ap, am, ci, contrato_key, fecha_baja in datos:
             e = Empleado(
                 nombres=nombres, apellido_paterno=ap, apellido_materno=am,
-                ci=ci, tipo_contrato=contrato,
+                ci=ci, tipo_contrato=tc_cache[contrato_key],
                 fecha_ingreso=rand_fecha(900, 180),
                 fecha_baja=fecha_baja,
                 celular=f'7{random.randint(1000000, 9999999)}',
@@ -177,39 +191,51 @@ class Command(BaseCommand):
     # ------------------------------------------------------------------ #
 
     def _crear_prendas(self):
-        # (nombre, modelo, talla, color, condicion, cantidad, stock_min, precio)
+        # (nombre, modelo, talla, color, cantidad, stock_min, precio)
+        # condicion ya no existe en PrendaInventario — vive en PrendaItem
         alquiler_data = [
-            ('Terno Clásico',         'Clásico',   'M',  'Negro',  'nueva', 8,  2, 120),
-            ('Terno Clásico',         'Clásico',   'L',  'Negro',  'nueva', 6,  2, 120),
-            ('Terno Moderno',         'Slim Fit',  'M',  'Azul',   'nueva', 5,  2, 130),
-            ('Terno Moderno',         'Slim Fit',  'XL', 'Azul',   'nueva', 4,  1, 130),
-            ('Frac',                  'Formal',    'M',  'Negro',  'nueva', 3,  1, 180),
-            ('Frac',                  'Formal',    'L',  'Negro',  'nueva', 2,  1, 180),
-            ('Smoking',               'Elegante',  'M',  'Negro',  'usada', 4,  1, 160),
-            ('Levita',                'Vintage',   'M',  'Gris',   'usada', 2,  1, 150),
-            ('Camisa Formal',         'Clásica',   'M',  'Blanco', 'nueva', 12, 3, 40),
-            ('Camisa Formal',         'Clásica',   'L',  'Blanco', 'nueva', 10, 3, 40),
-            ('Camisa Formal',         'Clásica',   'S',  'Blanco', 'nueva', 8,  2, 40),
-            ('Corbata',               'Clásica',   'U',  'Negro',  'nueva', 20, 5, 20),
-            ('Corbata',               'Elegante',  'U',  'Rojo',   'nueva', 15, 5, 20),
-            ('Corbata',               'Moderna',   'U',  'Azul',   'nueva', 15, 5, 20),
-            ('Chaleco',               'Formal',    'M',  'Negro',  'nueva', 8,  2, 50),
-            ('Chaleco',               'Formal',    'L',  'Negro',  'nueva', 6,  2, 50),
-            ('Chaleco',               'Moderno',   'M',  'Gris',   'nueva', 5,  2, 55),
-            ('Moño',                  'Clásico',   'U',  'Negro',  'nueva', 25, 5, 15),
-            ('Faja',                  'Formal',    'U',  'Negro',  'nueva', 18, 4, 25),
-            ('Pantalón Formal',       'Classic',   'M',  'Negro',  'usada', 10, 3, 45),
+            ('Terno Clásico',         'Clásico',   'M',  'Negro',  8,  2, 120),
+            ('Terno Clásico',         'Clásico',   'L',  'Negro',  6,  2, 120),
+            ('Terno Moderno',         'Slim Fit',  'M',  'Azul',   5,  2, 130),
+            ('Terno Moderno',         'Slim Fit',  'XL', 'Azul',   4,  1, 130),
+            ('Frac',                  'Formal',    'M',  'Negro',  3,  1, 180),
+            ('Frac',                  'Formal',    'L',  'Negro',  2,  1, 180),
+            ('Smoking',               'Elegante',  'M',  'Negro',  4,  1, 160),
+            ('Levita',                'Vintage',   'M',  'Gris',   2,  1, 150),
+            ('Camisa Formal',         'Clásica',   'M',  'Blanco', 12, 3, 40),
+            ('Camisa Formal',         'Clásica',   'L',  'Blanco', 10, 3, 40),
+            ('Camisa Formal',         'Clásica',   'S',  'Blanco', 8,  2, 40),
+            ('Corbata',               'Clásica',   'U',  'Negro',  20, 5, 20),
+            ('Corbata',               'Elegante',  'U',  'Rojo',   15, 5, 20),
+            ('Corbata',               'Moderna',   'U',  'Azul',   15, 5, 20),
+            ('Chaleco',               'Formal',    'M',  'Negro',  8,  2, 50),
+            ('Chaleco',               'Formal',    'L',  'Negro',  6,  2, 50),
+            ('Chaleco',               'Moderno',   'M',  'Gris',   5,  2, 55),
+            ('Moño',                  'Clásico',   'U',  'Negro',  25, 5, 15),
+            ('Faja',                  'Formal',    'U',  'Negro',  18, 4, 25),
+            ('Pantalón Formal',       'Classic',   'M',  'Negro',  10, 3, 45),
             # Stock bajo para ver alerta en dashboard
-            ('Smoking Blanco',        'Premium',   'M',  'Blanco', 'nueva', 1,  3, 200),
+            ('Smoking Blanco',        'Premium',   'M',  'Blanco', 1,  3, 200),
         ]
         prendas_alq = []
-        for nombre, modelo, talla, color, cond, cant, stock_min, precio in alquiler_data:
+        for nombre, modelo, talla, color, cant, stock_min, precio in alquiler_data:
             p = PrendaInventario(
-                tipo='alquiler', nombre=nombre, modelo=modelo, talla=talla,
-                color=color, condicion=cond, cantidad=cant,
-                stock_minimo=stock_min, precio=Decimal(str(precio)), estado='ACT',
+                nombre=nombre, modelo=modelo, talla=talla,
+                color=color, stock_minimo=stock_min,
+                precio=Decimal(str(precio)), estado='ACT',
             )
             p.save()
+            # Crear PrendaItems: 30% nueva (mín 1), 70% usada
+            n_nuevos = max(1, int(round(cant * 0.3)))
+            for i in range(1, cant + 1):
+                condicion_item = 'nueva' if i <= n_nuevos else 'usada'
+                PrendaItem.objects.create(
+                    prenda=p,
+                    tipo='alquiler',
+                    condicion=condicion_item,
+                    estado='disponible',
+                    veces_alquilado=0,
+                )
             prendas_alq.append(p)
 
         venta_data = [
@@ -231,11 +257,20 @@ class Command(BaseCommand):
         prendas_vta = []
         for nombre, modelo, talla, color, cant, stock_min, precio in venta_data:
             p = PrendaInventario(
-                tipo='venta', nombre=nombre, modelo=modelo, talla=talla,
-                color=color, cantidad=cant, stock_minimo=stock_min,
+                nombre=nombre, modelo=modelo, talla=talla,
+                color=color, stock_minimo=stock_min,
                 precio=Decimal(str(precio)), estado='ACT',
             )
             p.save()
+            # Crear PrendaItems: prendas de venta son siempre nuevas
+            for _ in range(cant):
+                PrendaItem.objects.create(
+                    prenda=p,
+                    tipo='venta',
+                    condicion='nueva',
+                    estado='disponible',
+                    veces_alquilado=0,
+                )
             prendas_vta.append(p)
 
         return prendas_alq, prendas_vta
@@ -264,13 +299,23 @@ class Command(BaseCommand):
             # Stock bajo para ver alerta
             ('Tela Seda Blanca',   'tela',      'metro',  2,   10, Decimal('120')),
         ]
+        # Crear/obtener TipoMaterial y UnidadMedida por nombre
+        tm_cache = {}
+        um_cache = {}
+
         insumos = []
         colores = ['Negro', 'Azul marino', 'Gris', 'Blanco', 'Celeste', '']
-        for i, (articulo, tipo, unidad, cant, stock_min, precio) in enumerate(datos):
+        for i, (articulo, tipo_nombre, unidad_nombre, cant, stock_min, precio) in enumerate(datos):
+            if tipo_nombre not in tm_cache:
+                nombre_display = tipo_nombre.capitalize()
+                tm_cache[tipo_nombre], _ = TipoMaterial.objects.get_or_create(nombre=nombre_display)
+            if unidad_nombre not in um_cache:
+                nombre_display = unidad_nombre.capitalize()
+                um_cache[unidad_nombre], _ = UnidadMedida.objects.get_or_create(nombre=nombre_display)
             ins = Insumo(
                 articulo=articulo,
-                tipo_material=tipo,
-                unidad_medida=unidad,
+                tipo_material=tm_cache[tipo_nombre],
+                unidad_medida=um_cache[unidad_nombre],
                 cantidad=Decimal(str(cant)),
                 stock_minimo=Decimal(str(stock_min)),
                 precio_costo=precio,
@@ -284,8 +329,12 @@ class Command(BaseCommand):
     # ------------------------------------------------------------------ #
 
     def _crear_reparaciones(self, clientes, empleados):
-        tipos_prenda = ['camisa', 'pantalon', 'chaqueta', 'vestido', 'falda', 'otro']
-        tipos_rep    = ['costura', 'parche', 'cambio_cremallera', 'ajuste', 'otro']
+        # TipoPrenda y TipoReparacion son FKs — obtener/crear instancias
+        nombres_tipo_prenda = ['Camisa', 'Pantalón', 'Chaqueta', 'Vestido', 'Falda', 'Otro']
+        nombres_tipo_rep    = ['Costura', 'Parche', 'Cambio de Cremallera', 'Ajuste', 'Otro']
+        tipos_prenda_objs = [TipoPrenda.objects.get_or_create(nombre=n)[0] for n in nombres_tipo_prenda]
+        tipos_rep_objs    = [TipoReparacion.objects.get_or_create(nombre=n)[0] for n in nombres_tipo_rep]
+
         estados      = ['pendiente', 'en_proceso', 'entregado']
         pesos        = [0.25, 0.25, 0.50]
         detalles_ops = [
@@ -300,8 +349,8 @@ class Command(BaseCommand):
             estado = random.choices(estados, pesos)[0]
             creado = rand_fecha(300, 0)
             r = Reparacion(
-                tipo_prenda=random.choice(tipos_prenda),
-                tipo_reparacion=random.choice(tipos_rep),
+                tipo_prenda=random.choice(tipos_prenda_objs),
+                tipo_reparacion=random.choice(tipos_rep_objs),
                 costo=Decimal(str(random.choice([30, 40, 50, 60, 80, 100, 120, 150, 180, 200]))),
                 fecha_entrega=creado + timedelta(days=random.randint(2, 10)),
                 empleado=random.choice(empleados),
@@ -314,7 +363,15 @@ class Command(BaseCommand):
     # ------------------------------------------------------------------ #
 
     def _crear_confecciones(self, clientes, empleados):
-        tipos_item = ['pantalon', 'chaleco', 'saco', 'saco_mujer', 'chaleco_mujer']
+        # TipoPrenda es FK — mapear clave interna → nombre en BD
+        tp_map = {
+            'pantalon':     TipoPrenda.objects.get_or_create(nombre='Pantalón')[0],
+            'chaleco':      TipoPrenda.objects.get_or_create(nombre='Chaleco')[0],
+            'saco':         TipoPrenda.objects.get_or_create(nombre='Saco')[0],
+            'saco_mujer':   TipoPrenda.objects.get_or_create(nombre='Saco – Mujer')[0],
+            'chaleco_mujer':TipoPrenda.objects.get_or_create(nombre='Chaleco – Mujer')[0],
+        }
+        tipos_item = list(tp_map.keys())
         colores    = ['Negro', 'Azul marino', 'Gris oxford', 'Marrón', 'Blanco roto']
         modelos    = ['Slim Fit', 'Classic', 'Regular', 'Modern', 'Sport']
         estados    = ['pendiente', 'en_proceso', 'entregado']
@@ -345,36 +402,36 @@ class Command(BaseCommand):
 
             tipos_seleccionados = random.sample(tipos_item, random.randint(1, 3))
             for tipo in tipos_seleccionados:
-                item = ConfeccionItem(confeccion=con, tipo_prenda=tipo)
-                v = lambda: Decimal(str(round(random.uniform(70, 115), 1)))
+                item = ConfeccionItem(confeccion=con, tipo_prenda=tp_map[tipo])
+                v = lambda: str(round(random.uniform(70, 115), 1))
                 if tipo == 'pantalon':
-                    item.pantalon_largo_total = Decimal(str(random.randint(100, 112)))
+                    item.pantalon_largo_total = str(random.randint(100, 112))
                     item.pantalon_contorno_cintura = v()
                     item.pantalon_contorno_cadera = v()
-                    item.pantalon_largo_entrepierna = Decimal(str(random.randint(72, 82)))
+                    item.pantalon_largo_entrepierna = str(random.randint(72, 82))
                 elif tipo == 'saco':
                     item.saco_contorno_busto = v()
                     item.saco_contorno_cintura = v()
                     item.saco_contorno_cadera = v()
-                    item.saco_ancho_hombros = Decimal(str(round(random.uniform(42, 52), 1)))
-                    item.saco_largo_total = Decimal(str(random.randint(70, 80)))
-                    item.saco_largo_manga = Decimal(str(random.randint(60, 68)))
+                    item.saco_ancho_hombros = str(round(random.uniform(42, 52), 1))
+                    item.saco_largo_total = str(random.randint(70, 80))
+                    item.saco_largo_manga = str(random.randint(60, 68))
                 elif tipo == 'chaleco':
                     item.chaleco_contorno_busto = v()
                     item.chaleco_contorno_cintura = v()
                     item.chaleco_contorno_cadera = v()
-                    item.chaleco_largo_total = Decimal(str(random.randint(55, 65)))
+                    item.chaleco_largo_total = str(random.randint(55, 65))
                 elif tipo == 'saco_mujer':
                     item.saco_mujer_contorno_busto = v()
                     item.saco_mujer_contorno_cintura = v()
                     item.saco_mujer_contorno_cadera = v()
-                    item.saco_mujer_ancho_hombros = Decimal(str(round(random.uniform(36, 44), 1)))
-                    item.saco_mujer_largo_total = Decimal(str(random.randint(60, 72)))
+                    item.saco_mujer_ancho_hombros = str(round(random.uniform(36, 44), 1))
+                    item.saco_mujer_largo_total = str(random.randint(60, 72))
                 elif tipo == 'chaleco_mujer':
                     item.chaleco_mujer_contorno_busto = v()
                     item.chaleco_mujer_contorno_cintura = v()
                     item.chaleco_mujer_contorno_cadera = v()
-                    item.chaleco_mujer_largo_total = Decimal(str(random.randint(50, 60)))
+                    item.chaleco_mujer_largo_total = str(random.randint(50, 60))
                 item.save()
 
             confecciones.append(con)
@@ -383,12 +440,11 @@ class Command(BaseCommand):
     # ------------------------------------------------------------------ #
 
     def _crear_alquileres(self, clientes, empleados, prendas):
-        estados     = ['alquilado', 'devuelto']
-        pesos       = [0.30, 0.70]
-        disponibles = [p for p in prendas if p.cantidad > 0]
-        garantias   = ['', '', 'CI del cliente', 'Depósito Bs. 200', 'Tarjeta de identidad']
-        notas_ops   = ['', '', 'Para boda', 'Para grado', 'Para quinceañera',
-                       'Evento corporativo', 'Aniversario de empresa']
+        estados   = ['alquilado', 'devuelto']
+        pesos     = [0.30, 0.70]
+        garantias = ['', '', 'CI del cliente', 'Depósito Bs. 200', 'Tarjeta de identidad']
+        notas_ops = ['', '', 'Para boda', 'Para grado', 'Para quinceañera',
+                     'Evento corporativo', 'Aniversario de empresa']
 
         for _ in range(55):
             fecha_alq = rand_fecha(365, 1)
@@ -408,22 +464,25 @@ class Command(BaseCommand):
             alq.save()
 
             n = random.randint(1, 5)
-            seleccion = random.sample(disponibles, min(n, len(disponibles)))
+            seleccion = random.sample(prendas, min(n, len(prendas)))
             for prenda in seleccion:
-                AlquilerItem.objects.create(
-                    alquiler=alq,
-                    articulo=prenda,
-                    cantidad=random.randint(1, 2),
-                    precio_unitario=prenda.precio,
-                )
+                pi = PrendaItem.objects.filter(prenda=prenda, estado='disponible').first()
+                if pi:
+                    AlquilerItem.objects.create(
+                        alquiler=alq,
+                        prenda_item=pi,
+                        precio_unitario=pi.prenda.precio,
+                        subtotal=pi.prenda.precio,
+                    )
+                    pi.estado = 'alquilado'
+                    pi.save(update_fields=['estado'])
             alq.recalcular_totales()
 
     # ------------------------------------------------------------------ #
 
     def _crear_ventas(self, clientes, empleados, prendas):
-        disponibles = [p for p in prendas if p.cantidad > 0]
-        notas_ops   = ['', '', 'Pago en efectivo', 'Pago con QR',
-                       'Cliente frecuente', 'Referido por cliente anterior']
+        notas_ops = ['', '', 'Pago en efectivo', 'Pago con QR',
+                     'Cliente frecuente', 'Referido por cliente anterior']
 
         for _ in range(45):
             descuento = Decimal(str(random.choice([0, 0, 0, 5, 10])))
@@ -437,14 +496,18 @@ class Command(BaseCommand):
             v.save()
 
             n = random.randint(1, 3)
-            seleccion = random.sample(disponibles, min(n, len(disponibles)))
+            seleccion = random.sample(prendas, min(n, len(prendas)))
             for prenda in seleccion:
-                VentaItem.objects.create(
-                    venta=v,
-                    articulo=prenda,
-                    cantidad=random.randint(1, 2),
-                    precio_unitario=prenda.precio,
-                )
+                pi = PrendaItem.objects.filter(prenda=prenda, estado='disponible').first()
+                if pi:
+                    VentaItem.objects.create(
+                        venta=v,
+                        prenda_item=pi,
+                        precio_unitario=pi.prenda.precio,
+                        subtotal=pi.prenda.precio,
+                    )
+                    pi.estado = 'baja'
+                    pi.save(update_fields=['estado'])
             v.recalcular_totales()
 
     # ------------------------------------------------------------------ #

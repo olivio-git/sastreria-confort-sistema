@@ -1,17 +1,23 @@
 from decimal import Decimal
+from itertools import zip_longest
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
-from django.db.models import Sum, F, ExpressionWrapper, DecimalField
+from django.db.models import Sum, F, ExpressionWrapper, DecimalField, Count, Q, Avg, OuterRef, Subquery, Value, Exists
+from django.db.models.functions import Coalesce, Greatest
+from django.db import transaction, IntegrityError
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.auth.decorators import login_required
+from django.views.decorators.http import require_POST
+from django.utils import timezone as django_tz
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
-from .models import Empleado, Cliente, Reparacion, Venta, VentaItem, Confeccion, ConfeccionItem, Alquiler, AlquilerItem, Transaccion, PrendaInventario, Insumo, Permiso, Falta, OrdenProduccion, InsumoCortado
-from .forms import EmpleadoForm, ClienteForm, ReparacionForm, VentaForm, VentaItemForm, ConfeccionForm, ConfeccionItemFormSet, AlquilerForm, AlquilerItemForm, TransaccionForm, PrendaInventarioForm, InsumoForm, PermisoForm, FaltaForm, EmpleadoReporteForm, ClienteReporteForm, ReparacionReporteForm, OrdenProduccionForm, InsumoCortadoForm
+from .models import Empleado, TipoContrato, Cliente, Reparacion, ReparacionItem, TipoPrenda, TipoReparacion, Venta, VentaItem, Confeccion, ConfeccionItem, Alquiler, AlquilerItem, EstadoAlquiler, Transaccion, PrendaInventario, PrendaItem, UbicacionItem, Insumo, TipoMaterial, UnidadMedida, Permiso, Falta, OrdenProduccion, InsumoCortado, CajaSesion, CajaMovimiento, TipoGasto, Conjunto, ConjuntoSlot, PagoComisionEmpleado, ModeloConfeccion
+from .forms import EmpleadoForm, ClienteForm, ReparacionForm, ReparacionItemForm, VentaForm, VentaItemForm, ConfeccionForm, ConfeccionItemFormSet, AlquilerForm, AlquilerItemForm, TransaccionForm, PrendaInventarioForm, InsumoForm, PermisoForm, FaltaForm, EmpleadoReporteForm, ClienteReporteForm, ReparacionReporteForm, OrdenProduccionForm, InsumoCortadoForm, CajaSesionAperturaForm, CajaSesionCierreForm, CajaMovimientoManualForm, TipoGastoForm, ConjuntoForm, ConjuntoSlotFormSet, PagoComisionEmpleadoForm
 from django.core.paginator import Paginator
 from datetime import date, datetime, timedelta
 from dateutil import rrule
 from dateutil.rrule import WEEKLY, MO, TU, WE, TH, FR
 import calendar
+import json
 from django.http import HttpResponse, JsonResponse
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
@@ -34,18 +40,47 @@ import openpyxl
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.utils import get_column_letter
 from io import BytesIO # Para manejar el archivo en memoria
-from django.db.models import Count
+from . import kardex_events
 FONT_PATH = os.path.join(settings.BASE_DIR, 'misastreria', 'static', 'font', 'DejaVuSans.ttf')
 
 
 # Esta es la línea que está causando el error
 pdfmetrics.registerFont(TTFont('DejaVuSans', FONT_PATH))
 
+# ============================================================
+# Analytics — module-level constants
+# ============================================================
+
+# Built from CajaMovimiento.CONCEPTO_CHOICES — single source of truth.
+# Legacy keys (pre-refactor) added at the end to handle old data.
+def _build_concepto_labels():
+    from misastreria.models import CajaMovimiento as _CM
+    labels = dict(_CM.CONCEPTO_CHOICES)
+    labels.update({
+        'confeccion_cobro': 'Cobro Confección',  # legacy
+        'gasto':            'Gasto',              # legacy
+    })
+    return labels
+
+CONCEPTO_LABELS = _build_concepto_labels()
+
+CONCEPTOS_OPERATIVOS = [
+    'apertura_caja', 'sobrante_caja', 'faltante_caja',
+    'garantia_alquiler', 'garantia_devolucion',
+]
+
+FECHA_MIGRACION_CAJA = date(2026, 5, 8)
+
+MESES_ES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
+            'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+
 @login_required
 def dashboard(request):
-    prendas_alerta = PrendaInventario.objects.filter(
-        estado='ACT', stock_minimo__isnull=False
-    ).extra(where=['cantidad <= stock_minimo']).order_by('nombre')
+    prendas_alerta = PrendaInventario.objects.annotate(
+        stock_total=Count('items', filter=~Q(items__estado='baja')),
+    ).filter(
+        estado='ACT', stock_minimo__isnull=False, stock_total__lte=F('stock_minimo')
+    ).order_by('nombre')
 
     insumos_alerta = Insumo.objects.filter(
         estado='ACT', stock_minimo__isnull=False
@@ -53,19 +88,46 @@ def dashboard(request):
 
     reparaciones_pendientes = Reparacion.objects.filter(estado='pendiente').count()
     alquileres_activos = Alquiler.objects.filter(estado='alquilado').count()
+    reservas_activas = Alquiler.objects.filter(estado='reservado').count()
     ordenes_activas = OrdenProduccion.objects.exclude(estado='terminado').count()
 
+    # Caja de hoy
+    hoy = django_tz.now().date()
+    caja_hoy_qs = CajaMovimiento.objects.filter(
+        fecha__date__gte=hoy,
+        fecha__date__lte=hoy,
+        movimiento_reverso__isnull=True,
+    )
+    ingresos_hoy = caja_hoy_qs.filter(tipo='ingreso').aggregate(t=Sum('monto'))['t'] or Decimal('0')
+    egresos_hoy = caja_hoy_qs.filter(tipo='egreso').aggregate(t=Sum('monto'))['t'] or Decimal('0')
+    sesion_activa = CajaSesion.objects.filter(estado='abierta').first()
+    caja_hoy = {
+        'ingresos': ingresos_hoy,
+        'egresos': egresos_hoy,
+        'saldo': ingresos_hoy - egresos_hoy,
+        'sesion': sesion_activa,
+    }
+
+    # Analytics
+    kpis = _dashboard_kpis(hoy)
+    chart_trend = _dashboard_trend_chart(hoy)
+    chart_donut = _dashboard_donut_chart(hoy)
     return render(request, 'misastreria/dashboard.html', {
-        'prendas_alerta':         prendas_alerta,
-        'insumos_alerta':         insumos_alerta,
+        'prendas_alerta':          prendas_alerta,
+        'insumos_alerta':          insumos_alerta,
         'reparaciones_pendientes': reparaciones_pendientes,
-        'alquileres_activos':     alquileres_activos,
-        'ordenes_activas':        ordenes_activas,
+        'alquileres_activos':      alquileres_activos,
+        'reservas_activas':        reservas_activas,
+        'ordenes_activas':         ordenes_activas,
+        'caja_hoy':                caja_hoy,
+        'kpis':                    kpis,
+        'chart_trend':             chart_trend,
+        'chart_donut':             chart_donut,
     })
 
 @login_required
 def lista_empleados(request):
-    q = request.GET.get('q', '').strip()
+    empleado_id = request.GET.get('empleado_id', '').strip()
     activo = request.GET.get('activo', '')
     orden = request.GET.get('orden', 'desc')
 
@@ -74,19 +136,22 @@ def lista_empleados(request):
     _p = request.GET.copy(); _p['orden'] = 'asc' if orden == 'desc' else 'desc'; _p.pop('page', None)
     orden_toggle_url = '?' + _p.urlencode()
 
-    if q:
-        empleados = empleados.filter(
-            Q(nombres__icontains=q) | Q(apellido_paterno__icontains=q) |
-            Q(apellido_materno__icontains=q) | Q(ci__icontains=q) | Q(codigo__icontains=q)
-        )
+    selected_empleado = None
+    if empleado_id:
+        try:
+            selected_empleado = Empleado.objects.get(id=empleado_id)
+            empleados = empleados.filter(id=empleado_id)
+        except Empleado.DoesNotExist:
+            empleado_id = ''
     if activo in ('1', '0'):
         empleados = empleados.filter(activo=(activo == '1'))
 
     paginator = Paginator(empleados, 15)
     page_obj = paginator.get_page(request.GET.get('page'))
     return render(request, 'misastreria/empleados/lista.html', {
-        'page_obj': page_obj, 'q': q, 'activo': activo,
+        'page_obj': page_obj, 'empleado_id': empleado_id, 'activo': activo,
         'total': empleados.count(), 'orden': orden, 'orden_toggle_url': orden_toggle_url,
+        'selected_empleado': selected_empleado,
     })
 
 @login_required
@@ -98,7 +163,10 @@ def crear_empleado(request):
             return redirect('lista_empleados')
     else:
         form = EmpleadoForm()
-    return render(request, 'misastreria/empleados/crear.html', {'form': form})
+    return render(request, 'misastreria/empleados/crear.html', {
+        'form': form,
+        'tipo_contrato_opts': list(TipoContrato.objects.values('id', 'nombre')),
+    })
 
 @login_required
 def editar_empleado(request, id):
@@ -110,7 +178,11 @@ def editar_empleado(request, id):
             return redirect('lista_empleados')
     else:
         form = EmpleadoForm(instance=empleado)
-    return render(request, 'misastreria/empleados/editar.html', {'form': form, 'empleado': empleado})
+    return render(request, 'misastreria/empleados/editar.html', {
+        'form': form,
+        'empleado': empleado,
+        'tipo_contrato_opts': list(TipoContrato.objects.values('id', 'nombre')),
+    })
 
 @login_required
 def eliminar_empleado(request, id):
@@ -120,15 +192,102 @@ def eliminar_empleado(request, id):
         return redirect('lista_empleados')
     return render(request, 'misastreria/empleados/eliminar.html', {'empleado': empleado})
 
+def _calcular_saldo_comision_empleado(empleado):
+    """Devengado (reparaciones+confecciones entregadas con %) menos total pagado."""
+    dev_rep = empleado.reparaciones.filter(
+        estado='entregado', porcentaje_comision__isnull=False
+    ).exclude(porcentaje_comision=0).aggregate(
+        s=Sum(
+            ExpressionWrapper(
+                F('total') * F('porcentaje_comision') / Decimal('100'),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            )
+        )
+    )['s'] or Decimal('0')
+
+    dev_conf = empleado.confecciones.filter(
+        estado='entregado', porcentaje_comision__isnull=False
+    ).exclude(porcentaje_comision=0).aggregate(
+        s=Sum(
+            ExpressionWrapper(
+                F('precio') * F('porcentaje_comision') / Decimal('100'),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            )
+        )
+    )['s'] or Decimal('0')
+
+    pagado = empleado.pagos_comision.aggregate(s=Sum('monto'))['s'] or Decimal('0')
+    return (dev_rep + dev_conf) - pagado
+
+
 @login_required
 def detalle_empleado(request, id):
     empleado = get_object_or_404(Empleado, id=id)
     permisos = empleado.permisos.order_by('-fecha_permiso')
     faltas = empleado.faltas.order_by('-fecha_falta')
+
+    # Reparaciones entregadas con comision asignada
+    reparaciones_qs = empleado.reparaciones.filter(
+        estado='entregado',
+        porcentaje_comision__isnull=False,
+    ).exclude(porcentaje_comision=0).select_related('cliente').order_by('-fecha_entrega', '-id')
+
+    reparaciones_comision = reparaciones_qs.annotate(
+        monto_comision=ExpressionWrapper(
+            F('total') * F('porcentaje_comision') / Decimal('100'),
+            output_field=DecimalField(max_digits=12, decimal_places=2),
+        )
+    )
+
+    # Confecciones entregadas con comision asignada
+    confecciones_qs = empleado.confecciones.filter(
+        estado='entregado',
+        porcentaje_comision__isnull=False,
+    ).exclude(porcentaje_comision=0).select_related('cliente').order_by('-fecha_entrega', '-id')
+
+    confecciones_comision = confecciones_qs.annotate(
+        monto_comision=ExpressionWrapper(
+            F('precio') * F('porcentaje_comision') / Decimal('100'),
+            output_field=DecimalField(max_digits=12, decimal_places=2),
+        )
+    )
+
+    # Totales devengados
+    total_devengado_rep = reparaciones_qs.aggregate(
+        s=Sum(
+            ExpressionWrapper(
+                F('total') * F('porcentaje_comision') / Decimal('100'),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            )
+        )
+    )['s'] or Decimal('0')
+    total_devengado_conf = confecciones_qs.aggregate(
+        s=Sum(
+            ExpressionWrapper(
+                F('precio') * F('porcentaje_comision') / Decimal('100'),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            )
+        )
+    )['s'] or Decimal('0')
+    total_devengado = total_devengado_rep + total_devengado_conf
+
+    # Pagos
+    pagos_comision = empleado.pagos_comision.order_by('-fecha', '-id')
+    total_pagado = pagos_comision.aggregate(s=Sum('monto'))['s'] or Decimal('0')
+
+    saldo_comision = total_devengado - total_pagado
+
     return render(request, 'misastreria/empleados/detalle.html', {
         'empleado': empleado,
         'permisos': permisos,
         'faltas': faltas,
+        'reparaciones_comision': reparaciones_comision,
+        'confecciones_comision': confecciones_comision,
+        'pagos_comision': pagos_comision,
+        'total_devengado': total_devengado,
+        'total_pagado': total_pagado,
+        'saldo_comision': saldo_comision,
+        'pago_form': PagoComisionEmpleadoForm(),
     })
 
 @login_required
@@ -174,6 +333,46 @@ def eliminar_falta(request, id):
     if request.method == 'POST':
         falta.delete()
     return redirect('detalle_empleado', id=empleado_id)
+
+
+@login_required
+def pagar_comision_empleado(request, empleado_id):
+    from django.http import HttpResponseNotAllowed
+    from .caja_signals import registrar_pago_comision_empleado
+
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['POST'])
+
+    empleado = get_object_or_404(Empleado, id=empleado_id)
+    form = PagoComisionEmpleadoForm(request.POST)
+
+    if not form.is_valid():
+        for err in form.errors.values():
+            messages.error(request, err.as_text())
+        return redirect('detalle_empleado', id=empleado_id)
+
+    monto = form.cleaned_data['monto']
+
+    saldo = _calcular_saldo_comision_empleado(empleado)
+    if monto > saldo:
+        messages.error(
+            request,
+            f"El pago de Bs {monto:.2f} excede el saldo de comisión pendiente (Bs {saldo:.2f})."
+        )
+        return redirect('detalle_empleado', id=empleado_id)
+
+    registrar_pago_comision_empleado(
+        empleado=empleado,
+        monto=monto,
+        forma_pago=form.cleaned_data['forma_pago'],
+        via_caja=form.cleaned_data.get('via_caja', False),
+        descripcion=form.cleaned_data.get('descripcion', ''),
+        usuario=request.user,
+    )
+    via_label = "vía caja" if form.cleaned_data.get('via_caja') else "fuera de caja"
+    messages.success(request, f"Comisión de Bs {monto:.2f} registrada ({via_label}).")
+    return redirect('detalle_empleado', id=empleado_id)
+
 
 @login_required
 def reporte_dias_trabajados(request):
@@ -235,21 +434,18 @@ def reporte_dias_trabajados(request):
 
 @login_required
 def lista_clientes(request):
-    q = request.GET.get('q', '').strip()
-    desde = request.GET.get('desde', '')
-    hasta = request.GET.get('hasta', '')
-    orden = request.GET.get('orden', 'desc')
+    cliente_id = request.GET.get('cliente_id', '').strip()
+    desde      = request.GET.get('desde', '')
+    hasta      = request.GET.get('hasta', '')
+    orden      = request.GET.get('orden', 'desc')
 
     sort = '-creado' if orden == 'desc' else 'creado'
     clientes = Cliente.objects.order_by(sort)
     _p = request.GET.copy(); _p['orden'] = 'asc' if orden == 'desc' else 'desc'; _p.pop('page', None)
     orden_toggle_url = '?' + _p.urlencode()
 
-    if q:
-        clientes = clientes.filter(
-            Q(nombres__icontains=q) | Q(apellido_paterno__icontains=q) |
-            Q(apellido_materno__icontains=q) | Q(ci__icontains=q) | Q(celular__icontains=q)
-        )
+    if cliente_id:
+        clientes = clientes.filter(id=cliente_id)
     if desde:
         clientes = clientes.filter(fecha_registro__gte=desde)
     if hasta:
@@ -258,7 +454,8 @@ def lista_clientes(request):
     paginator = Paginator(clientes, 15)
     page_obj = paginator.get_page(request.GET.get('page'))
     return render(request, 'misastreria/clientes/lista.html', {
-        'page_obj': page_obj, 'q': q, 'desde': desde, 'hasta': hasta,
+        'page_obj': page_obj, 'cliente_id': cliente_id,
+        'desde': desde, 'hasta': hasta,
         'total': clientes.count(), 'orden': orden, 'orden_toggle_url': orden_toggle_url,
     })
 
@@ -296,24 +493,239 @@ def eliminar_cliente(request, id):
         return redirect('lista_clientes')
     return render(request, 'misastreria/clientes/eliminar.html', {'cliente': cliente})
 
-def buscar_clientes(request):
+def buscar_empleados(request):
     q = request.GET.get('q', '').strip()
-    clientes = Cliente.objects.filter(
+    qs = Empleado.objects.filter(activo=True).filter(
         Q(nombres__icontains=q) | Q(apellido_paterno__icontains=q) |
         Q(apellido_materno__icontains=q) | Q(ci__icontains=q)
-    ).order_by('nombres', 'apellido_paterno')[:10]
-    data = [{'id': c.id, 'ci': c.ci or '', 'nombre': str(c)} for c in clientes]
+    ).order_by('nombres', 'apellido_paterno')
+    if q:
+        qs = qs[:10]
+    data = [{'id': e.id, 'ci': e.ci or '', 'nombre': str(e)} for e in qs]
     return JsonResponse(data, safe=False)
+
+
+def buscar_clientes(request):
+    q = request.GET.get('q', '').strip()
+    qs = Cliente.objects.filter(
+        Q(nombres__icontains=q) | Q(apellido_paterno__icontains=q) |
+        Q(apellido_materno__icontains=q) | Q(ci__icontains=q)
+    ).order_by('nombres', 'apellido_paterno')
+    if q:
+        qs = qs[:10]
+    data = [{'id': c.id, 'ci': c.ci or '', 'nombre': str(c)} for c in qs]
+    return JsonResponse(data, safe=False)
+
+
+def buscar_tipo_prenda(request):
+    q = request.GET.get('q', '').strip()
+    qs = TipoPrenda.objects.filter(nombre__icontains=q).order_by('nombre')
+    if q:
+        qs = qs[:10]
+    return JsonResponse(
+        [{'id': t.id, 'nombre': t.nombre, 'plantilla': t.plantilla} for t in qs],
+        safe=False,
+    )
+
+
+def crear_tipo_prenda(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'method not allowed'}, status=405)
+    nombre = request.POST.get('nombre', '').strip()
+    plantilla = request.POST.get('plantilla', '').strip()
+    if not nombre:
+        return JsonResponse({'error': 'Nombre requerido'}, status=400)
+    tp = TipoPrenda.objects.create(nombre=nombre, plantilla=plantilla)
+    return JsonResponse({'id': tp.id, 'nombre': tp.nombre, 'plantilla': tp.plantilla})
+
+
+def buscar_tipo_reparacion(request):
+    q = request.GET.get('q', '').strip()
+    qs = TipoReparacion.objects.filter(nombre__icontains=q).order_by('nombre')
+    if q:
+        qs = qs[:10]
+    return JsonResponse(
+        [{'id': t.id, 'nombre': t.nombre} for t in qs],
+        safe=False,
+    )
+
+
+def crear_tipo_reparacion(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'method not allowed'}, status=405)
+    nombre = request.POST.get('nombre', '').strip()
+    if not nombre:
+        return JsonResponse({'error': 'Nombre requerido'}, status=400)
+    tr = TipoReparacion.objects.create(nombre=nombre)
+    return JsonResponse({'id': tr.id, 'nombre': tr.nombre})
+
+
+def buscar_estado_alquiler(request):
+    q = request.GET.get('q', '').strip()
+    qs = EstadoAlquiler.objects.filter(nombre__icontains=q).order_by('nombre')
+    if q:
+        qs = qs[:10]
+    return JsonResponse(
+        [{'nombre': e.nombre, 'display': e.nombre.replace('_', ' ').title(), 'color': e.color} for e in qs],
+        safe=False,
+    )
+
+
+def crear_estado_alquiler(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'method not allowed'}, status=405)
+    nombre = request.POST.get('nombre', '').strip().lower().replace(' ', '_')
+    color  = request.POST.get('color', 'warning').strip()
+    if not nombre:
+        return JsonResponse({'error': 'Nombre requerido'}, status=400)
+    if color not in ('warning', 'danger'):
+        color = 'warning'
+    e, _ = EstadoAlquiler.objects.get_or_create(nombre=nombre, defaults={'color': color})
+    return JsonResponse({'nombre': e.nombre, 'display': e.nombre.replace('_', ' ').title(), 'color': e.color})
+
+
+def buscar_unidad_medida(request):
+    q = request.GET.get('q', '').strip()
+    qs = UnidadMedida.objects.filter(nombre__icontains=q).order_by('nombre')
+    if q:
+        qs = qs[:10]
+    return JsonResponse(
+        [{'id': u.id, 'nombre': u.nombre} for u in qs],
+        safe=False,
+    )
+
+
+def crear_unidad_medida(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'method not allowed'}, status=405)
+    nombre = request.POST.get('nombre', '').strip()
+    if not nombre:
+        return JsonResponse({'error': 'Nombre requerido'}, status=400)
+    u, _ = UnidadMedida.objects.get_or_create(nombre=nombre)
+    return JsonResponse({'id': u.id, 'nombre': u.nombre})
+
+
+def buscar_tipo_contrato(request):
+    q = request.GET.get('q', '').strip()
+    qs = TipoContrato.objects.filter(nombre__icontains=q).order_by('nombre')
+    if q:
+        qs = qs[:10]
+    return JsonResponse(
+        [{'id': t.id, 'nombre': t.nombre} for t in qs],
+        safe=False,
+    )
+
+
+def crear_tipo_contrato(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'method not allowed'}, status=405)
+    nombre = request.POST.get('nombre', '').strip()
+    if not nombre:
+        return JsonResponse({'error': 'Nombre requerido'}, status=400)
+    t, _ = TipoContrato.objects.get_or_create(nombre=nombre)
+    return JsonResponse({'id': t.id, 'nombre': t.nombre})
+
+
+def buscar_ubicacion_item(request):
+    q = request.GET.get('q', '').strip()
+    qs = UbicacionItem.objects.filter(nombre__icontains=q).order_by('nombre')
+    if q:
+        qs = qs[:10]
+    return JsonResponse(
+        [{'id': u.id, 'nombre': u.nombre} for u in qs],
+        safe=False,
+    )
+
+
+def crear_ubicacion_item(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'method not allowed'}, status=405)
+    nombre = request.POST.get('nombre', '').strip()
+    if not nombre:
+        return JsonResponse({'error': 'Nombre requerido'}, status=400)
+    u, _ = UbicacionItem.objects.get_or_create(nombre=nombre)
+    return JsonResponse({'id': u.id, 'nombre': u.nombre})
+
+
+def buscar_tipo_material(request):
+    q = request.GET.get('q', '').strip()
+    qs = TipoMaterial.objects.filter(nombre__icontains=q).order_by('nombre')
+    if q:
+        qs = qs[:10]
+    return JsonResponse(
+        [{'id': t.id, 'nombre': t.nombre} for t in qs],
+        safe=False,
+    )
+
+
+def crear_tipo_material(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'method not allowed'}, status=405)
+    nombre = request.POST.get('nombre', '').strip()
+    if not nombre:
+        return JsonResponse({'error': 'Nombre requerido'}, status=400)
+    t, _ = TipoMaterial.objects.get_or_create(nombre=nombre)
+    return JsonResponse({'id': t.id, 'nombre': t.nombre})
+
+
+def buscar_modelo_confeccion(request):
+    q = request.GET.get('q', '').strip()
+    qs = ModeloConfeccion.objects.filter(nombre__icontains=q).order_by('nombre')
+    if q:
+        qs = qs[:15]
+    return JsonResponse(
+        [{'id': m.nombre, 'nombre': m.nombre} for m in qs],
+        safe=False,
+    )
+
+
+def crear_modelo_confeccion(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'method not allowed'}, status=405)
+    nombre = request.POST.get('nombre', '').strip()
+    if not nombre:
+        return JsonResponse({'error': 'El nombre es requerido.'}, status=400)
+    m, _ = ModeloConfeccion.objects.get_or_create(nombre=nombre)
+    return JsonResponse({'id': m.nombre, 'nombre': m.nombre})
+
+
+def buscar_prenda_inventario(request):
+    q = request.GET.get('q', '').strip()
+    qs = PrendaInventario.objects.filter(estado='ACT').order_by('nombre')
+    if q:
+        qs = qs.filter(
+            Q(nombre__icontains=q) | Q(codigo__icontains=q) |
+            Q(color__icontains=q) | Q(talla__icontains=q)
+        )[:15]
+    else:
+        qs = qs[:200]
+    data = [{'id': p.id, 'ci': p.codigo, 'nombre': str(p)} for p in qs]
+    return JsonResponse(data, safe=False)
+
+
+def buscar_confeccion(request):
+    q = request.GET.get('q', '').strip()
+    qs = Confeccion.objects.filter(estado__in=['pendiente', 'en_proceso']).select_related('cliente').order_by('-creado')
+    if q:
+        qs = qs.filter(
+            Q(codigo__icontains=q) | Q(modelo__icontains=q) |
+            Q(cliente__nombres__icontains=q) | Q(cliente__apellido_paterno__icontains=q)
+        )[:15]
+    else:
+        qs = qs[:200]
+    data = [{'id': c.id, 'ci': c.codigo, 'nombre': str(c)} for c in qs]
+    return JsonResponse(data, safe=False)
+
 
 @login_required
 def historial_cliente(request, id):
     cliente      = get_object_or_404(Cliente, id=id)
     reparaciones = cliente.reparaciones.order_by('-creado')
     confecciones = cliente.confeccion_set.order_by('-creado')
-    alquileres   = cliente.alquileres.prefetch_related('items__articulo').order_by('-fecha_alquiler')
-    ventas       = cliente.ventas.prefetch_related('items__articulo').order_by('-fecha_venta')
+    alquileres   = cliente.alquileres.prefetch_related('items__prenda_item__prenda').order_by('-fecha_alquiler')
+    ventas       = cliente.ventas.prefetch_related('items__prenda_item__prenda').order_by('-fecha_venta')
 
-    total_reparaciones = reparaciones.aggregate(t=Sum('costo'))['t'] or 0
+    total_reparaciones = reparaciones.aggregate(t=Sum('total'))['t'] or 0
     total_confecciones = confecciones.aggregate(t=Sum('precio'))['t'] or 0
     total_alquileres   = alquileres.aggregate(t=Sum('total'))['t'] or 0
     total_ventas       = ventas.aggregate(t=Sum('total'))['t'] or 0
@@ -337,24 +749,49 @@ def lista_reparaciones(request):
     q = request.GET.get('q', '').strip()
     estado = request.GET.get('estado', '').strip()
     tipo_prenda = request.GET.get('tipo_prenda', '').strip()
+    cliente_id = request.GET.get('cliente_id', '').strip()
     desde = request.GET.get('desde', '')
     hasta = request.GET.get('hasta', '')
     periodo = request.GET.get('periodo', '')
     orden = request.GET.get('orden', 'desc')
 
-    hoy = date.today()
+    hoy = django_tz.localdate()
     if periodo == 'semana':
         desde = (hoy - timedelta(days=7)).isoformat()
         hasta = hoy.isoformat()
     elif periodo == 'mes':
         desde = (hoy - timedelta(days=30)).isoformat()
         hasta = hoy.isoformat()
-    elif periodo == '3meses' or (not desde and not hasta and not q and not estado and not tipo_prenda):
+    elif periodo == '3meses' or (not desde and not hasta and not q and not estado and not tipo_prenda and not cliente_id):
         desde = (hoy - timedelta(days=90)).isoformat()
         hasta = hoy.isoformat()
 
     sort = '-creado' if orden == 'desc' else 'creado'
-    reparaciones = Reparacion.objects.order_by(sort)
+    _dcf = DecimalField(max_digits=10, decimal_places=2)
+    _rep_ingresos_q = (
+        CajaMovimiento.objects
+        .filter(referencia_reparacion=OuterRef('pk'), tipo='ingreso', movimiento_reverso__isnull=True)
+        .values('referencia_reparacion').annotate(t=Sum('monto')).values('t')
+    )
+    _rep_egresos_q = (
+        CajaMovimiento.objects
+        .filter(referencia_reparacion=OuterRef('pk'), tipo='egreso', movimiento_reverso__isnull=True)
+        .values('referencia_reparacion').annotate(t=Sum('monto')).values('t')
+    )
+    reparaciones = (
+        Reparacion.objects
+        .annotate(
+            _ingresos_caja=Coalesce(Subquery(_rep_ingresos_q, output_field=_dcf), Value(Decimal('0')), output_field=_dcf),
+            _egresos_caja=Coalesce(Subquery(_rep_egresos_q, output_field=_dcf), Value(Decimal('0')), output_field=_dcf),
+        )
+        .annotate(
+            saldo_caja=Greatest(
+                ExpressionWrapper(F('total') - F('_ingresos_caja') + F('_egresos_caja'), output_field=_dcf),
+                Value(Decimal('0')), output_field=_dcf,
+            )
+        )
+        .order_by(sort)
+    )
     _p = request.GET.copy(); _p['orden'] = 'asc' if orden == 'desc' else 'desc'; _p.pop('page', None)
     orden_toggle_url = '?' + _p.urlencode()
 
@@ -364,14 +801,18 @@ def lista_reparaciones(request):
             Q(cliente__nombres__icontains=q) | Q(cliente__apellido_paterno__icontains=q) |
             Q(cliente__ci__icontains=q)
         )
+    if cliente_id:
+        reparaciones = reparaciones.filter(cliente_id=cliente_id)
     if estado:
         reparaciones = reparaciones.filter(estado=estado)
     if tipo_prenda:
-        reparaciones = reparaciones.filter(tipo_prenda=tipo_prenda)
+        reparaciones = reparaciones.filter(items__tipo_prenda_id=tipo_prenda).distinct()
     if desde:
-        reparaciones = reparaciones.filter(creado__date__gte=desde)
+        desde_dt = django_tz.make_aware(datetime.combine(date.fromisoformat(desde), datetime.min.time()))
+        reparaciones = reparaciones.filter(creado__gte=desde_dt)
     if hasta:
-        reparaciones = reparaciones.filter(creado__date__lte=hasta)
+        hasta_dt = django_tz.make_aware(datetime.combine(date.fromisoformat(hasta) + timedelta(days=1), datetime.min.time()))
+        reparaciones = reparaciones.filter(creado__lt=hasta_dt)
 
     paginator = Paginator(reparaciones, 15)
     page_obj = paginator.get_page(request.GET.get('page'))
@@ -379,11 +820,57 @@ def lista_reparaciones(request):
     return render(request, 'misastreria/reparaciones/lista.html', {
         'page_obj': page_obj,
         'q': q, 'estado': estado, 'tipo_prenda': tipo_prenda,
+        'cliente_id': cliente_id,
         'desde': desde, 'hasta': hasta, 'periodo': periodo,
         'total': reparaciones.count(), 'orden': orden, 'orden_toggle_url': orden_toggle_url,
-        'tipo_prenda_choices': Reparacion.TIPO_PRENDA_CHOICES,
+        'tipo_prenda_opts': list(TipoPrenda.objects.values('id', 'nombre')),
         'estado_choices': Reparacion.ESTADO_CHOICES,
     })
+
+
+def _guardar_items_reparacion(reparacion, post):
+    """Borra los items existentes y recrea desde POST. Retorna lista de errores."""
+    reparacion.items.all().delete()
+    errores = []
+    count_str = post.get('items_count', '0')
+    try:
+        count = int(count_str)
+    except ValueError:
+        count = 0
+
+    for i in range(count):
+        tp_id = post.get(f'items[{i}][tipo_prenda]', '').strip()
+        tr_id = post.get(f'items[{i}][tipo_reparacion]', '').strip()
+        costo_str = post.get(f'items[{i}][costo]', '').strip()
+        detalles = post.get(f'items[{i}][detalles]', '').strip()
+
+        if not tp_id or not tr_id:
+            errores.append(f"Fila {i+1}: prenda y tipo de reparación son requeridos.")
+            continue
+        try:
+            from .models import TipoPrenda, TipoReparacion
+            tp = TipoPrenda.objects.get(pk=tp_id)
+            tr = TipoReparacion.objects.get(pk=tr_id)
+        except (TipoPrenda.DoesNotExist, TipoReparacion.DoesNotExist):
+            errores.append(f"Fila {i+1}: prenda o tipo de reparación no encontrado.")
+            continue
+
+        try:
+            costo = Decimal(costo_str) if costo_str else None
+        except Exception:
+            costo = None
+
+        ReparacionItem.objects.create(
+            reparacion=reparacion,
+            tipo_prenda=tp,
+            tipo_reparacion=tr,
+            costo=costo,
+            detalles=detalles,
+        )
+
+    reparacion.recalcular_total()
+    return errores
+
 
 @login_required
 def crear_reparacion(request):
@@ -391,13 +878,24 @@ def crear_reparacion(request):
         form = ReparacionForm(request.POST)
         if form.is_valid():
             reparacion = form.save()
-            messages.success(request, f"Reparación {reparacion.codigo} creada con éxito.")
-            return redirect('lista_reparaciones')
+            errores = _guardar_items_reparacion(reparacion, request.POST)
+            if reparacion.estado == 'entregado':
+                from .caja_signals import registrar_reparacion_en_caja
+                registrar_reparacion_en_caja(reparacion)
+            if errores:
+                messages.warning(request, f"Reparación {reparacion.codigo} creada con advertencias: {'; '.join(errores)}")
+            else:
+                messages.success(request, f"Reparación {reparacion.codigo} creada con éxito.")
+            return redirect('detalle_reparacion', id=reparacion.id)
         else:
             messages.error(request, "Por favor corrige los errores en el formulario.")
     else:
         form = ReparacionForm()
-    return render(request, 'misastreria/reparaciones/crear.html', {'form': form})
+    return render(request, 'misastreria/reparaciones/crear.html', {
+        'form': form,
+        'tipos_prenda_json': json.dumps([{'id': t.id, 'nombre': t.nombre} for t in TipoPrenda.objects.order_by('nombre')]),
+        'tipos_reparacion_json': json.dumps([{'id': t.id, 'nombre': t.nombre} for t in TipoReparacion.objects.order_by('nombre')]),
+    })
 
 @login_required
 def editar_reparacion(request, id):
@@ -405,23 +903,108 @@ def editar_reparacion(request, id):
     if request.method == 'POST':
         form = ReparacionForm(request.POST, instance=reparacion)
         if form.is_valid():
-            form.save()
-            messages.success(request, "Reparación actualizada con éxito.")
+            reparacion = form.save()
+            errores = _guardar_items_reparacion(reparacion, request.POST)
+            from .caja_signals import _ajustar_total_en_caja
+            _ajustar_total_en_caja(
+                referencia_field='referencia_reparacion',
+                instance=reparacion,
+                concepto_cobro='reparacion_cobro',
+                nuevo_total=reparacion.total,
+                forma_pago=getattr(reparacion, 'forma_pago', 'efectivo') or 'efectivo',
+                cliente=getattr(reparacion, 'cliente', None),
+            )
+            if errores:
+                messages.warning(request, f"Actualizado con advertencias: {'; '.join(errores)}")
+            else:
+                messages.success(request, "Reparación actualizada con éxito.")
             return redirect('lista_reparaciones')
         else:
             messages.error(request, "Por favor corrige los errores en el formulario.")
     else:
         form = ReparacionForm(instance=reparacion)
-    return render(request, 'misastreria/reparaciones/editar.html', {'form': form, 'reparacion': reparacion})
+    items_existentes = list(reparacion.items.select_related('tipo_prenda', 'tipo_reparacion').values(
+        'tipo_prenda_id', 'tipo_prenda__nombre',
+        'tipo_reparacion_id', 'tipo_reparacion__nombre',
+        'costo', 'detalles',
+    ))
+    return render(request, 'misastreria/reparaciones/editar.html', {
+        'form': form, 'reparacion': reparacion,
+        'items_existentes_json': json.dumps(items_existentes, default=str),
+        'tipos_prenda_json': json.dumps([{'id': t.id, 'nombre': t.nombre} for t in TipoPrenda.objects.order_by('nombre')]),
+        'tipos_reparacion_json': json.dumps([{'id': t.id, 'nombre': t.nombre} for t in TipoReparacion.objects.order_by('nombre')]),
+    })
 
 @login_required
 def eliminar_reparacion(request, id):
     reparacion = get_object_or_404(Reparacion, id=id)
     if request.method == 'POST':
+        from .caja_signals import _reversar_movimientos_activos
+        _reversar_movimientos_activos(referencia_field='referencia_reparacion', instance=reparacion, usuario=request.user)
         reparacion.delete()
         messages.success(request, "Reparación eliminada con éxito.")
         return redirect('lista_reparaciones')
     return render(request, 'misastreria/reparaciones/eliminar.html', {'reparacion': reparacion})
+
+@login_required
+@login_required
+def detalle_reparacion(request, id):
+    from .forms import PagoReparacionForm
+    reparacion = get_object_or_404(Reparacion, id=id)
+    items = reparacion.items.select_related('tipo_prenda', 'tipo_reparacion').all()
+    pagos = reparacion.caja_movimientos.filter(
+        movimiento_reverso__isnull=True,
+        concepto__in=['reparacion_cobro', 'reparacion_pago', 'reparacion_saldo'],
+    ).order_by('-fecha', '-id')
+    return render(request, 'misastreria/reparaciones/detalle.html', {
+        'reparacion': reparacion,
+        'items': items,
+        'pagos': pagos,
+        'total': reparacion.total,
+        'pagado': reparacion.total_pagado,
+        'saldo': reparacion.saldo_pendiente,
+        'form': PagoReparacionForm(),
+    })
+
+
+@login_required
+def agregar_pago_reparacion(request, id):
+    from .forms import PagoReparacionForm
+    from .caja_signals import registrar_pago_reparacion
+    from django.http import HttpResponseNotAllowed
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['POST'])
+    reparacion = get_object_or_404(Reparacion, id=id)
+    form = PagoReparacionForm(request.POST)
+    if form.is_valid():
+        monto = form.cleaned_data['monto']
+        saldo = reparacion.saldo_pendiente
+        if monto > saldo:
+            messages.error(request, f"El pago excede el saldo pendiente de Bs {saldo:.2f}.")
+        else:
+            registrar_pago_reparacion(
+                reparacion,
+                monto,
+                form.cleaned_data['forma_pago'],
+                form.cleaned_data.get('descripcion', ''),
+                request.user,
+            )
+            messages.success(request, f"Pago de Bs {monto:.2f} registrado.")
+    else:
+        for err in form.errors.values():
+            messages.error(request, err.as_text())
+    return redirect('detalle_reparacion', id=reparacion.id)
+
+
+@login_required
+def reparacion_en_proceso(request, id):
+    reparacion = get_object_or_404(Reparacion, id=id)
+    if request.method == 'POST' and reparacion.estado == 'pendiente':
+        reparacion.estado = 'en_proceso'
+        reparacion.save()
+        messages.success(request, f'Reparación {reparacion.codigo} marcada como En Proceso.')
+    return redirect('detalle_reparacion', id=reparacion.id)
+
 
 @login_required
 def marcar_entregado(request, id):
@@ -433,80 +1016,247 @@ def marcar_entregado(request, id):
             messages.success(request, f"La reparación {reparacion.codigo} ha sido marcada como entregada.")
         else:
             messages.warning(request, f"La reparación {reparacion.codigo} ya está entregada.")
-        return redirect('lista_reparaciones')
-    return redirect('lista_reparaciones')
+        return redirect('detalle_reparacion', id=reparacion.id)
+    return redirect('detalle_reparacion', id=reparacion.id)
+
+
+# ─── PDF Elegante Premium — helpers compartidos ───────────────────────────────
+_PDF_NAVY  = colors.HexColor('#0d1b2a')
+_PDF_GOLD  = colors.HexColor('#c9a84c')
+_PDF_LGRAY = colors.HexColor('#f7f7f7')
+_LOGO_PDF  = os.path.join(os.path.dirname(__file__), 'static', 'images', 'fortium-tailor-logo.jpg')
+
+
+def _pdf_page(c, doc, tipo_doc, codigo, fecha_str, hora_str, estado_str):
+    c.saveState()
+    W, H = A4
+    HEADER_H = 4.0 * cm
+    c.setFillColor(_PDF_NAVY)
+    c.rect(0, H - HEADER_H, W, HEADER_H, fill=1, stroke=0)
+    if os.path.exists(_LOGO_PDF):
+        c.drawImage(_LOGO_PDF, 0.5*cm, H - HEADER_H + 0.3*cm,
+                    width=4.2*cm, height=3.5*cm,
+                    preserveAspectRatio=True, mask='auto')
+    c.setFillColor(colors.white)
+    c.setFont('Helvetica-Bold', 15)
+    c.drawCentredString(W / 2, H - 1.55*cm, 'COMPROBANTE')
+    c.setFont('Helvetica', 10)
+    c.drawCentredString(W / 2, H - 2.2*cm, tipo_doc)
+    c.setStrokeColor(_PDF_GOLD)
+    c.setLineWidth(1.5)
+    c.line(W/2 - 3.2*cm, H - 2.55*cm, W/2 + 3.2*cm, H - 2.55*cm)
+    lbls = ['Código:', 'Fecha:', 'Hora:', 'Estado:'] if hora_str else ['Código:', 'Fecha:', 'Estado:']
+    vals = [codigo, fecha_str, hora_str, estado_str] if hora_str else [codigo, fecha_str, estado_str]
+    for i, (lbl, val) in enumerate(zip(lbls, vals)):
+        yi = H - 1.4*cm - i * 0.65*cm
+        c.setFillColor(_PDF_GOLD)
+        c.setFont('Helvetica-Bold', 7.5)
+        c.drawString(W - 5.8*cm, yi, lbl)
+        c.setFillColor(colors.white)
+        c.setFont('Helvetica', 7.5)
+        c.drawString(W - 4.3*cm, yi, str(val))
+    c.setFillColor(_PDF_GOLD)
+    c.setFont('Helvetica-Oblique', 8)
+    c.drawCentredString(W / 2, H - HEADER_H - 0.5*cm, 'El arte de vestir a tu forma y medida')
+    c.setFillColor(_PDF_NAVY)
+    c.rect(0, 0, W, 1.3*cm, fill=1, stroke=0)
+    c.setFillColor(colors.white)
+    c.setFont('Helvetica', 7.5)
+    c.drawString(0.8*cm, 0.47*cm, 'Calle España #123 · Santa Cruz - Bolivia')
+    c.drawCentredString(W / 2, 0.47*cm, '+591 770 12345')
+    c.drawRightString(W - 0.8*cm, 0.47*cm, '@fortium.tailor')
+    c.restoreState()
+
+
+def _pdf_st():
+    return {
+        'sec': ParagraphStyle('_PSec', fontName='Helvetica-Bold', fontSize=9,
+                              textColor=colors.white, leading=14),
+        'kl':  ParagraphStyle('_PKl',  fontName='Helvetica-Bold', fontSize=8.5, leading=12),
+        'kv':  ParagraphStyle('_PKv',  fontName='Helvetica',      fontSize=8.5, leading=12),
+        'sig': ParagraphStyle('_PSig', fontName='Helvetica',      fontSize=8.5,
+                              alignment=TA_CENTER),
+        'ch':  ParagraphStyle('_PCH',  fontName='Helvetica-Bold', fontSize=9,
+                              textColor=_PDF_NAVY, spaceAfter=2),
+        'ci':  ParagraphStyle('_PCI',  fontName='Helvetica',      fontSize=8,
+                              leading=11, spaceAfter=2),
+    }
+
+
+def _pdf_left_tbl(rows, lw):
+    t = Table(rows, colWidths=[2.2*cm, lw - 2.2*cm])
+    t.setStyle(TableStyle([
+        ('SPAN',          (0, 0), (1, 0)),
+        ('BACKGROUND',    (0, 0), (-1, 0), _PDF_NAVY),
+        ('TEXTCOLOR',     (0, 0), (-1, 0), colors.white),
+        ('FONTSIZE',      (0, 0), (-1, -1), 8.5),
+        ('TOPPADDING',    (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 5),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
+        ('ROWBACKGROUNDS',(0, 1), (-1, -1), [colors.white, _PDF_LGRAY]),
+        ('GRID',          (0, 1), (-1, -1), 0.25, colors.HexColor('#e0e0e0')),
+    ]))
+    return t
+
+
+def _pdf_items_tbl(rows, col_widths, n_right_cols):
+    t = Table(rows, colWidths=col_widths)
+    cmds = [
+        ('SPAN',          (0, 0), (-1, 0)),
+        ('BACKGROUND',    (0, 0), (-1, 0), _PDF_NAVY),
+        ('TEXTCOLOR',     (0, 0), (-1, 0), colors.white),
+        ('BACKGROUND',    (0, 1), (-1, 1), colors.HexColor('#1e3a5c')),
+        ('TEXTCOLOR',     (0, 1), (-1, 1), colors.white),
+        ('FONTNAME',      (0, 0), (-1, 1), 'Helvetica-Bold'),
+        ('FONTNAME',      (0, -1),(-1, -1),'Helvetica-Bold'),
+        ('FONTSIZE',      (0, 0), (-1, -1), 8),
+        ('ALIGN',         (-n_right_cols, 2), (-1, -1), 'RIGHT'),
+        ('ROWBACKGROUNDS',(0, 2), (-1, -2), [colors.white, _PDF_LGRAY]),
+        ('GRID',          (0, 1), (-1, -2), 0.25, colors.HexColor('#e0e0e0')),
+        ('LINEABOVE',     (0, -1),(-1, -1), 0.5, _PDF_NAVY),
+        ('TOPPADDING',    (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 4),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
+    ]
+    t.setStyle(TableStyle(cmds))
+    return t
+
+
+def _pdf_body(left_tbl, right_tbl, lw, rw):
+    t = Table([[left_tbl, right_tbl]], colWidths=[lw, rw])
+    t.setStyle(TableStyle([
+        ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 0),
+        ('TOPPADDING',    (0, 0), (-1, -1), 0),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING',  (0, 0), (0, -1),  6),
+    ]))
+    return t
+
+
+def _pdf_total_tbl(label, amount_str, page_w):
+    t = Table([[label, amount_str]], colWidths=[page_w * 0.55, page_w * 0.45])
+    t.setStyle(TableStyle([
+        ('BACKGROUND',    (0, 0), (-1, -1), _PDF_LGRAY),
+        ('FONTNAME',      (0, 0), (0, 0), 'Helvetica-Bold'),
+        ('FONTSIZE',      (0, 0), (0, 0), 11),
+        ('FONTNAME',      (1, 0), (1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE',      (1, 0), (1, 0), 14),
+        ('TEXTCOLOR',     (1, 0), (1, 0), _PDF_NAVY),
+        ('ALIGN',         (0, 0), (0, 0), 'LEFT'),
+        ('ALIGN',         (1, 0), (1, 0), 'RIGHT'),
+        ('TOPPADDING',    (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 8),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 8),
+        ('BOX',           (0, 0), (-1, -1), 1, _PDF_GOLD),
+    ]))
+    return t
+
+
+def _pdf_sig_tbl(st, page_w):
+    t = Table(
+        [
+            [Paragraph('Firma del cliente', st['sig']),
+             Paragraph('Firma del encargado', st['sig'])],
+            [Paragraph('CI: _______________', st['sig']), Paragraph('', st['sig'])],
+        ],
+        colWidths=[page_w / 2, page_w / 2],
+    )
+    t.setStyle(TableStyle([
+        ('LINEABOVE',     (0, 0), (0, 0), 0.5, colors.black),
+        ('LINEABOVE',     (1, 0), (1, 0), 0.5, colors.black),
+        ('TOPPADDING',    (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ]))
+    return t
+
 
 @login_required
 def exportar_recibo_reparacion_pdf(request, id):
     reparacion = get_object_or_404(Reparacion, id=id)
-    
-    missing_fields = []
-    if not reparacion.costo:
-        missing_fields.append("costo")
+    items = list(reparacion.items.select_related('tipo_prenda', 'tipo_reparacion'))
+
     if not reparacion.cliente:
-        missing_fields.append("cliente")
-    if not reparacion.fecha_entrega:
-        missing_fields.append("fecha de entrega")
-    
-    if missing_fields:
-        messages.error(request, f"No se puede generar el recibo: faltan {', '.join(missing_fields)}.")
+        messages.error(request, "No se puede generar el recibo: falta el cliente.")
         return redirect('lista_reparaciones')
-    
+    if not items:
+        messages.error(request, "No se puede generar el recibo: la reparación no tiene items.")
+        return redirect('lista_reparaciones')
+
     response = HttpResponse(content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="recibo_reparacion_{reparacion.codigo}.pdf"'
-    
-    doc = SimpleDocTemplate(response, pagesize=letter, rightMargin=inch, leftMargin=inch, topMargin=inch, bottomMargin=inch/2)
-    elements = []
-    styles = getSampleStyleSheet()
-    
-    try:
-        styles.add(ParagraphStyle(name='Centered', alignment=1, fontSize=16, spaceAfter=20))
-        styles.add(ParagraphStyle(name='NormalBold', fontName='Helvetica-Bold', fontSize=12, spaceAfter=10))
-    except Exception as e:
-        messages.error(request, f"Error al generar el PDF: {str(e)}")
-        return redirect('lista_reparaciones')
-    
-    elements.append(Paragraph("Recibo de Reparación - Sastrería", styles['Centered']))
-    elements.append(Paragraph(f"Código: {reparacion.codigo}", styles['NormalBold']))
-    elements.append(Paragraph(f"Fecha: {reparacion.creado.strftime('%d/%m/%Y')}", styles['Normal']))
-    
-    data = [
-        ['Cliente', str(reparacion.cliente) if reparacion.cliente else '-'],
-        ['Tipo de Prenda', reparacion.otro_prenda if reparacion.tipo_prenda == 'otro' and reparacion.otro_prenda else reparacion.get_tipo_prenda_display() or reparacion.tipo_prenda],
-        ['Tipo de Reparación', reparacion.otro_reparacion if reparacion.tipo_reparacion == 'otro' and reparacion.otro_reparacion else reparacion.get_tipo_reparacion_display() or reparacion.tipo_reparacion],
-        ['Costo', f"${reparacion.costo:.2f}" if reparacion.costo else '-'],
-        ['Fecha de Entrega', str(reparacion.fecha_entrega)],
-        ['Estado', reparacion.get_estado_display()],
-        ['Detalles', reparacion.detalles or '-'],
-        ['Asignado a', str(reparacion.empleado) if reparacion.empleado else '-'],
+
+    st = _pdf_st()
+    W_PAGE, L_W, R_W = 18*cm, 6.5*cm, 11.5*cm
+
+    cliente  = reparacion.cliente
+    cli_str  = f"{cliente.nombres} {cliente.apellido_paterno}" if cliente else '—'
+    tel_str  = getattr(cliente, 'celular', '—') or '—'
+    emp_str  = str(reparacion.empleado) if reparacion.empleado else '—'
+    fe_str   = reparacion.fecha_entrega.strftime('%d/%m/%Y') if reparacion.fecha_entrega else '—'
+    est_str  = reparacion.get_estado_display()
+    cod_str  = reparacion.codigo
+    fec_str  = reparacion.creado.strftime('%d/%m/%Y')
+
+    left_data = [
+        [Paragraph('DATOS DEL CLIENTE', st['sec']), ''],
+        [Paragraph('<b>Cliente:</b>',       st['kl']), Paragraph(cli_str, st['kv'])],
+        [Paragraph('<b>Teléfono:</b>',       st['kl']), Paragraph(tel_str, st['kv'])],
+        [Paragraph('<b>Empleado:</b>',       st['kl']), Paragraph(emp_str, st['kv'])],
+        [Paragraph('<b>Fecha entrega:</b>',  st['kl']), Paragraph(fe_str,  st['kv'])],
+        [Paragraph('<b>Estado:</b>',         st['kl']), Paragraph(est_str, st['kv'])],
     ]
-    
-    table = Table(data, colWidths=[150, 300])
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, -1), colors.white),
-        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-    ]))
-    
-    elements.append(table)
-    doc.build(elements)
+    left_tbl = _pdf_left_tbl(left_data, L_W)
+
+    det_st = ParagraphStyle('_Det', fontName='Helvetica', fontSize=7.5, leading=10)
+    items_rows = [
+        [Paragraph('DETALLE DE REPARACIÓN', st['sec']), '', '', '', ''],
+        ['N°', 'Prenda', 'Tipo Reparación', 'Costo', 'Detalles'],
+    ]
+    for i, item in enumerate(items, 1):
+        items_rows.append([
+            str(i),
+            str(item.tipo_prenda) if item.tipo_prenda else '—',
+            str(item.tipo_reparacion) if item.tipo_reparacion else '—',
+            f"Bs {item.costo:.2f}" if item.costo else '—',
+            Paragraph(item.detalles or '—', det_st),
+        ])
+    items_rows.append(['', '', '', 'TOTAL:', f"Bs {reparacion.total:.2f}"])
+    right_tbl = _pdf_items_tbl(items_rows, [0.5*cm, 2.5*cm, 3.4*cm, 1.9*cm, 3.2*cm], 2)
+
+    def on_page(c, doc):
+        _pdf_page(c, doc, 'DE REPARACIÓN', cod_str, fec_str, '', est_str)
+
+    doc = SimpleDocTemplate(response, pagesize=A4,
+                            topMargin=5.2*cm, bottomMargin=2.0*cm,
+                            leftMargin=1.5*cm, rightMargin=1.5*cm)
+    doc.build(
+        [
+            _pdf_body(left_tbl, right_tbl, L_W, R_W),
+            Spacer(1, 0.5*cm),
+            _pdf_total_tbl('TOTAL A PAGAR', f"Bs.  {reparacion.total:.2f}", W_PAGE),
+            Spacer(1, 0.8*cm),
+            _pdf_sig_tbl(st, W_PAGE),
+        ],
+        onFirstPage=on_page, onLaterPages=on_page,
+    )
     return response
 
 @login_required
 def lista_ventas(request):
-    q = request.GET.get('q', '').strip()
-    desde = request.GET.get('desde', '').strip()
-    hasta = request.GET.get('hasta', '').strip()
-    periodo = request.GET.get('periodo', '').strip()
-    orden = request.GET.get('orden', 'desc')
+    q           = request.GET.get('q', '').strip()
+    cliente_id  = request.GET.get('cliente_id', '').strip()
+    empleado_id = request.GET.get('empleado_id', '').strip()
+    desde       = request.GET.get('desde', '').strip()
+    hasta       = request.GET.get('hasta', '').strip()
+    periodo     = request.GET.get('periodo', '').strip()
+    orden       = request.GET.get('orden', 'desc')
 
-    hoy = date.today()
+    hoy = django_tz.localdate()
     if periodo == 'semana':
         desde = (hoy - timedelta(days=7)).isoformat()
         hasta = ''
@@ -524,11 +1274,15 @@ def lista_ventas(request):
     if q:
         ventas = ventas.filter(
             Q(codigo__icontains=q) |
-            Q(items__articulo__nombre__icontains=q) |
+            Q(items__prenda_item__prenda__nombre__icontains=q) |
             Q(cliente__nombres__icontains=q) |
             Q(cliente__apellido_paterno__icontains=q) |
             Q(cliente__ci__icontains=q)
         ).distinct()
+    if cliente_id:
+        ventas = ventas.filter(cliente_id=cliente_id)
+    if empleado_id:
+        ventas = ventas.filter(empleado_id=empleado_id)
     if desde:
         ventas = ventas.filter(fecha_venta__gte=desde)
     if hasta:
@@ -542,61 +1296,80 @@ def lista_ventas(request):
         'page_obj': page_obj,
         'total': total,
         'q': q,
-        'desde': desde,
-        'hasta': hasta,
-        'periodo': periodo,
+        'cliente_id': cliente_id, 'empleado_id': empleado_id,
+        'desde': desde, 'hasta': hasta, 'periodo': periodo,
         'orden': orden, 'orden_toggle_url': orden_toggle_url,
     })
 
 
 def _guardar_items_venta(venta, post_data):
-    """Guarda los ítems de la venta y gestiona el stock."""
-    for item in venta.items.all():
-        item.articulo.cantidad += item.cantidad
-        item.articulo.save()
+    """Guarda los ítems de la venta y gestiona el estado de cada PrendaItem."""
+    for item in venta.items.select_related('prenda_item'):
+        pi = item.prenda_item
+        pi.estado = 'disponible'
+        pi.save(update_fields=['estado'])
+    kardex_events.delete_eventos_venta(venta)
     venta.items.all().delete()
 
-    articulos  = post_data.getlist('item_articulo')
-    cantidades = post_data.getlist('item_cantidad')
-    precios    = post_data.getlist('item_precio')
+    prenda_item_ids       = post_data.getlist('item_prenda_item')
+    precios               = post_data.getlist('item_precio')
+    grupos                = post_data.getlist('item_grupo_conjunto')
+    tipo_reparacion_ids   = post_data.getlist('item_tipo_reparacion')
+    precios_reparacion    = post_data.getlist('item_precio_reparacion')
+    errores               = []
+    seen                  = set()
 
-    errores = []
-    for i, (art_id, cant_str, precio_str) in enumerate(zip(articulos, cantidades, precios), 1):
-        if not art_id:
+    for i, (pi_id, precio_str, grupo_str, tr_id, prec_rep_str) in enumerate(
+        zip_longest(prenda_item_ids, precios, grupos, tipo_reparacion_ids, precios_reparacion, fillvalue=''), 1
+    ):
+        if not pi_id:
             continue
+        if pi_id in seen:
+            errores.append(f"Fila {i}: item duplicado.")
+            continue
+        seen.add(pi_id)
         try:
-            prenda   = PrendaInventario.objects.get(pk=art_id)
-            cantidad = int(cant_str or 1)
-            precio   = Decimal(precio_str or prenda.precio)
-            if cantidad < 1:
-                errores.append(f"Fila {i}: la cantidad debe ser al menos 1.")
-                continue
-            if prenda.cantidad < cantidad:
-                errores.append(f"Fila {i}: stock insuficiente para {prenda} (disponible: {prenda.cantidad}).")
-                continue
-            VentaItem.objects.create(
-                venta=venta, articulo=prenda,
-                cantidad=cantidad, precio_unitario=precio,
-            )
-            prenda.cantidad -= cantidad
-            prenda.save()
-        except (PrendaInventario.DoesNotExist, ValueError, Exception):
-            errores.append(f"Fila {i}: datos inválidos.")
+            pi = PrendaItem.objects.select_related('prenda').get(pk=pi_id)
+        except PrendaItem.DoesNotExist:
+            errores.append(f"Fila {i}: item inexistente.")
+            continue
+        if pi.estado != 'disponible':
+            errores.append(f"Fila {i}: {pi.codigo_item} no disponible.")
+            continue
+
+        try:
+            precio = Decimal(precio_str)
+        except Exception:
+            precio = pi.prenda.precio
+        try:
+            grupo = int(grupo_str) or None
+        except (TypeError, ValueError):
+            grupo = None
+        try:
+            precio_reparacion = Decimal(prec_rep_str) if prec_rep_str else Decimal('0')
+        except Exception:
+            precio_reparacion = Decimal('0')
+        tipo_reparacion = None
+        if tr_id:
+            tipo_reparacion = TipoReparacion.objects.filter(pk=tr_id).first()
+        vi = VentaItem.objects.create(
+            venta=venta,
+            prenda_item=pi,
+            precio_unitario=precio,
+            tipo_reparacion=tipo_reparacion,
+            precio_reparacion=precio_reparacion,
+            grupo_conjunto=grupo,
+        )
+        kardex_events.emit_venta(vi.prenda_item, venta, vi.precio_unitario)
+        pi.estado = 'baja'
+        pi.save(update_fields=['estado'])
 
     venta.recalcular_totales()
     return errores
 
 
 def _prendas_venta_json():
-    import json
-    prendas = list(
-        PrendaInventario.objects.filter(tipo='venta', estado='ACT')
-        .values('id', 'nombre', 'talla', 'color', 'precio', 'cantidad')
-    )
-    for p in prendas:
-        p['precio'] = float(p['precio'])
-        p['label'] = str(PrendaInventario.objects.get(pk=p['id']))
-    return json.dumps(prendas)
+    return _prenda_items_json('venta')
 
 
 @login_required
@@ -606,6 +1379,8 @@ def crear_venta(request):
         if form.is_valid():
             venta = form.save()
             errores = _guardar_items_venta(venta, request.POST)
+            from .caja_signals import registrar_venta_en_caja
+            registrar_venta_en_caja(venta)
             if errores:
                 messages.warning(request, 'Venta creada con advertencias: ' + '; '.join(errores))
             else:
@@ -615,10 +1390,21 @@ def crear_venta(request):
             messages.error(request, 'Por favor corrige los errores del formulario.')
     else:
         form = VentaForm()
+    items_preload = []
+    item_id = request.GET.get('item')
+    if item_id:
+        try:
+            pi = PrendaItem.objects.select_related('prenda').get(id=item_id, tipo='venta', estado='disponible')
+            items_preload = [{'prenda_item_id': pi.id, 'precio_unitario': float(pi.prenda.precio), 'grupo_conjunto': None}]
+        except PrendaItem.DoesNotExist:
+            pass
     return render(request, 'misastreria/ventas/form.html', {
         'form': form,
         'titulo': 'Nueva Venta',
         'prendas_json': _prendas_venta_json(),
+        'conjuntos_json': _conjuntos_json('venta'),
+        'items_existentes': json.dumps(items_preload),
+        'tipos_reparacion_json': json.dumps(list(TipoReparacion.objects.values('id', 'nombre').order_by('nombre'))),
     })
 
 
@@ -630,6 +1416,15 @@ def editar_venta(request, id):
         if form.is_valid():
             venta = form.save()
             errores = _guardar_items_venta(venta, request.POST)
+            from .caja_signals import _ajustar_total_en_caja
+            _ajustar_total_en_caja(
+                referencia_field='referencia_venta',
+                instance=venta,
+                concepto_cobro='venta_cobro',
+                nuevo_total=venta.total,
+                forma_pago=getattr(venta, 'forma_pago', 'efectivo') or 'efectivo',
+                cliente=getattr(venta, 'cliente', None),
+            )
             if errores:
                 messages.warning(request, 'Actualizado con advertencias: ' + '; '.join(errores))
             else:
@@ -639,15 +1434,55 @@ def editar_venta(request, id):
             messages.error(request, 'Por favor corrige los errores del formulario.')
     else:
         form = VentaForm(instance=venta)
-    items_existentes = list(venta.items.select_related('articulo').values(
-        'articulo_id', 'cantidad', 'precio_unitario'
-    ))
+    prendas_json = _prendas_venta_json()
+    items_propios_ids = list(venta.items.values_list('prenda_item_id', flat=True))
+    if items_propios_ids:
+        prendas_base = json.loads(prendas_json)
+        ids_en_json = {p['prenda_item_id'] for p in prendas_base}
+        for pi in PrendaItem.objects.filter(pk__in=items_propios_ids).select_related('prenda'):
+            if pi.id not in ids_en_json:
+                p = pi.prenda
+                ubic = f" [{pi.ubicacion}]" if pi.ubicacion else ""
+                label = (
+                    f"{pi.codigo_item} — {p.nombre}"
+                    f"{f' T{p.talla}' if p.talla else ''}"
+                    f"{f' {p.color}' if p.color else ''}"
+                    f" ({pi.get_condicion_display()}){ubic}"
+                )
+                prendas_base.append({
+                    'prenda_item_id': pi.id,
+                    'codigo_item':    pi.codigo_item,
+                    'sku_codigo':     p.codigo,
+                    'sku_nombre':     p.nombre,
+                    'talla':          p.talla,
+                    'color':          p.color,
+                    'condicion':      pi.condicion,
+                    'condicion_label': pi.get_condicion_display(),
+                    'ubicacion':      str(pi.ubicacion) if pi.ubicacion else '',
+                    'precio':         float(p.precio),
+                    'label':          label,
+                    'tipo_prenda_id': p.tipo_prenda_id,
+                })
+        prendas_json = json.dumps(prendas_base)
+
+    items_existentes = [
+        {
+            'prenda_item_id': item.prenda_item_id,
+            'precio_unitario': float(item.precio_unitario),
+            'grupo_conjunto': item.grupo_conjunto,
+            'tipo_reparacion_id': item.tipo_reparacion_id,
+            'precio_reparacion': float(item.precio_reparacion or 0),
+        }
+        for item in venta.items.all()
+    ]
     return render(request, 'misastreria/ventas/form.html', {
         'form':    form,
         'titulo':  'Editar Venta',
         'venta':   venta,
-        'items_existentes': items_existentes,
-        'prendas_json': _prendas_venta_json(),
+        'items_existentes': json.dumps(items_existentes),
+        'prendas_json': prendas_json,
+        'conjuntos_json': _conjuntos_json('venta'),
+        'tipos_reparacion_json': json.dumps(list(TipoReparacion.objects.values('id', 'nombre').order_by('nombre'))),
     })
 
 
@@ -655,9 +1490,12 @@ def editar_venta(request, id):
 def eliminar_venta(request, id):
     venta = get_object_or_404(Venta, id=id)
     if request.method == 'POST':
-        for item in venta.items.all():
-            item.articulo.cantidad += item.cantidad
-            item.articulo.save()
+        from .caja_signals import _reversar_movimientos_activos
+        for item in venta.items.select_related('prenda_item'):
+            pi = item.prenda_item
+            pi.estado = 'disponible'
+            pi.save(update_fields=['estado'])
+        _reversar_movimientos_activos(referencia_field='referencia_venta', instance=venta, usuario=request.user)
         venta.delete()
         messages.success(request, 'Venta eliminada correctamente.')
         return redirect('lista_ventas')
@@ -669,58 +1507,63 @@ def exportar_recibo_pdf(request, id):
     response = HttpResponse(content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="recibo_venta_{venta.codigo}.pdf"'
 
-    doc = SimpleDocTemplate(response, pagesize=letter)
-    elements = []
-    styles = getSampleStyleSheet()
+    st = _pdf_st()
+    W_PAGE, L_W, R_W = 18*cm, 6.5*cm, 11.5*cm
 
-    elements.append(Paragraph("Sastrería Confort", styles['Heading1']))
-    elements.append(Paragraph(f"Recibo de Venta — {venta.codigo}", styles['Heading2']))
-    elements.append(Spacer(1, 0.1 * inch))
+    cliente = venta.cliente
+    cli_str = f"{cliente.nombres} {cliente.apellido_paterno}" if cliente else '—'
+    tel_str = getattr(cliente, 'celular', '—') or '—'
+    emp_str = str(venta.empleado) if venta.empleado else '—'
+    fec_str = venta.fecha_venta.strftime('%d/%m/%Y')
+    cod_str = venta.codigo
 
-    info = [
-        ['Cliente', str(venta.cliente) if venta.cliente else '—'],
-        ['Empleado', str(venta.empleado) if venta.empleado else '—'],
-        ['Fecha', venta.fecha_venta.strftime('%d/%m/%Y')],
+    left_data = [
+        [Paragraph('DATOS DEL CLIENTE', st['sec']), ''],
+        [Paragraph('<b>Cliente:</b>',    st['kl']), Paragraph(cli_str, st['kv'])],
+        [Paragraph('<b>Teléfono:</b>',   st['kl']), Paragraph(tel_str, st['kv'])],
+        [Paragraph('<b>Empleado:</b>',   st['kl']), Paragraph(emp_str, st['kv'])],
+        [Paragraph('<b>Fecha venta:</b>',st['kl']), Paragraph(fec_str, st['kv'])],
     ]
-    info_table = Table(info, colWidths=[120, 350])
-    info_table.setStyle(TableStyle([
-        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('TOPPADDING', (0, 0), (-1, -1), 4),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-    ]))
-    elements.append(info_table)
-    elements.append(Spacer(1, 0.15 * inch))
+    left_tbl = _pdf_left_tbl(left_data, L_W)
 
-    data = [['Prenda', 'Cant.', 'P. Unit. (Bs.)', 'Subtotal (Bs.)']]
-    for item in venta.items.select_related('articulo').all():
-        data.append([
-            str(item.articulo),
-            str(item.cantidad),
-            f"{item.precio_unitario:.2f}",
-            f"{item.subtotal:.2f}",
+    venta_items = list(venta.items.select_related('prenda_item__prenda').all())
+    items_rows = [
+        [Paragraph('DETALLE DE VENTA', st['sec']), '', '', '', '', ''],
+        ['N°', 'Prenda', 'Color', 'Talla', 'P. Unit.', 'Subtotal'],
+    ]
+    for i, item in enumerate(venta_items, 1):
+        prenda = item.prenda_item.prenda if item.prenda_item else None
+        items_rows.append([
+            str(i),
+            prenda.nombre if prenda else '—',
+            (prenda.color or '—') if prenda else '—',
+            (prenda.talla or '—') if prenda else '—',
+            f"Bs {item.precio_unitario:.2f}",
+            f"Bs {item.subtotal:.2f}",
         ])
-    data.append(['', '', 'Subtotal', f"{venta.subtotal:.2f}"])
+    items_rows.append(['', '', '', '', 'Subtotal:', f"Bs {venta.subtotal:.2f}"])
     if venta.descuento:
-        data.append(['', '', f'Descuento ({venta.descuento}%)', f"- {(venta.subtotal - venta.total):.2f}"])
-    data.append(['', '', 'TOTAL', f"Bs. {venta.total:.2f}"])
+        items_rows.append(['', '', '', '', f'Desc. {venta.descuento}%:',
+                           f"-Bs {(venta.subtotal - venta.total):.2f}"])
+    items_rows.append(['', '', '', '', 'TOTAL:', f"Bs {venta.total:.2f}"])
+    right_tbl = _pdf_items_tbl(items_rows, [0.5*cm, 3.6*cm, 1.8*cm, 1.2*cm, 2.2*cm, 2.2*cm], 2)
 
-    items_table = Table(data, colWidths=[220, 50, 110, 110])
-    items_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e3a8a')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 0), (-1, -1), 9),
-        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
-        ('GRID', (0, 0), (-1, -2), 0.5, colors.grey),
-        ('FONTNAME', (-2, -1), (-1, -1), 'Helvetica-Bold'),
-        ('TOPPADDING', (0, 0), (-1, -1), 5),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-    ]))
-    elements.append(items_table)
+    def on_page(c, doc):
+        _pdf_page(c, doc, 'DE VENTA', cod_str, fec_str, '', 'Completado')
 
-    doc.build(elements)
+    doc = SimpleDocTemplate(response, pagesize=A4,
+                            topMargin=5.2*cm, bottomMargin=2.0*cm,
+                            leftMargin=1.5*cm, rightMargin=1.5*cm)
+    doc.build(
+        [
+            _pdf_body(left_tbl, right_tbl, L_W, R_W),
+            Spacer(1, 0.5*cm),
+            _pdf_total_tbl('TOTAL A PAGAR', f"Bs.  {venta.total:.2f}", W_PAGE),
+            Spacer(1, 0.8*cm),
+            _pdf_sig_tbl(st, W_PAGE),
+        ],
+        onFirstPage=on_page, onLaterPages=on_page,
+    )
     return response
 
 @login_required
@@ -734,15 +1577,17 @@ def get_precio_articulo(request):
 
 @login_required
 def lista_confecciones(request):
-    q = request.GET.get('q', '').strip()
+    q           = request.GET.get('q', '').strip()
     tipo_prenda = request.GET.get('tipo_prenda', '').strip()
-    estado = request.GET.get('estado', '').strip()
-    desde = request.GET.get('desde', '').strip()
-    hasta = request.GET.get('hasta', '').strip()
-    periodo = request.GET.get('periodo', '').strip()
-    orden = request.GET.get('orden', 'desc')
+    estado      = request.GET.get('estado', '').strip()
+    cliente_id  = request.GET.get('cliente_id', '').strip()
+    empleado_id = request.GET.get('empleado_id', '').strip()
+    desde       = request.GET.get('desde', '').strip()
+    hasta       = request.GET.get('hasta', '').strip()
+    periodo     = request.GET.get('periodo', '').strip()
+    orden       = request.GET.get('orden', 'desc')
 
-    hoy = date.today()
+    hoy = django_tz.localdate()
     if periodo == 'semana':
         desde = (hoy - timedelta(days=7)).isoformat()
         hasta = ''
@@ -754,7 +1599,36 @@ def lista_confecciones(request):
         desde = (hoy - timedelta(days=90)).isoformat()
 
     sort = '-creado' if orden == 'desc' else 'creado'
-    confecciones = Confeccion.objects.all().order_by(sort)
+    _dcf = DecimalField(max_digits=10, decimal_places=2)
+    _ingresos_q = (
+        CajaMovimiento.objects
+        .filter(referencia_confeccion=OuterRef('pk'), tipo='ingreso', movimiento_reverso__isnull=True)
+        .values('referencia_confeccion')
+        .annotate(t=Sum('monto'))
+        .values('t')
+    )
+    _egresos_q = (
+        CajaMovimiento.objects
+        .filter(referencia_confeccion=OuterRef('pk'), tipo='egreso', movimiento_reverso__isnull=True)
+        .values('referencia_confeccion')
+        .annotate(t=Sum('monto'))
+        .values('t')
+    )
+    confecciones = (
+        Confeccion.objects
+        .annotate(
+            _ingresos_caja=Coalesce(Subquery(_ingresos_q, output_field=_dcf), Value(Decimal('0')), output_field=_dcf),
+            _egresos_caja=Coalesce(Subquery(_egresos_q, output_field=_dcf), Value(Decimal('0')), output_field=_dcf),
+        )
+        .annotate(
+            saldo_caja=Greatest(
+                ExpressionWrapper(F('precio') - F('_ingresos_caja') + F('_egresos_caja'), output_field=_dcf),
+                Value(Decimal('0')),
+                output_field=_dcf,
+            )
+        )
+        .order_by(sort)
+    )
     _p = request.GET.copy(); _p['orden'] = 'asc' if orden == 'desc' else 'desc'; _p.pop('page', None)
     orden_toggle_url = '?' + _p.urlencode()
     if q:
@@ -764,8 +1638,12 @@ def lista_confecciones(request):
             Q(cliente__apellido_paterno__icontains=q) |
             Q(cliente__ci__icontains=q)
         )
+    if cliente_id:
+        confecciones = confecciones.filter(cliente_id=cliente_id)
+    if empleado_id:
+        confecciones = confecciones.filter(empleado_id=empleado_id)
     if tipo_prenda:
-        confecciones = confecciones.filter(items__tipo_prenda=tipo_prenda).distinct()
+        confecciones = confecciones.filter(items__tipo_prenda_id=tipo_prenda).distinct()
     if estado:
         confecciones = confecciones.filter(estado=estado)
     if desde:
@@ -783,11 +1661,12 @@ def lista_confecciones(request):
         'q': q,
         'tipo_prenda': tipo_prenda,
         'estado': estado,
+        'cliente_id': cliente_id, 'empleado_id': empleado_id,
         'desde': desde,
         'hasta': hasta,
         'periodo': periodo,
         'orden': orden, 'orden_toggle_url': orden_toggle_url,
-        'tipo_prenda_choices': Confeccion.TIPO_PRENDA_CHOICES,
+        'tipo_prenda_opts': list(TipoPrenda.objects.values('id', 'nombre')),
         'estado_choices': Confeccion.ESTADO_CHOICES,
     })
 
@@ -804,7 +1683,7 @@ def crear_confeccion(request):
             formset.instance = confeccion
             formset.save()
             messages.success(request, f"Confección {confeccion.codigo} creada exitosamente.")
-            return redirect('lista_confecciones')
+            return redirect('detalle_confeccion', id=confeccion.id)
         else:
             messages.error(request, "Por favor corrige los errores del formulario.")
     else:
@@ -812,21 +1691,25 @@ def crear_confeccion(request):
         desde_alquiler_id = request.GET.get('desde_alquiler')
         if desde_alquiler_id:
             try:
-                alquiler = Alquiler.objects.select_related('cliente').prefetch_related('items__articulo').get(pk=desde_alquiler_id)
+                alquiler = Alquiler.objects.select_related('cliente').prefetch_related('items__prenda_item__prenda').get(pk=desde_alquiler_id)
                 initial['cliente'] = alquiler.cliente_id
-                primer_item = alquiler.items.select_related('articulo').first()
-                if primer_item:
-                    initial['color'] = primer_item.articulo.color
-                    initial['modelo'] = primer_item.articulo.modelo
+                primer_item = alquiler.items.select_related('prenda_item__prenda').first()
+                if primer_item and primer_item.prenda_item:
+                    initial['color'] = primer_item.prenda_item.prenda.color
+                    initial['modelo'] = primer_item.prenda_item.prenda.modelo
                 initial['observaciones'] = f"Basado en alquiler {alquiler.codigo}"
             except Alquiler.DoesNotExist:
                 pass
         form = ConfeccionForm(initial=initial)
         formset = ConfeccionItemFormSet(prefix='items')
+    tipos_prenda = list(TipoPrenda.objects.values('id', 'nombre', 'plantilla'))
+    modelo_opts = list(ModeloConfeccion.objects.values_list('nombre', flat=True))
     return render(request, 'misastreria/confecciones/form.html', {
         'form': form,
         'formset': formset,
         'titulo': 'Crear Confección',
+        'tipos_prenda_json': json.dumps(tipos_prenda),
+        'modelo_opts_json': json.dumps(modelo_opts),
     })
 
 @login_required
@@ -839,30 +1722,106 @@ def editar_confeccion(request, id):
             form.save()
             formset.save()
             messages.success(request, 'Confección actualizada exitosamente.')
-            return redirect('lista_confecciones')
+            return redirect('detalle_confeccion', id=confeccion.id)
         else:
             messages.error(request, "Por favor corrige los errores del formulario.")
     else:
         form = ConfeccionForm(instance=confeccion)
         formset = ConfeccionItemFormSet(instance=confeccion, prefix='items')
+    tipos_prenda = list(TipoPrenda.objects.values('id', 'nombre', 'plantilla'))
+    modelo_opts = list(ModeloConfeccion.objects.values_list('nombre', flat=True))
     return render(request, 'misastreria/confecciones/form.html', {
         'form': form,
         'formset': formset,
         'titulo': 'Editar Confección',
         'confeccion': confeccion,
+        'tipos_prenda_json': json.dumps(tipos_prenda),
+        'modelo_opts_json': json.dumps(modelo_opts),
     })
+
+@login_required
+def detalle_confeccion(request, id):
+    from .forms import PagoConfeccionForm
+    confeccion = get_object_or_404(Confeccion, id=id)
+    items = confeccion.items.select_related('tipo_prenda').all()
+    pagos = confeccion.caja_movimientos.filter(
+        movimiento_reverso__isnull=True,
+        concepto__in=['confeccion_adelanto', 'confeccion_pago', 'confeccion_saldo'],
+    ).order_by('-fecha', '-id')
+    return render(request, 'misastreria/confecciones/detalle.html', {
+        'confeccion': confeccion,
+        'items': items,
+        'pagos': pagos,
+        'precio': confeccion.precio,
+        'pagado': confeccion.total_pagado,
+        'saldo': confeccion.saldo_pendiente,
+        'form': PagoConfeccionForm(),
+    })
+
+
+@login_required
+def agregar_pago_confeccion(request, id):
+    from .forms import PagoConfeccionForm
+    from .caja_signals import registrar_pago_confeccion
+    from django.http import HttpResponseNotAllowed
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['POST'])
+    confeccion = get_object_or_404(Confeccion, id=id)
+    form = PagoConfeccionForm(request.POST)
+    if form.is_valid():
+        monto = form.cleaned_data['monto']
+        saldo = confeccion.saldo_pendiente
+        if monto > saldo:
+            form.add_error('monto', f"El pago excede el saldo pendiente de Bs {saldo:.2f}.")
+        else:
+            registrar_pago_confeccion(
+                confeccion,
+                monto,
+                form.cleaned_data['forma_pago'],
+                form.cleaned_data.get('descripcion', ''),
+                request.user,
+            )
+            messages.success(request, f"Pago de Bs {monto:.2f} registrado correctamente.")
+            return redirect('detalle_confeccion', id=id)
+    items = confeccion.items.select_related('tipo_prenda').all()
+    pagos = confeccion.caja_movimientos.filter(
+        movimiento_reverso__isnull=True,
+        concepto__in=['confeccion_adelanto', 'confeccion_pago', 'confeccion_saldo'],
+    ).order_by('-fecha', '-id')
+    return render(request, 'misastreria/confecciones/detalle.html', {
+        'confeccion': confeccion,
+        'items': items,
+        'pagos': pagos,
+        'precio': confeccion.precio,
+        'pagado': confeccion.total_pagado,
+        'saldo': confeccion.saldo_pendiente,
+        'form': form,
+    })
+
 
 @login_required
 def eliminar_confeccion(request, id):
     confeccion = get_object_or_404(Confeccion, id=id)
     if request.method == 'POST':
         try:
-            confeccion.delete()
+            from .caja_signals import _reversar_movimientos_activos
+            with transaction.atomic():
+                _reversar_movimientos_activos(referencia_field='referencia_confeccion', instance=confeccion, usuario=request.user)
+                confeccion.delete()
             messages.success(request, 'Confección eliminada exitosamente.')
         except ProtectedError:
             messages.error(request, 'No se puede eliminar la confección porque está asociada a otros registros.')
         return redirect('lista_confecciones')
     return render(request, 'misastreria/confecciones/eliminar.html', {'confeccion': confeccion})
+
+@login_required
+def confeccion_en_proceso(request, id):
+    confeccion = get_object_or_404(Confeccion, id=id)
+    if request.method == 'POST' and confeccion.estado == 'pendiente':
+        confeccion.estado = 'en_proceso'
+        confeccion.save()
+        messages.success(request, f'Confección {confeccion.codigo} marcada como En Proceso.')
+    return redirect('detalle_confeccion', id=confeccion.id)
 
 @login_required
 def entregar_confeccion(request, id):
@@ -871,70 +1830,138 @@ def entregar_confeccion(request, id):
         messages.error(request, 'La confección ya está marcada como entregada.')
         return redirect('lista_confecciones')
     if request.method == 'POST':
+        from dateutil.relativedelta import relativedelta
+        from datetime import date
+        forma_pago = request.POST.get('forma_pago', 'efectivo')
+        from .models import FORMA_PAGO_CHOICES as _FPC
+        valid = [k for k, _ in _FPC]
+        confeccion.forma_pago = forma_pago if forma_pago in valid else 'efectivo'
         confeccion.estado = 'entregado'
         confeccion.saldo = 0
+        if not confeccion.fecha_entrega:
+            confeccion.fecha_entrega = date.today()
+        if confeccion.garantia_meses and not confeccion.garantia_hasta:
+            confeccion.garantia_hasta = confeccion.fecha_entrega + relativedelta(months=confeccion.garantia_meses)
         confeccion.save()
         messages.success(request, f'Confección {confeccion.codigo} marcada como entregada.')
         return redirect('lista_confecciones')
-    return render(request, 'misastreria/confecciones/entregar.html', {'confeccion': confeccion})
+    from .models import FORMA_PAGO_CHOICES
+    return render(request, 'misastreria/confecciones/entregar.html', {
+        'confeccion': confeccion,
+        'forma_pago_choices': FORMA_PAGO_CHOICES,
+        'saldo_pendiente': confeccion.saldo_pendiente,
+    })
 
 @login_required
 def exportar_recibo_confeccion_pdf(request, id):
     confeccion = get_object_or_404(Confeccion, id=id)
     response = HttpResponse(content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="recibo_confeccion_{confeccion.codigo}.pdf"'
-    
-    doc = SimpleDocTemplate(response, pagesize=letter)
-    elements = []
-    styles = getSampleStyleSheet()
 
-    elements.append(Paragraph("Recibo de Confección", styles['Heading1']))
-    elements.append(Paragraph(f"Código: {confeccion.codigo}", styles['Normal']))
+    st = _pdf_st()
+    W_PAGE, L_W, R_W = 18*cm, 6.5*cm, 11.5*cm
 
-    data = [
-        ['Campo', 'Valor'],
-        ['Fecha Inicio', confeccion.fecha_inicio.strftime('%d/%m/%Y')],
-        ['Prendas', confeccion.tipos_prenda_display or '—'],
-        ['Color', confeccion.color],
-        ['Modelo', confeccion.modelo],
-        ['Cliente', str(confeccion.cliente)],
-        ['Precio', f"${confeccion.precio:.2f}"],
-        ['Fecha de Prueba', confeccion.fecha_prueba.strftime('%d/%m/%Y')],
-        ['Fecha de Entrega', confeccion.fecha_entrega.strftime('%d/%m/%Y')],
-        ['Adelanto', f"${confeccion.adelanto:.2f}"],
-        ['Saldo', f"${confeccion.saldo:.2f}"],
+    def fmt_d(d):
+        return d.strftime('%d/%m/%Y') if d else '—'
+
+    cliente  = confeccion.cliente
+    cli_str  = f"{cliente.nombres} {cliente.apellido_paterno}" if cliente else '—'
+    tel_str  = getattr(cliente, 'celular', '—') or '—'
+    emp_str  = str(confeccion.empleado) if confeccion.empleado else '—'
+    cod_str  = confeccion.codigo
+    fec_str  = fmt_d(confeccion.fecha_inicio)
+    est_str  = confeccion.get_estado_display()
+
+    left_data = [
+        [Paragraph('DATOS DEL ENCARGO', st['sec']), ''],
+        [Paragraph('<b>Cliente:</b>',        st['kl']), Paragraph(cli_str, st['kv'])],
+        [Paragraph('<b>Teléfono:</b>',        st['kl']), Paragraph(tel_str, st['kv'])],
+        [Paragraph('<b>Empleado:</b>',        st['kl']), Paragraph(emp_str, st['kv'])],
+        [Paragraph('<b>Color:</b>',           st['kl']), Paragraph(confeccion.color or '—', st['kv'])],
+        [Paragraph('<b>Modelo:</b>',          st['kl']), Paragraph(confeccion.modelo or '—', st['kv'])],
+        [Paragraph('<b>Fecha inicio:</b>',    st['kl']), Paragraph(fec_str, st['kv'])],
+        [Paragraph('<b>Fecha prueba:</b>',    st['kl']), Paragraph(fmt_d(confeccion.fecha_prueba), st['kv'])],
+        [Paragraph('<b>Fecha entrega:</b>',   st['kl']), Paragraph(fmt_d(confeccion.fecha_entrega), st['kv'])],
+        [Paragraph('<b>Estado:</b>',          st['kl']), Paragraph(est_str, st['kv'])],
     ]
+    if confeccion.observaciones:
+        left_data.append(
+            [Paragraph('<b>Observaciones:</b>', st['kl']),
+             Paragraph(confeccion.observaciones[:80], st['kv'])]
+        )
+    left_tbl = _pdf_left_tbl(left_data, L_W)
 
-    table = Table(data, colWidths=[150, 350])
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.darkgrey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 1), (-1, -1), 10),
-        ('TOPPADDING', (0, 0), (-1, -1), 6),
+    conf_items = list(confeccion.items.select_related('tipo_prenda').all())
+    items_rows = [
+        [Paragraph('PRENDAS A CONFECCIONAR', st['sec']), '', ''],
+        ['N°', 'Tipo de Prenda', 'Talla'],
+    ]
+    for i, item in enumerate(conf_items, 1):
+        items_rows.append([
+            str(i),
+            str(item.tipo_prenda) if item.tipo_prenda else '—',
+            item.talla or '—',
+        ])
+    if not conf_items:
+        items_rows.append(['—', '—', '—'])
+    right_tbl = _pdf_items_tbl(items_rows, [0.7*cm, 7.8*cm, 3.0*cm], 1)
+
+    # Financial summary table (replaces single total)
+    fin_data = [
+        ['Precio total', f"Bs.  {confeccion.precio:.2f}"],
+        ['Adelanto',     f"Bs.  {confeccion.adelanto:.2f}"],
+        ['Saldo pendiente', f"Bs.  {confeccion.saldo:.2f}"],
+    ]
+    fin_tbl = Table(fin_data, colWidths=[W_PAGE * 0.55, W_PAGE * 0.45])
+    fin_tbl.setStyle(TableStyle([
+        ('BACKGROUND',    (0, 0), (-1, -1), _PDF_LGRAY),
+        ('BACKGROUND',    (0, 2), (-1, 2), colors.HexColor('#eef3ff')),
+        ('FONTNAME',      (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME',      (1, 0), (1, -1), 'Helvetica'),
+        ('FONTNAME',      (0, 2), (-1, 2), 'Helvetica-Bold'),
+        ('FONTSIZE',      (0, 0), (-1, -1), 10),
+        ('FONTSIZE',      (1, 2), (1, 2), 13),
+        ('TEXTCOLOR',     (1, 2), (1, 2), _PDF_NAVY),
+        ('ALIGN',         (0, 0), (0, -1), 'LEFT'),
+        ('ALIGN',         (1, 0), (1, -1), 'RIGHT'),
+        ('TOPPADDING',    (0, 0), (-1, -1), 6),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 8),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 8),
+        ('BOX',           (0, 0), (-1, -1), 1, _PDF_GOLD),
+        ('LINEBELOW',     (0, 1), (-1, 1), 0.5, colors.HexColor('#cccccc')),
     ]))
-    
-    elements.append(table)
-    doc.build(elements)
+
+    def on_page(c, doc):
+        _pdf_page(c, doc, 'DE CONFECCIÓN', cod_str, fec_str, '', est_str)
+
+    doc = SimpleDocTemplate(response, pagesize=A4,
+                            topMargin=5.2*cm, bottomMargin=2.0*cm,
+                            leftMargin=1.5*cm, rightMargin=1.5*cm)
+    doc.build(
+        [
+            _pdf_body(left_tbl, right_tbl, L_W, R_W),
+            Spacer(1, 0.5*cm),
+            fin_tbl,
+            Spacer(1, 0.8*cm),
+            _pdf_sig_tbl(st, W_PAGE),
+        ],
+        onFirstPage=on_page, onLaterPages=on_page,
+    )
     return response
 
 @login_required
 def lista_alquileres(request):
-    q      = request.GET.get('q', '').strip()
-    estado = request.GET.get('estado', '').strip()
-    prenda = request.GET.get('prenda', '').strip()
-    desde  = request.GET.get('desde', '').strip()
-    hasta  = request.GET.get('hasta', '').strip()
-    periodo = request.GET.get('periodo', '').strip()
-    orden  = request.GET.get('orden', 'desc')
+    q          = request.GET.get('q', '').strip()
+    estado     = request.GET.get('estado', '').strip()
+    prenda     = request.GET.get('prenda', '').strip()
+    cliente_id = request.GET.get('cliente_id', '').strip()
+    desde      = request.GET.get('desde', '').strip()
+    hasta      = request.GET.get('hasta', '').strip()
+    periodo    = request.GET.get('periodo', '').strip()
+    orden      = request.GET.get('orden', 'desc')
 
-    hoy = date.today()
+    hoy = django_tz.localdate()
     if periodo == 'semana':
         desde = (hoy - timedelta(days=7)).isoformat(); hasta = ''
     elif periodo == 'mes':
@@ -954,10 +1981,12 @@ def lista_alquileres(request):
             Q(cliente__nombres__icontains=q) |
             Q(cliente__apellido_paterno__icontains=q) |
             Q(cliente__ci__icontains=q) |
-            Q(items__articulo__nombre__icontains=q)
+            Q(items__prenda_item__prenda__nombre__icontains=q)
         ).distinct()
+    if cliente_id:
+        alquileres = alquileres.filter(cliente_id=cliente_id)
     if prenda:
-        alquileres = alquileres.filter(items__articulo__nombre__icontains=prenda).distinct()
+        alquileres = alquileres.filter(items__prenda_item__prenda__nombre__icontains=prenda).distinct()
     if estado:
         alquileres = alquileres.filter(estado=estado)
     if desde:
@@ -974,52 +2003,101 @@ def lista_alquileres(request):
         'total':    total,
         'q':        q,
         'prenda':   prenda,
+        'cliente_id': cliente_id,
         'estado':   estado,
         'desde':    desde,
         'hasta':    hasta,
         'periodo':  periodo,
         'orden':    orden,
         'orden_toggle_url': orden_toggle_url,
-        'estado_choices':   Alquiler.ESTADO_OPCIONES,
+        'estado_choices': [(n, n) for n in EstadoAlquiler.objects.values_list('nombre', flat=True)],
+        'estado_mapa':    {e.nombre: e.color for e in EstadoAlquiler.objects.all()},
     })
 
 
 def _guardar_items_alquiler(alquiler, post_data, estado_anterior=None):
-    """Guarda los ítems del alquiler y gestiona el stock."""
-    # Si había estado 'alquilado', restaurar stock de ítems viejos antes de reemplazarlos
-    if estado_anterior == 'alquilado':
-        for item in alquiler.items.all():
-            item.articulo.cantidad += item.cantidad
-            item.articulo.save()
+    """Guarda los ítems del alquiler y gestiona el estado de cada PrendaItem."""
+    ESTADOS_QUE_BLOQUEAN = {'alquilado', 'reservado'}
+    ESTADOS_NORMALES = {'alquilado', 'devuelto', 'reservado'}
+    if estado_anterior in ESTADOS_QUE_BLOQUEAN:
+        nuevo = alquiler.estado
+        if nuevo not in ESTADOS_NORMALES:
+            disposition = post_data.get('items_disposition', 'disponible')
+            if disposition == 'baja':
+                target = 'baja'
+            elif disposition == 'mantener':
+                target = None  # no tocar
+            else:
+                target = 'disponible'
+        else:
+            target = 'disponible'
+
+        if target is not None:
+            for item in alquiler.items.select_related('prenda_item'):
+                pi = item.prenda_item
+                pi.estado = target
+                pi.save(update_fields=['estado'])
+    kardex_events.delete_eventos_alquiler(alquiler)
     alquiler.items.all().delete()
 
-    articulos  = post_data.getlist('item_articulo')
-    cantidades = post_data.getlist('item_cantidad')
-    precios    = post_data.getlist('item_precio')
+    prenda_item_ids       = post_data.getlist('item_prenda_item')
+    precios               = post_data.getlist('item_precio')
+    grupos                = post_data.getlist('item_grupo_conjunto')
+    tipo_reparacion_ids   = post_data.getlist('item_tipo_reparacion')
+    precios_reparacion    = post_data.getlist('item_precio_reparacion')
+    errores               = []
+    seen                  = set()
 
-    errores = []
-    for i, (art_id, cant_str, precio_str) in enumerate(zip(articulos, cantidades, precios), 1):
-        if not art_id:
+    for i, (pi_id, precio_str, grupo_str, tr_id, prec_rep_str) in enumerate(
+        zip_longest(prenda_item_ids, precios, grupos, tipo_reparacion_ids, precios_reparacion, fillvalue=''), 1
+    ):
+        if not pi_id:
             continue
+        if pi_id in seen:
+            errores.append(f"Fila {i}: el item ya fue seleccionado en otra fila.")
+            continue
+        seen.add(pi_id)
         try:
-            prenda   = PrendaInventario.objects.get(pk=art_id)
-            cantidad = int(cant_str or 1)
-            precio   = Decimal(precio_str or prenda.precio)
-            if cantidad < 1:
-                errores.append(f"Fila {i}: la cantidad debe ser al menos 1.")
-                continue
-            if alquiler.estado == 'alquilado' and prenda.cantidad < cantidad:
-                errores.append(f"Fila {i}: stock insuficiente para {prenda} (disponible: {prenda.cantidad}).")
-                continue
-            AlquilerItem.objects.create(
-                alquiler=alquiler, articulo=prenda,
-                cantidad=cantidad, precio_unitario=precio,
+            pi = PrendaItem.objects.select_related('prenda').get(pk=pi_id)
+        except PrendaItem.DoesNotExist:
+            errores.append(f"Fila {i}: item inexistente.")
+            continue
+
+        if alquiler.estado in ESTADOS_QUE_BLOQUEAN and pi.estado != 'disponible':
+            errores.append(
+                f"Fila {i}: el item {pi.codigo_item} no está disponible "
+                f"(estado: {pi.get_estado_display()})."
             )
+            continue
+
+        try:
+            precio = Decimal(precio_str)
+        except Exception:
+            precio = pi.prenda.precio
+        try:
+            grupo = int(grupo_str) or None
+        except (TypeError, ValueError):
+            grupo = None
+        try:
+            precio_reparacion = Decimal(prec_rep_str) if prec_rep_str else Decimal('0')
+        except Exception:
+            precio_reparacion = Decimal('0')
+        tipo_reparacion = None
+        if tr_id:
+            tipo_reparacion = TipoReparacion.objects.filter(pk=tr_id).first()
+        ai = AlquilerItem.objects.create(
+            alquiler=alquiler,
+            prenda_item=pi,
+            precio_unitario=precio,
+            tipo_reparacion=tipo_reparacion,
+            precio_reparacion=precio_reparacion,
+            grupo_conjunto=grupo,
+        )
+        if alquiler.estado in ESTADOS_QUE_BLOQUEAN:
             if alquiler.estado == 'alquilado':
-                prenda.cantidad -= cantidad
-                prenda.save()
-        except (PrendaInventario.DoesNotExist, ValueError, Exception):
-            errores.append(f"Fila {i}: datos inválidos.")
+                kardex_events.emit_alquiler(ai.prenda_item, alquiler, ai.precio_unitario)
+            pi.estado = alquiler.estado
+            pi.save(update_fields=['estado'])
 
     alquiler.recalcular_totales()
     return errores
@@ -1032,19 +2110,39 @@ def crear_alquiler(request):
         if form.is_valid():
             alquiler = form.save()
             errores = _guardar_items_alquiler(alquiler, request.POST)
+            from decimal import Decimal
+            from .caja_signals import registrar_alquiler_en_caja, registrar_garantia_alquiler_en_caja, registrar_pago_alquiler
+            adelanto = form.cleaned_data.get('adelanto') or Decimal('0')
+            if adelanto > (alquiler.total or Decimal('0')):
+                adelanto = alquiler.total or Decimal('0')
+            forma = form.cleaned_data.get('forma_pago') or 'efectivo'
+            registrar_alquiler_en_caja(alquiler, adelanto=adelanto, forma_pago=forma)
+            registrar_garantia_alquiler_en_caja(alquiler)
             if errores:
                 messages.warning(request, 'Alquiler creado con advertencias: ' + '; '.join(errores))
             else:
                 messages.success(request, f"Alquiler {alquiler.codigo} creado exitosamente.")
-            return redirect('lista_alquileres')
+            return redirect('detalle_alquiler', id=alquiler.id)
         else:
             messages.error(request, 'Por favor corrige los errores del formulario.')
     else:
         form = AlquilerForm()
+    items_preload = []
+    item_id = request.GET.get('item')
+    if item_id:
+        try:
+            pi = PrendaItem.objects.select_related('prenda').get(id=item_id, tipo='alquiler', estado='disponible')
+            items_preload = [{'prenda_item_id': pi.id, 'precio_unitario': float(pi.prenda.precio), 'grupo_conjunto': None}]
+        except PrendaItem.DoesNotExist:
+            pass
     return render(request, 'misastreria/alquileres/form.html', {
         'form': form,
         'titulo': 'Nuevo Alquiler',
         'prendas_json': _prendas_alquiler_json(),
+        'conjuntos_json': _conjuntos_json('alquiler'),
+        'estado_alquiler_opts': list(EstadoAlquiler.objects.values('nombre', 'color')),
+        'items_existentes': json.dumps(items_preload),
+        'tipos_reparacion_json': json.dumps(list(TipoReparacion.objects.values('id', 'nombre').order_by('nombre'))),
     })
 
 
@@ -1057,6 +2155,16 @@ def editar_alquiler(request, id):
         if form.is_valid():
             alquiler = form.save()
             errores = _guardar_items_alquiler(alquiler, request.POST, estado_anterior=estado_anterior)
+            from .caja_signals import _ajustar_total_en_caja, _ajustar_garantia_alquiler_en_caja
+            _ajustar_total_en_caja(
+                referencia_field='referencia_alquiler',
+                instance=alquiler,
+                concepto_cobro='alquiler_cobro',
+                nuevo_total=alquiler.total,
+                forma_pago=getattr(alquiler, 'forma_pago', 'efectivo') or 'efectivo',
+                cliente=getattr(alquiler, 'cliente', None),
+            )
+            _ajustar_garantia_alquiler_en_caja(alquiler)
             if errores:
                 messages.warning(request, 'Actualizado con advertencias: ' + '; '.join(errores))
             else:
@@ -1066,38 +2174,197 @@ def editar_alquiler(request, id):
             messages.error(request, 'Por favor corrige los errores del formulario.')
     else:
         form = AlquilerForm(instance=alquiler)
-    items_existentes = list(alquiler.items.select_related('articulo').values(
-        'articulo_id', 'cantidad', 'precio_unitario'
-    ))
+    prendas_json = _prendas_alquiler_json()
+
+    # Inyectar items propios del alquiler (aunque estén en estado 'alquilado' o 'reservado')
+    if alquiler.estado in ('alquilado', 'reservado'):
+        items_propios_ids = list(alquiler.items.values_list('prenda_item_id', flat=True))
+        prendas_base = json.loads(prendas_json)
+        ids_en_json = {p['prenda_item_id'] for p in prendas_base}
+        for pi in PrendaItem.objects.filter(pk__in=items_propios_ids).select_related('prenda'):
+            if pi.id not in ids_en_json:
+                p = pi.prenda
+                ubic = f" [{pi.ubicacion}]" if pi.ubicacion else ""
+                label = (
+                    f"{pi.codigo_item} — {p.nombre}"
+                    f"{f' T{p.talla}' if p.talla else ''}"
+                    f"{f' {p.color}' if p.color else ''}"
+                    f" ({pi.get_condicion_display()}){ubic}"
+                )
+                prendas_base.append({
+                    'prenda_item_id': pi.id,
+                    'codigo_item': pi.codigo_item,
+                    'sku_codigo': p.codigo,
+                    'sku_nombre': p.nombre,
+                    'talla': p.talla,
+                    'color': p.color,
+                    'condicion': pi.condicion,
+                    'condicion_label': pi.get_condicion_display(),
+                    'ubicacion': str(pi.ubicacion) if pi.ubicacion else '',
+                    'precio': float(p.precio),
+                    'label': label,
+                    'tipo_prenda_id': p.tipo_prenda_id,
+                })
+        prendas_json = json.dumps(prendas_base)
+
+    # Construir ITEMS_INICIALES para el template
+    items_iniciales = [
+        {
+            'prenda_item_id': item.prenda_item_id,
+            'precio_unitario': float(item.precio_unitario),
+            'grupo_conjunto': item.grupo_conjunto,
+            'tipo_reparacion_id': item.tipo_reparacion_id,
+            'precio_reparacion': float(item.precio_reparacion or 0),
+        }
+        for item in alquiler.items.all()
+    ]
+    items_iniciales_json = json.dumps(items_iniciales)
+
     return render(request, 'misastreria/alquileres/form.html', {
         'form':    form,
         'titulo':  'Editar Alquiler',
         'alquiler': alquiler,
-        'items_existentes': items_existentes,
-        'prendas_json': _prendas_alquiler_json(),
+        'items_existentes': items_iniciales_json,
+        'prendas_json': prendas_json,
+        'conjuntos_json': _conjuntos_json('alquiler'),
+        'estado_alquiler_opts': list(EstadoAlquiler.objects.values('nombre', 'color')),
+        'tipos_reparacion_json': json.dumps(list(TipoReparacion.objects.values('id', 'nombre').order_by('nombre'))),
     })
 
 
-def _prendas_alquiler_json():
-    import json
-    prendas = list(
-        PrendaInventario.objects.filter(tipo='alquiler', estado='ACT')
-        .values('id', 'nombre', 'talla', 'color', 'precio', 'cantidad')
+def _build_prenda_item_opts(tipo=None):
+    qs = (
+        PrendaItem.objects
+        .filter(estado='disponible', prenda__estado='ACT')
+        .select_related('prenda')
+        .order_by('codigo_item')
     )
-    for p in prendas:
-        p['precio'] = float(p['precio'])
-        p['label'] = str(PrendaInventario.objects.get(pk=p['id']))
-    return json.dumps(prendas)
+    if tipo:
+        qs = qs.filter(tipo=tipo)
+    result = []
+    for pi in qs:
+        nombre_prenda = pi.prenda.nombre
+        if pi.prenda.talla:
+            nombre_prenda += f' T{pi.prenda.talla}'
+        result.append({
+            'id': pi.id,
+            'nombre': f'{pi.codigo_item} — {nombre_prenda}',
+            'info': pi.get_estado_display(),
+        })
+    return result
+
+
+def _conjuntos_json(tipo=None):
+    qs = (
+        Conjunto.objects.filter(activo=True)
+        .prefetch_related('slots__prenda_item__prenda')
+        .order_by('nombre')
+    )
+    if tipo:
+        qs = qs.filter(tipo=tipo)
+    data = []
+    for c in qs:
+        slots_out = []
+        requeridos_total = 0
+        requeridos_disponible = 0
+        for s in c.slots.all():
+            pi = s.prenda_item
+            if pi:
+                nombre = pi.prenda.nombre
+                if pi.prenda.talla:
+                    nombre += f' T{pi.prenda.talla}'
+                disponible = pi.estado == 'disponible'
+            else:
+                nombre = 'Sin asignar'
+                disponible = False
+            if not s.opcional:
+                requeridos_total += 1
+                if disponible:
+                    requeridos_disponible += 1
+            slots_out.append({
+                'id': s.id,
+                'prenda_item_id': s.prenda_item_id,
+                'prenda_item_codigo': pi.codigo_item if pi else None,
+                'prenda_item_nombre': nombre,
+                'disponible': disponible,
+                'opcional': s.opcional,
+                'orden': s.orden,
+            })
+
+        if requeridos_total == 0:
+            disponibilidad = 'no_disponible'
+        elif requeridos_disponible == requeridos_total:
+            disponibilidad = 'completo'
+        elif requeridos_disponible > 0:
+            disponibilidad = 'parcial'
+        else:
+            disponibilidad = 'no_disponible'
+
+        data.append({
+            'id': c.id,
+            'nombre': c.nombre,
+            'descripcion': c.descripcion,
+            'precio_sugerido': float(c.precio_sugerido),
+            'disponibilidad': disponibilidad,
+            'slots': slots_out,
+        })
+    return json.dumps(data)
+
+
+def _prenda_items_json(tipo):
+    qs = (
+        PrendaItem.objects
+        .select_related('prenda')
+        .filter(
+            tipo=tipo,
+            prenda__estado='ACT',
+            estado='disponible',
+        )
+        .order_by('prenda__codigo', 'codigo_item')
+    )
+    data = []
+    for pi in qs:
+        p = pi.prenda
+        ubic = f" [{pi.ubicacion}]" if pi.ubicacion else ""
+        label = (
+            f"{pi.codigo_item} — {p.nombre}"
+            f"{f' T{p.talla}' if p.talla else ''}"
+            f"{f' {p.color}' if p.color else ''}"
+            f" ({pi.get_condicion_display()}){ubic}"
+        )
+        data.append({
+            'prenda_item_id': pi.id,
+            'codigo_item':    pi.codigo_item,
+            'sku_codigo':     p.codigo,
+            'sku_nombre':     p.nombre,
+            'talla':          p.talla,
+            'color':          p.color,
+            'condicion':      pi.condicion,
+            'condicion_label': pi.get_condicion_display(),
+            'ubicacion':      str(pi.ubicacion) if pi.ubicacion else '',
+            'precio':         float(p.precio),
+            'label':          label,
+            'tipo_prenda_id': p.tipo_prenda_id,
+            'prenda_inventario_id': pi.prenda_id,
+        })
+    return json.dumps(data)
+
+
+def _prendas_alquiler_json():
+    return _prenda_items_json('alquiler')
 
 
 @login_required
 def eliminar_alquiler(request, id):
     alquiler = get_object_or_404(Alquiler, id=id)
     if request.method == 'POST':
-        if alquiler.estado == 'alquilado':
-            for item in alquiler.items.all():
-                item.articulo.cantidad += item.cantidad
-                item.articulo.save()
+        from .caja_signals import _reversar_movimientos_activos
+        if alquiler.estado in ('alquilado', 'reservado'):
+            for item in alquiler.items.select_related('prenda_item'):
+                pi = item.prenda_item
+                pi.estado = 'disponible'
+                pi.save(update_fields=['estado'])
+        _reversar_movimientos_activos(referencia_field='referencia_alquiler', instance=alquiler, usuario=request.user)
         alquiler.delete()
         messages.success(request, 'Alquiler eliminado correctamente.')
         return redirect('lista_alquileres')
@@ -1107,20 +2374,66 @@ def eliminar_alquiler(request, id):
 @login_required
 def devolver_alquiler(request, id):
     alquiler = get_object_or_404(Alquiler, id=id)
+    if alquiler.estado == 'reservado':
+        return redirect('confirmar_reserva', id=alquiler.id)
     if alquiler.estado == 'devuelto':
         messages.error(request, 'El alquiler ya está marcado como devuelto.')
         return redirect('lista_alquileres')
+
+    _TIPOS_MONETARIOS = ('efectivo', 'qr', 'transferencia')
+    tiene_garantia_monetaria = (
+        alquiler.garantia_tipo in _TIPOS_MONETARIOS
+        and alquiler.garantia_monto
+        and alquiler.garantia_monto > 0
+    )
+
     if request.method == 'POST':
-        for item in alquiler.items.all():
-            item.articulo.cantidad += item.cantidad
-            item.articulo.save()
-            item.articulo.veces_alquilado += 1
-            item.articulo.save()
+        for item in alquiler.items.select_related('prenda_item'):
+            pi = item.prenda_item
+            pi.veces_alquilado = (pi.veces_alquilado or 0) + 1
+            pi.condicion = 'usada'
+            pi.estado = 'disponible'
+            pi.save(update_fields=['veces_alquilado', 'condicion', 'estado'])
         alquiler.estado = 'devuelto'
         alquiler.save()
-        messages.success(request, f'Alquiler {alquiler.codigo} devuelto. Stock restaurado.')
+        for ai in alquiler.items.select_related('prenda_item').all():
+            kardex_events.emit_devolucion(ai.prenda_item, alquiler)
+
+        if tiene_garantia_monetaria:
+            raw = request.POST.get('garantia_devolver', '').strip()
+            try:
+                monto_devuelto = Decimal(raw) if raw else Decimal('0')
+            except Exception:
+                monto_devuelto = Decimal('0')
+            if monto_devuelto > 0:
+                from .caja_signals import registrar_devolucion_garantia_alquiler
+                registrar_devolucion_garantia_alquiler(alquiler, monto_devuelto, request.user)
+
+        messages.success(request, f'Alquiler {alquiler.codigo} devuelto. Items restaurados a disponible.')
         return redirect('lista_alquileres')
-    return render(request, 'misastreria/alquileres/devolver.html', {'alquiler': alquiler})
+
+    return render(request, 'misastreria/alquileres/devolver.html', {
+        'alquiler': alquiler,
+        'tiene_garantia_monetaria': tiene_garantia_monetaria,
+    })
+
+
+@login_required
+def confirmar_reserva(request, id):
+    alquiler = get_object_or_404(Alquiler, id=id)
+    if alquiler.estado != 'reservado':
+        messages.error(request, 'Solo se pueden confirmar alquileres en estado reservado.')
+        return redirect('detalle_alquiler', id=alquiler.id)
+    if request.method == 'POST':
+        for ai in alquiler.items.select_related('prenda_item'):
+            kardex_events.emit_alquiler(ai.prenda_item, alquiler, ai.precio_unitario)
+            ai.prenda_item.estado = 'alquilado'
+            ai.prenda_item.save(update_fields=['estado'])
+        alquiler.estado = 'alquilado'
+        alquiler.save()
+        messages.success(request, f'Reserva {alquiler.codigo} confirmada como alquiler.')
+        return redirect('detalle_alquiler', id=alquiler.id)
+    return render(request, 'misastreria/alquileres/confirmar.html', {'alquiler': alquiler})
 
 
 @login_required
@@ -1129,75 +2442,176 @@ def exportar_comprobante_alquiler_pdf(request, id):
     response = HttpResponse(content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="comprobante_alquiler_{alquiler.codigo}.pdf"'
 
-    doc = SimpleDocTemplate(response, pagesize=letter)
-    elements = []
-    styles = getSampleStyleSheet()
+    st = _pdf_st()
+    W_PAGE, L_W, R_W = 18*cm, 6.5*cm, 11.5*cm
 
-    elements.append(Paragraph("Comprobante de Alquiler", styles['Heading1']))
-    elements.append(Paragraph(f"Código: {alquiler.codigo}", styles['Normal']))
+    cliente  = alquiler.cliente
+    cli_str  = f"{cliente.nombres} {cliente.apellido_paterno}" if cliente else '—'
+    tel_str  = getattr(cliente, 'celular', '—') or '—'
+    emp_str  = str(alquiler.empleado) if alquiler.empleado else '—'
+    garantia = alquiler.garantia or 'Cubre pérdida y daño de las prendas alquiladas.'
+    fec_str  = alquiler.fecha_alquiler.strftime('%d/%m/%Y')
+    fdev_str = alquiler.fecha_devolucion.strftime('%d/%m/%Y')
+    if alquiler.hora_devolucion:
+        fdev_str += f" a las {alquiler.hora_devolucion.strftime('%H:%M')}"
+    hora_hdr = alquiler.hora_devolucion.strftime('%H:%M') if alquiler.hora_devolucion else ''
+    est_str  = alquiler.estado_display
+    cod_str  = alquiler.codigo
 
-    cabecera = [
-        ['Campo', 'Valor'],
-        ['Cliente',      str(alquiler.cliente) if alquiler.cliente else '-'],
-        ['Empleado',     str(alquiler.empleado) if alquiler.empleado else '-'],
-        ['Fecha alquiler',   alquiler.fecha_alquiler.strftime('%d/%m/%Y')],
-        ['Fecha devolución', alquiler.fecha_devolucion.strftime('%d/%m/%Y')],
-        ['Garantía',    alquiler.garantia or '-'],
+    left_data = [
+        [Paragraph('DATOS DEL CLIENTE', st['sec']), ''],
+        [Paragraph('<b>Cliente:</b>',         st['kl']), Paragraph(cli_str, st['kv'])],
+        [Paragraph('<b>Empleado:</b>',         st['kl']), Paragraph(emp_str, st['kv'])],
+        [Paragraph('<b>Teléfono:</b>',         st['kl']), Paragraph(tel_str, st['kv'])],
+        [Paragraph('<b>Garantía:</b>',         st['kl']), Paragraph(garantia[:60], st['kv'])],
+        [Paragraph('<b>Fecha alquiler:</b>',   st['kl']), Paragraph(fec_str, st['kv'])],
+        [Paragraph('<b>Fecha devolución:</b>', st['kl']), Paragraph(fdev_str, st['kv'])],
+        [Paragraph('<b>Aviso:</b>',            st['kl']),
+         Paragraph('En caso de no devolver en la fecha acordada, se aplicará un recargo por día de retraso.',
+                   st['kv'])],
     ]
-    t1 = Table(cabecera, colWidths=[150, 350])
-    t1.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.darkgrey),
-        ('TEXTCOLOR',  (0, 0), (-1, 0), colors.white),
-        ('FONTNAME',   (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE',   (0, 0), (-1, -1), 10),
-        ('GRID',       (0, 0), (-1, -1), 0.5, colors.black),
-        ('TOPPADDING', (0, 0), (-1, -1), 5),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-    ]))
-    elements.append(t1)
+    left_tbl = _pdf_left_tbl(left_data, L_W)
 
-    from reportlab.platypus import Spacer
-    elements.append(Spacer(1, 12))
-    elements.append(Paragraph("Prendas", styles['Heading2']))
-
-    items_data = [['Prenda', 'Cant.', 'Precio unit.', 'Subtotal']]
-    for item in alquiler.items.select_related('articulo'):
-        items_data.append([
-            str(item.articulo), str(item.cantidad),
-            f"{item.precio_unitario:.2f}", f"{item.subtotal:.2f}",
+    alq_items = list(alquiler.items.select_related('prenda_item__prenda'))
+    items_rows = [
+        [Paragraph('DETALLE DE PRENDAS', st['sec']), '', '', '', '', '', ''],
+        ['N°', 'Prenda', 'Color', 'Talla', 'Cant.', 'P. Unit.', 'Subtotal'],
+    ]
+    for i, item in enumerate(alq_items, 1):
+        prenda = item.prenda_item.prenda if item.prenda_item else None
+        items_rows.append([
+            str(i),
+            prenda.nombre if prenda else '—',
+            (prenda.color or '—') if prenda else '—',
+            (prenda.talla or '—') if prenda else '—',
+            '1',
+            f"Bs {item.precio_unitario:.2f}",
+            f"Bs {item.subtotal:.2f}",
         ])
-    items_data.append(['', '', 'Subtotal:', f"{alquiler.subtotal:.2f}"])
+    items_rows.append(['', '', '', '', '', 'Subtotal:', f"Bs {alquiler.subtotal:.2f}"])
     if alquiler.descuento:
-        items_data.append(['', '', f'Descuento {alquiler.descuento}%:', f"-{(alquiler.subtotal - alquiler.total):.2f}"])
-    items_data.append(['', '', 'TOTAL:', f"{alquiler.total:.2f}"])
+        items_rows.append(['', '', '', '', '', f'Desc. {alquiler.descuento}%:',
+                           f"-Bs {(alquiler.subtotal - alquiler.total):.2f}"])
+    items_rows.append(['', '', '', '', '', 'TOTAL:', f"Bs {alquiler.total:.2f}"])
+    right_tbl = _pdf_items_tbl(
+        items_rows,
+        [0.5*cm, 3.0*cm, 1.5*cm, 1.2*cm, 0.8*cm, 2.0*cm, 2.5*cm],
+        2,
+    )
 
-    t2 = Table(items_data, colWidths=[240, 60, 100, 100])
-    t2.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.darkgrey),
-        ('TEXTCOLOR',  (0, 0), (-1, 0), colors.white),
-        ('FONTNAME',   (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTNAME',   (0, -1), (-1, -1), 'Helvetica-Bold'),
-        ('FONTSIZE',   (0, 0), (-1, -1), 10),
-        ('ALIGN',      (1, 0), (-1, -1), 'RIGHT'),
-        ('GRID',       (0, 0), (-1, -2), 0.5, colors.black),
-        ('TOPPADDING', (0, 0), (-1, -1), 5),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    # Condiciones
+    cond_rows = [
+        [Paragraph('CONDICIONES DEL ALQUILER', st['ch'])],
+        [Paragraph('&bull; El cliente es responsable del cuidado de las prendas.', st['ci'])],
+        [Paragraph('&bull; En caso de daño o pérdida, se aplicará el monto correspondiente.', st['ci'])],
+        [Paragraph('&bull; Recargo por retraso: 20% por día de la prenda alquilada.', st['ci'])],
+        [Paragraph('&bull; No se devuelve la garantía por pérdida o daño total.', st['ci'])],
+    ]
+    cond_tbl = Table(cond_rows, colWidths=[W_PAGE])
+    cond_tbl.setStyle(TableStyle([
+        ('BACKGROUND',    (0, 0), (-1, -1), _PDF_LGRAY),
+        ('TOPPADDING',    (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 8),
+        ('BOX',           (0, 0), (-1, -1), 0.5, colors.HexColor('#cccccc')),
     ]))
-    elements.append(t2)
 
-    doc.build(elements)
+    def on_page(c, doc):
+        _pdf_page(c, doc, 'DE ALQUILER DE PRENDAS', cod_str, fec_str, hora_hdr, est_str)
+
+    doc = SimpleDocTemplate(response, pagesize=A4,
+                            topMargin=5.2*cm, bottomMargin=2.0*cm,
+                            leftMargin=1.5*cm, rightMargin=1.5*cm)
+    doc.build(
+        [
+            _pdf_body(left_tbl, right_tbl, L_W, R_W),
+            Spacer(1, 0.4*cm),
+            _pdf_total_tbl('TOTAL A PAGAR', f"Bs.  {alquiler.total:.2f}", W_PAGE),
+            Spacer(1, 0.4*cm),
+            cond_tbl,
+            Spacer(1, 0.6*cm),
+            _pdf_sig_tbl(st, W_PAGE),
+        ],
+        onFirstPage=on_page, onLaterPages=on_page,
+    )
     return response
+
+
+@login_required
+def detalle_alquiler(request, id):
+    from .forms import PagoAlquilerForm
+    alquiler = get_object_or_404(Alquiler, id=id)
+    items = alquiler.items.select_related('prenda_item__prenda').all()
+    pagos = alquiler.caja_movimientos.filter(
+        movimiento_reverso__isnull=True,
+        concepto__in=['alquiler_cobro', 'alquiler_pago'],
+    ).order_by('-fecha', '-id')
+    total = alquiler.total
+    pagado = alquiler.total_pagado
+    saldo = alquiler.saldo_pendiente
+    form = PagoAlquilerForm()
+    return render(request, 'misastreria/alquileres/detalle.html', {
+        'alquiler': alquiler,
+        'items': items,
+        'pagos': pagos,
+        'total': total,
+        'pagado': pagado,
+        'saldo': saldo,
+        'form': form,
+    })
+
+
+@login_required
+def agregar_pago_alquiler(request, id):
+    from .forms import PagoAlquilerForm
+    from .caja_signals import registrar_pago_alquiler
+    from django.http import HttpResponseNotAllowed
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['POST'])
+    alquiler = get_object_or_404(Alquiler, id=id)
+    form = PagoAlquilerForm(request.POST)
+    if form.is_valid():
+        monto = form.cleaned_data['monto']
+        saldo = alquiler.saldo_pendiente
+        if monto > saldo:
+            form.add_error('monto', f"El pago excede el saldo pendiente de Bs {saldo:.2f}.")
+        else:
+            registrar_pago_alquiler(
+                alquiler,
+                monto,
+                form.cleaned_data['forma_pago'],
+                form.cleaned_data.get('descripcion', ''),
+                request.user,
+            )
+            messages.success(request, f"Pago de Bs {monto:.2f} registrado correctamente.")
+            return redirect('detalle_alquiler', id=id)
+    items = alquiler.items.select_related('prenda_item__prenda').all()
+    pagos = alquiler.caja_movimientos.filter(
+        movimiento_reverso__isnull=True,
+        concepto__in=['alquiler_cobro', 'alquiler_pago'],
+    ).order_by('-fecha', '-id')
+    return render(request, 'misastreria/alquileres/detalle.html', {
+        'alquiler': alquiler,
+        'items': items,
+        'pagos': pagos,
+        'total': alquiler.total,
+        'pagado': alquiler.total_pagado,
+        'saldo': alquiler.saldo_pendiente,
+        'form': form,
+    })
+
 
 @login_required
 def lista_transacciones(request):
     q = request.GET.get('q', '').strip()
     tipo_transaccion = request.GET.get('tipo_transaccion', '').strip()
+    tipo_servicio = request.GET.get('tipo_servicio', '').strip()
     desde = request.GET.get('desde', '').strip()
     hasta = request.GET.get('hasta', '').strip()
     periodo = request.GET.get('periodo', '').strip()
     orden = request.GET.get('orden', 'desc')
 
-    hoy = date.today()
+    hoy = django_tz.localdate()
     if periodo == 'semana':
         desde = (hoy - timedelta(days=7)).isoformat()
         hasta = ''
@@ -1219,6 +2633,8 @@ def lista_transacciones(request):
         )
     if tipo_transaccion:
         transacciones = transacciones.filter(tipo_transaccion=tipo_transaccion)
+    if tipo_servicio:
+        transacciones = transacciones.filter(tipo_servicio=tipo_servicio)
     if desde:
         transacciones = transacciones.filter(fecha__gte=desde)
     if hasta:
@@ -1233,11 +2649,13 @@ def lista_transacciones(request):
         'total': total,
         'q': q,
         'tipo_transaccion': tipo_transaccion,
+        'tipo_servicio': tipo_servicio,
         'desde': desde,
         'hasta': hasta,
         'periodo': periodo,
         'orden': orden, 'orden_toggle_url': orden_toggle_url,
         'tipo_transaccion_choices': Transaccion.TIPO_TRANSACCION_CHOICES,
+        'tipo_servicio_choices': Transaccion.TIPO_SERVICIO_CHOICES,
     })
 
 
@@ -1292,7 +2710,17 @@ def lista_prendas(request):
     tipo   = request.GET.get('tipo', '').strip()
     estado = request.GET.get('estado', 'ACT').strip()
 
-    qs = PrendaInventario.objects.all().order_by('-creado')
+    qs = (
+        PrendaInventario.objects
+        .annotate(
+            stock_total=Count('items', filter=~Q(items__estado='baja')),
+            _stock_disponible=Count('items', filter=Q(items__estado='disponible')),
+            items_alquiler=Count('items', filter=Q(items__tipo='alquiler') & ~Q(items__estado='baja')),
+            items_venta=Count('items', filter=Q(items__tipo='venta') & ~Q(items__estado='baja')),
+        )
+        .prefetch_related('items')
+        .order_by('-creado')
+    )
     if q:
         qs = qs.filter(
             Q(codigo__icontains=q) | Q(nombre__icontains=q) |
@@ -1300,7 +2728,7 @@ def lista_prendas(request):
             Q(codigo_referencia__icontains=q)
         )
     if tipo:
-        qs = qs.filter(tipo=tipo)
+        qs = qs.filter(items__tipo=tipo).distinct()
     if estado:
         qs = qs.filter(estado=estado)
 
@@ -1308,13 +2736,22 @@ def lista_prendas(request):
     paginator = Paginator(qs, 15)
     page_obj  = paginator.get_page(request.GET.get('page'))
 
+    # Annotate each page object with alert counts using Python (prefetch_related avoids N+1)
+    for prenda in page_obj:
+        alerta_items = [
+            i for i in prenda.items.all()
+            if i.estado != 'baja' and i.estado_vida_util in ('advertencia', 'critico')
+        ]
+        prenda.items_proximos_baja_count = len(alerta_items)
+        prenda.tiene_critico = any(i.estado_vida_util == 'critico' for i in alerta_items)
+
     return render(request, 'misastreria/prendas/lista.html', {
         'page_obj': page_obj,
         'total':    total,
         'q':        q,
         'tipo':     tipo,
         'estado':   estado,
-        'tipo_choices':   PrendaInventario.TIPO_CHOICES,
+        'tipo_choices':   PrendaItem.TIPO_CHOICES,
         'estado_choices': PrendaInventario.ESTADO_OPCIONES,
     })
 
@@ -1367,12 +2804,147 @@ def eliminar_prenda(request, id):
 
 
 @login_required
+def detalle_prenda(request, id):
+    from django.db.models import Count, Q as Qfilter
+    prenda = get_object_or_404(
+        PrendaInventario.objects.annotate(
+            stock_total=Count('items', filter=~Qfilter(items__estado='baja')),
+            _stock_disponible=Count('items', filter=Qfilter(items__estado='disponible')),
+        ),
+        id=id,
+    )
+    items = prenda.items.all().order_by('codigo_item')
+    resumen = {
+        'disponible': items.filter(estado='disponible').count(),
+        'alquilado':  items.filter(estado='alquilado').count(),
+        'baja':       items.filter(estado='baja').count(),
+        'total':      items.count(),
+    }
+    return render(request, 'misastreria/prendas/detalle.html', {
+        'prenda':  prenda,
+        'items':   items,
+        'resumen': resumen,
+        'ubicacion_opts': list(UbicacionItem.objects.values('id', 'nombre')),
+    })
+
+
+@login_required
+def editar_prenda_item(request, id):
+    item = get_object_or_404(PrendaItem, id=id)
+    if request.method == 'POST':
+        ubicacion_id = request.POST.get('ubicacion', '').strip()
+        if ubicacion_id:
+            try:
+                item.ubicacion = UbicacionItem.objects.get(id=int(ubicacion_id))
+            except (ValueError, UbicacionItem.DoesNotExist):
+                item.ubicacion = None
+        else:
+            item.ubicacion = None
+        item.condicion = request.POST.get('condicion', item.condicion)
+        item.tipo      = request.POST.get('tipo', item.tipo)
+        item.notas     = request.POST.get('notas', '').strip()
+        max_usos_raw = request.POST.get('max_usos', '').strip()
+        if max_usos_raw == '':
+            item.max_usos = None
+        else:
+            try:
+                val = int(max_usos_raw)
+                if val > 0:
+                    item.max_usos = val
+            except (TypeError, ValueError):
+                pass  # silently keep current value on invalid input
+        if item.max_usos and item.max_usos <= item.veces_alquilado:
+            messages.warning(request, f'El máx. de usos ({item.max_usos}) es menor o igual a los usos actuales ({item.veces_alquilado}).')
+        item.save(update_fields=['ubicacion', 'condicion', 'tipo', 'notas', 'max_usos', 'actualizado'])
+        messages.success(request, f'Item {item.codigo_item} actualizado.')
+        return redirect('detalle_prenda', id=item.prenda_id)
+    return redirect('detalle_prenda', id=item.prenda_id)
+
+
+@login_required
+def baja_prenda_item(request, id):
+    item = get_object_or_404(PrendaItem, id=id)
+    if request.method == 'POST':
+        if item.estado in ('alquilado', 'reservado'):
+            messages.error(request, f'El item {item.codigo_item} está {item.get_estado_display().lower()} y no puede darse de baja.')
+            return redirect('detalle_prenda', id=item.prenda_id)
+        item.estado = 'baja'
+        item.fecha_baja = date.today()
+        item.save(update_fields=['estado', 'fecha_baja', 'actualizado'])
+        kardex_events.emit_baja(item)
+        messages.success(request, f'Item {item.codigo_item} dado de baja.')
+        return redirect('detalle_prenda', id=item.prenda_id)
+    return redirect('detalle_prenda', id=item.prenda_id)
+
+
+@login_required
+def items_proximos_baja(request):
+    estado_filter = request.GET.get('estado', 'todos').strip()
+
+    items = PrendaItem.objects.exclude(estado='baja').select_related('prenda').order_by('prenda__nombre')
+    items_con_vida_util = [i for i in items if i.max_usos_efectivo is not None]
+
+    if estado_filter == 'advertencia':
+        items_filtrados = [i for i in items_con_vida_util if i.estado_vida_util == 'advertencia']
+    elif estado_filter == 'critico':
+        items_filtrados = [i for i in items_con_vida_util if i.estado_vida_util == 'critico']
+    else:
+        estado_filter = 'todos'
+        items_filtrados = [i for i in items_con_vida_util if i.estado_vida_util in ('advertencia', 'critico')]
+
+    items_filtrados.sort(key=lambda i: i.porcentaje_vida_util or 0, reverse=True)
+
+    total = len(items_filtrados)
+    paginator = Paginator(items_filtrados, 15)
+    page_obj  = paginator.get_page(request.GET.get('page'))
+
+    return render(request, 'misastreria/prendas/proximos_baja.html', {
+        'page_obj':      page_obj,
+        'total':         total,
+        'estado_filter': estado_filter,
+    })
+
+
+@login_required
+def agregar_items_prenda(request, id):
+    prenda = get_object_or_404(PrendaInventario, id=id)
+    if request.method != 'POST':
+        return redirect('detalle_prenda', id=prenda.id)
+    try:
+        cantidad = int(request.POST.get('cantidad', 1))
+    except (TypeError, ValueError):
+        cantidad = 1
+    cantidad = min(50, max(1, cantidad))
+    tipo      = request.POST.get('tipo', 'alquiler')
+    condicion = request.POST.get('condicion', 'nueva')
+    notas     = request.POST.get('notas', '').strip()
+    ubicacion_id = request.POST.get('ubicacion', '').strip()
+    ubicacion_obj = None
+    if ubicacion_id:
+        try:
+            ubicacion_obj = UbicacionItem.objects.get(id=int(ubicacion_id))
+        except (ValueError, UbicacionItem.DoesNotExist):
+            pass
+    for _ in range(cantidad):
+        pi = PrendaItem.objects.create(
+            prenda=prenda,
+            tipo=tipo,
+            condicion=condicion,
+            ubicacion=ubicacion_obj,
+            notas=notas,
+        )
+        kardex_events.emit_ingreso(pi)
+    messages.success(request, f"Se agregaron {cantidad} item{'s' if cantidad != 1 else ''} a {prenda.codigo}.")
+    return redirect('detalle_prenda', id=prenda.id)
+
+
+@login_required
 def lista_insumos(request):
     q            = request.GET.get('q', '').strip()
     tipo_material= request.GET.get('tipo_material', '').strip()
     estado       = request.GET.get('estado', 'ACT').strip()
 
-    qs = Insumo.objects.all().order_by('-creado')
+    qs = Insumo.objects.all().select_related('tipo_material', 'unidad_medida').order_by('-creado')
     if q:
         qs = qs.filter(
             Q(codigo__icontains=q)    | Q(articulo__icontains=q) |
@@ -1380,7 +2952,7 @@ def lista_insumos(request):
             Q(codigo_referencia__icontains=q)
         )
     if tipo_material:
-        qs = qs.filter(tipo_material=tipo_material)
+        qs = qs.filter(tipo_material_id=tipo_material)
     if estado:
         qs = qs.filter(estado=estado)
 
@@ -1394,8 +2966,8 @@ def lista_insumos(request):
         'q':            q,
         'tipo_material':tipo_material,
         'estado':       estado,
-        'tipo_material_choices': Insumo.TIPO_MATERIAL_CHOICES,
-        'estado_choices':        Insumo.ESTADO_OPCIONES,
+        'tipo_material_opts': list(TipoMaterial.objects.values('id', 'nombre')),
+        'estado_choices':     Insumo.ESTADO_OPCIONES,
     })
 
 
@@ -1412,6 +2984,8 @@ def crear_insumo(request):
     return render(request, 'misastreria/insumos/form.html', {
         'form':   form,
         'titulo': 'Nuevo Insumo',
+        'unidad_medida_opts':  list(UnidadMedida.objects.values('id', 'nombre')),
+        'tipo_material_opts':  list(TipoMaterial.objects.values('id', 'nombre')),
     })
 
 
@@ -1430,6 +3004,8 @@ def editar_insumo(request, id):
         'form':   form,
         'titulo': 'Editar Insumo',
         'insumo': insumo,
+        'unidad_medida_opts':  list(UnidadMedida.objects.values('id', 'nombre')),
+        'tipo_material_opts':  list(TipoMaterial.objects.values('id', 'nombre')),
     })
 
 
@@ -1505,7 +3081,7 @@ def exportar_empleados_pdf(request):
     for e in empleados:
         data.append([
             str(e),
-            e.get_tipo_contrato_display(),
+            str(e.tipo_contrato) if e.tipo_contrato else '-',
             e.fecha_ingreso.strftime('%d/%m/%Y'),
             e.faltas.count(),
             e.permisos.count()
@@ -1580,7 +3156,7 @@ def exportar_empleados_excel(request):
     for e in empleados_qs: # Usamos empleados_qs (con los counts ya hechos)
         ws.append([
             str(e),
-            e.get_tipo_contrato_display(),
+            str(e.tipo_contrato) if e.tipo_contrato else '-',
             e.fecha_ingreso.strftime('%d/%m/%Y'),
             e.faltas_count,   # <-- ¡Usamos el count ya calculado!
             e.permisos_count  # <-- ¡Usamos el count ya calculado!
@@ -1634,7 +3210,7 @@ def reporte_clientes(request):
     for cliente in clientes_filtrados:
         registros = {
             'ventas': cliente.ventas.count(),
-            'reparaciones': cliente.reparaciones_set.count(), # Asumo 'reparaciones_set' si no hay related_name
+            'reparaciones': cliente.reparaciones.count(),
             'confecciones': cliente.confeccion_set.count(),
             'alquileres': cliente.alquileres.count(),
         }
@@ -1913,6 +3489,8 @@ def reporte_reparaciones(request):
     elif export_format == 'excel':
         return exportar_reparaciones_excel(request, reparaciones_filtradas, form.cleaned_data if form.is_valid() else {})
 
+    kpis = _kpis_reparaciones(reparaciones_filtradas)
+
     context = {
         'form': form,
         'reparaciones': reparaciones_filtradas,
@@ -1922,6 +3500,7 @@ def reporte_reparaciones(request):
         'selected_empleado': selected_empleado,
         'selected_tipo_prenda': selected_tipo_prenda,
         'selected_estado': selected_estado,
+        'kpis': kpis,
     }
     return render(request, 'misastreria/reportes/reparaciones.html', context)
 
@@ -1969,8 +3548,7 @@ def exportar_reparaciones_pdf(request, reparaciones_data, filtros_aplicados):
         if filtros_aplicados.get('empleado'):
             filter_text_lines.append(f"Empleado: {filtros_aplicados['empleado'].__str__()}." )
         if filtros_aplicados.get('tipo_prenda'):
-            tipo_prenda_display = dict(Reparacion.TIPO_PRENDA_CHOICES).get(filtros_aplicados['tipo_prenda'], filtros_aplicados['tipo_prenda'])
-            filter_text_lines.append(f"Tipo de Prenda: {tipo_prenda_display}.")
+            filter_text_lines.append(f"Tipo de Prenda: {filtros_aplicados['tipo_prenda']}.")
         if filtros_aplicados.get('estado'):
             estado_display = dict(Reparacion.ESTADO_CHOICES).get(filtros_aplicados['estado'], filtros_aplicados['estado'])
             filter_text_lines.append(f"Estado: {estado_display}.")
@@ -1984,21 +3562,20 @@ def exportar_reparaciones_pdf(request, reparaciones_data, filtros_aplicados):
     table_data = [[
         Paragraph('Código', styles['TableHeader']),
         Paragraph('Fecha Entrega', styles['TableHeader']),
-        Paragraph('Tipo Prenda', styles['TableHeader']),
-        Paragraph('Tipo Reparación', styles['TableHeader']),
-        Paragraph('Costo (BOB)', styles['TableHeader']),
+        Paragraph('Prendas', styles['TableHeader']),
+        Paragraph('Total (BOB)', styles['TableHeader']),
         Paragraph('Cliente', styles['TableHeader']),
         Paragraph('Empleado', styles['TableHeader']),
         Paragraph('Estado', styles['TableHeader'])
     ]]
 
     for rep in reparaciones_data:
+        prendas_txt = ', '.join(str(it.tipo_prenda) for it in rep.items.all()) or '-'
         table_data.append([
             Paragraph(str(rep.codigo), styles['TableContent']),
             Paragraph(rep.fecha_entrega.strftime('%d/%m/%Y'), styles['TableContent']),
-            Paragraph(rep.get_tipo_prenda_display(), styles['TableContent']),
-            Paragraph(rep.get_tipo_reparacion_display(), styles['TableContent']),
-            Paragraph(f"{rep.costo:.2f}" if rep.costo is not None else "N/A", styles['TableContent']),
+            Paragraph(prendas_txt, styles['TableContent']),
+            Paragraph(f"{rep.total:.2f}", styles['TableContent']),
             Paragraph(rep.cliente.__str__() if rep.cliente else "N/A", styles['TableContent']),
             Paragraph(rep.empleado.__str__() if rep.empleado else "N/A", styles['TableContent']),
             Paragraph(rep.get_estado_display(), styles['TableContent']),
@@ -2017,7 +3594,7 @@ def exportar_reparaciones_pdf(request, reparaciones_data, filtros_aplicados):
         ('BOX', (0, 0), (-1, -1), 1, colors.black),
     ])
 
-    col_widths = [0.8*inch, 1*inch, 1.2*inch, 1.2*inch, 0.8*inch, 1.5*inch, 1.5*inch, 0.8*inch]
+    col_widths = [0.8*inch, 1*inch, 1.8*inch, 0.9*inch, 1.5*inch, 1.5*inch, 0.8*inch]
     table = Table(table_data, colWidths=col_widths)
     
     table.setStyle(table_style)
@@ -2100,8 +3677,7 @@ def exportar_reparaciones_excel(request, reparaciones_data, filtros_aplicados):
             ws[f'A{current_filter_row}'].alignment = Alignment(horizontal="center")
             current_filter_row += 1
         if filtros_aplicados.get('tipo_prenda'):
-            tipo_prenda_display = dict(Reparacion.TIPO_PRENDA_CHOICES).get(filtros_aplicados['tipo_prenda'], filtros_aplicados['tipo_prenda'])
-            filter_text = f"Tipo de Prenda: {tipo_prenda_display}."
+            filter_text = f"Tipo de Prenda: {filtros_aplicados['tipo_prenda']}."
             ws.merge_cells(start_row=current_filter_row, start_column=1, end_row=current_filter_row, end_column=filter_col_span)
             ws[f'A{current_filter_row}'] = filter_text
             ws[f'A{current_filter_row}'].font = Font(name='Calibri', size=10)
@@ -2119,7 +3695,7 @@ def exportar_reparaciones_excel(request, reparaciones_data, filtros_aplicados):
     header_row = current_filter_row + 1
 
     # Cabecera de la tabla principal
-    headers = ['Código', 'Fecha Entrega', 'Tipo Prenda', 'Tipo Reparación', 'Costo (BOB)', 'Cliente', 'Empleado', 'Estado']
+    headers = ['Código', 'Fecha Entrega', 'Prendas', 'Total (BOB)', 'Cliente', 'Empleado', 'Estado']
     ws.append(headers)
 
     for col_num, cell in enumerate(ws[header_row]):
@@ -2130,12 +3706,12 @@ def exportar_reparaciones_excel(request, reparaciones_data, filtros_aplicados):
 
     # Datos de la tabla principal
     for rep in reparaciones_data:
+        prendas_txt = ', '.join(str(it.tipo_prenda) for it in rep.items.all()) or '-'
         row_data = [
             str(rep.codigo),
             rep.fecha_entrega.strftime('%d/%m/%Y'),
-            rep.get_tipo_prenda_display(),
-            rep.get_tipo_reparacion_display(),
-            float(rep.costo) if rep.costo is not None else "N/A",
+            prendas_txt,
+            float(rep.total),
             rep.cliente.__str__() if rep.cliente else "N/A",
             rep.empleado.__str__() if rep.empleado else "N/A",
             rep.get_estado_display(),
@@ -2170,7 +3746,7 @@ def exportar_reparaciones_excel(request, reparaciones_data, filtros_aplicados):
     return response
 @login_required
 def reporte_ventas(request):
-    ventas = Venta.objects.prefetch_related('items__articulo').all()
+    ventas = Venta.objects.prefetch_related('items__prenda_item__prenda').all()
     clientes = Cliente.objects.all()
     empleados = Empleado.objects.all()
 
@@ -2199,6 +3775,8 @@ def reporte_ventas(request):
     elif export_format == 'excel':
         return exportar_reporte_ventas_excel(request, ventas, fecha_desde, fecha_hasta, total_ventas)
 
+    kpis = _kpis_ventas(ventas)
+
     context = {
         'ventas': ventas,
         'clientes': clientes,
@@ -2208,6 +3786,7 @@ def reporte_ventas(request):
         'selected_cliente': cliente_id,
         'selected_empleado': empleado_id,
         'total_ventas': total_ventas,
+        'kpis': kpis,
     }
     return render(request, 'misastreria/reportes/reporte_ventas.html', context)
 
@@ -2300,7 +3879,7 @@ def exportar_reporte_ventas_pdf(request, ventas, fecha_desde, fecha_hasta, total
     for venta in ventas:
         cliente_full_name = f"{venta.cliente.nombres} {venta.cliente.apellido_paterno}".strip() if venta.cliente else "N/A"
         empleado_full_name = f"{venta.empleado.nombres} {venta.empleado.apellido_paterno}".strip() if venta.empleado else "N/A"
-        items = list(venta.items.select_related('articulo').all())
+        items = list(venta.items.select_related('prenda_item__prenda').all())
         if items:
             for idx, item in enumerate(items):
                 data.append([
@@ -2308,8 +3887,8 @@ def exportar_reporte_ventas_pdf(request, ventas, fecha_desde, fecha_hasta, total
                     Paragraph(venta.fecha_venta.strftime('%d/%m/%Y') if idx == 0 else '', styles['TableContent']),
                     Paragraph(cliente_full_name if idx == 0 else '', styles['TableContent']),
                     Paragraph(empleado_full_name if idx == 0 else '', styles['TableContent']),
-                    Paragraph(str(item.articulo), styles['TableContent']),
-                    Paragraph(str(item.cantidad), styles['TableContent']),
+                    Paragraph(str(item.prenda_item.prenda) if item.prenda_item else '—', styles['TableContent']),
+                    Paragraph('1', styles['TableContent']),
                     Paragraph(f"{item.precio_unitario:.2f}", styles['TableContent']),
                     Paragraph(f"{item.subtotal:.2f}" if idx == len(items) - 1 else '', styles['TableContent']),
                 ])
@@ -2431,7 +4010,7 @@ def exportar_reporte_ventas_excel(request, ventas, fecha_desde, fecha_hasta, tot
     for venta in ventas:
         cliente_full_name = f"{venta.cliente.nombres} {venta.cliente.apellido_paterno}".strip() if venta.cliente else "N/A"
         empleado_full_name = f"{venta.empleado.nombres} {venta.empleado.apellido_paterno}".strip() if venta.empleado else "N/A"
-        items = list(venta.items.select_related('articulo').all())
+        items = list(venta.items.select_related('prenda_item__prenda').all())
         rows_to_write = items if items else [None]
         for idx, item in enumerate(rows_to_write):
             row_data = [
@@ -2439,8 +4018,8 @@ def exportar_reporte_ventas_excel(request, ventas, fecha_desde, fecha_hasta, tot
                 venta.fecha_venta.strftime('%d/%m/%Y') if idx == 0 else '',
                 cliente_full_name if idx == 0 else '',
                 empleado_full_name if idx == 0 else '',
-                str(item.articulo) if item else '—',
-                item.cantidad if item else '',
+                str(item.prenda_item.prenda) if item and item.prenda_item else '—',
+                1 if item else '',
                 float(item.precio_unitario) if item else '',
                 float(item.subtotal) if item else float(venta.total),
             ]
@@ -2495,15 +4074,14 @@ def reporte_articulos(request):
     context = {
         'articulos': articulos,
     }
-    return render(request, 'misastreria/reportes/reporte_articulos.html', context)
+    return render(request, 'misastreria/reportes/articulos.html', context)
 
 @login_required
 def reporte_confecciones(request):
     confecciones = Confeccion.objects.all()
     clientes = Cliente.objects.all()
     empleados = Empleado.objects.all()
-    # Los artículos ahora son tipos de prenda del modelo Confeccion
-    tipo_prenda_choices = Confeccion.TIPO_PRENDA_CHOICES 
+    tipo_prenda_opts = list(TipoPrenda.objects.values('id', 'nombre'))
     estado_choices = Confeccion.ESTADO_CHOICES
 
     fecha_desde = request.GET.get('fecha_desde')
@@ -2525,7 +4103,7 @@ def reporte_confecciones(request):
         confecciones = confecciones.filter(empleado__id=empleado_id)
     
     if selected_tipo_prenda and selected_tipo_prenda != '':
-        confecciones = confecciones.filter(tipo_prenda=selected_tipo_prenda)
+        confecciones = confecciones.filter(items__tipo_prenda_id=selected_tipo_prenda).distinct()
     
     if selected_estado and selected_estado != '':
         confecciones = confecciones.filter(estado=selected_estado)
@@ -2540,11 +4118,13 @@ def reporte_confecciones(request):
     elif export_format == 'excel':
         return exportar_reporte_confecciones_excel(request, confecciones, fecha_desde, fecha_hasta, total_confecciones)
 
+    kpis = _kpis_confecciones(confecciones)
+
     context = {
         'confecciones': confecciones,
         'clientes': clientes,
         'empleados': empleados,
-        'tipo_prenda_choices': tipo_prenda_choices, # Pasa las opciones del modelo
+        'tipo_prenda_opts': tipo_prenda_opts,
         'estado_choices': estado_choices, # Pasa las opciones de estado
         'selected_fecha_desde': fecha_desde,
         'selected_fecha_hasta': fecha_hasta,
@@ -2553,6 +4133,7 @@ def reporte_confecciones(request):
         'selected_tipo_prenda': selected_tipo_prenda, # Cambiado a tipo_prenda
         'selected_estado': selected_estado, # Nuevo para el estado
         'total_confecciones': total_confecciones,
+        'kpis': kpis,
     }
     return render(request, 'misastreria/reportes/reporte_confecciones.html', context)
 
@@ -2626,11 +4207,10 @@ def exportar_reporte_confecciones_pdf(request, confecciones, fecha_desde, fecha_
         except ObjectDoesNotExist:
             filter_text += f"Encargado (ID {request.GET.get('empleado')}) no encontrado. "
     
-    selected_tipo_prenda = request.GET.get('tipo_prenda') # Usar tipo_prenda
+    selected_tipo_prenda = request.GET.get('tipo_prenda')
     if selected_tipo_prenda and selected_tipo_prenda != '':
-        # Obtener el display del tipo de prenda para el filtro
-        tipo_prenda_display = dict(Confeccion.TIPO_PRENDA_CHOICES).get(selected_tipo_prenda, selected_tipo_prenda)
-        filter_text += f"Tipo de Prenda: {tipo_prenda_display}. "
+        tp_obj = TipoPrenda.objects.filter(pk=selected_tipo_prenda).first()
+        filter_text += f"Tipo de Prenda: {tp_obj.nombre if tp_obj else selected_tipo_prenda}. "
     else:
         filter_text += "Tipo de Prenda: Todas las Prendas. "
 
@@ -2665,8 +4245,8 @@ def exportar_reporte_confecciones_pdf(request, confecciones, fecha_desde, fecha_
             Paragraph(confeccion.fecha_inicio.strftime('%d/%m/%Y'), styles['TableContent']), # Usar fecha_inicio
             Paragraph(cliente_full_name, styles['TableContent']),
             Paragraph(empleado_full_name, styles['TableContent']),
-            Paragraph(confeccion.get_tipo_prenda_display(), styles['TableContent']), # Usar get_tipo_prenda_display
-            Paragraph(confeccion.get_estado_display(), styles['TableContent']), # Usar get_estado_display
+            Paragraph(confeccion.tipos_prenda_display or '—', styles['TableContent']),
+            Paragraph(confeccion.get_estado_display(), styles['TableContent']),
             Paragraph(f"{confeccion.precio:.2f}", styles['TableContent']) # Usar precio
         ]
         
@@ -2757,14 +4337,14 @@ def exportar_reporte_confecciones_excel(request, confecciones, fecha_desde, fech
         except ObjectDoesNotExist:
             filter_text += f"Encargado (ID {request.GET.get('empleado')}) no encontrado. "
     
-    selected_tipo_prenda = request.GET.get('tipo_prenda') # Usar tipo_prenda
+    selected_tipo_prenda = request.GET.get('tipo_prenda')
     if selected_tipo_prenda and selected_tipo_prenda != '':
-        tipo_prenda_display = dict(Confeccion.TIPO_PRENDA_CHOICES).get(selected_tipo_prenda, selected_tipo_prenda)
-        filter_text += f"Tipo de Prenda: {tipo_prenda_display}. "
+        tp_obj = TipoPrenda.objects.filter(pk=selected_tipo_prenda).first()
+        filter_text += f"Tipo de Prenda: {tp_obj.nombre if tp_obj else selected_tipo_prenda}. "
     else:
         filter_text += "Tipo de Prenda: Todas las Prendas. "
 
-    selected_estado = request.GET.get('estado') # Nuevo filtro de estado
+    selected_estado = request.GET.get('estado')
     if selected_estado and selected_estado != '':
         estado_display = dict(Confeccion.ESTADO_CHOICES).get(selected_estado, selected_estado)
         filter_text += f"Estado: {estado_display}. "
@@ -2799,8 +4379,8 @@ def exportar_reporte_confecciones_excel(request, confecciones, fecha_desde, fech
             confeccion.fecha_inicio.strftime('%d/%m/%Y'), # Usar fecha_inicio
             cliente_full_name,
             empleado_full_name,
-            confeccion.get_tipo_prenda_display(), # Usar get_tipo_prenda_display
-            confeccion.get_estado_display(), # Usar get_estado_display
+            confeccion.tipos_prenda_display or '—',
+            confeccion.get_estado_display(),
             confeccion.precio # Usar precio
         ]
         
@@ -2853,10 +4433,10 @@ def exportar_reporte_confecciones_excel(request, confecciones, fecha_desde, fech
 
 @login_required
 def reporte_alquileres(request):
-    alquileres = Alquiler.objects.prefetch_related('items__articulo').all()
+    alquileres = Alquiler.objects.prefetch_related('items__prenda_item__prenda').all()
     clientes = Cliente.objects.all()
-    articulos_inventario = PrendaInventario.objects.filter(tipo='alquiler').order_by('nombre')
-    estado_alquiler_choices = Alquiler.ESTADO_OPCIONES
+    articulos_inventario = PrendaInventario.objects.filter(items__tipo='alquiler').distinct().order_by('nombre')
+    estado_alquiler_choices = [(n, n) for n in EstadoAlquiler.objects.values_list('nombre', flat=True)]
 
     fecha_desde = request.GET.get('fecha_desde')
     fecha_hasta = request.GET.get('fecha_hasta')
@@ -2872,7 +4452,7 @@ def reporte_alquileres(request):
     if cliente_id and cliente_id != '':
         alquileres = alquileres.filter(cliente__id=cliente_id)
     if selected_articulo_id and selected_articulo_id != '':
-        alquileres = alquileres.filter(items__articulo__id=selected_articulo_id).distinct()
+        alquileres = alquileres.filter(items__prenda_item__prenda__id=selected_articulo_id).distinct()
     if selected_estado and selected_estado != '':
         alquileres = alquileres.filter(estado=selected_estado)
 
@@ -2886,6 +4466,8 @@ def reporte_alquileres(request):
     elif export_format == 'excel':
         return exportar_reporte_alquileres_excel(request, alquileres, fecha_desde, fecha_hasta, total_alquileres)
 
+    kpis = _kpis_alquileres(alquileres)
+
     context = {
         'alquileres': alquileres,
         'clientes': clientes,
@@ -2897,6 +4479,7 @@ def reporte_alquileres(request):
         'selected_articulo': selected_articulo_id,
         'selected_estado': selected_estado,
         'total_alquileres': total_alquileres,
+        'kpis': kpis,
     }
     return render(request, 'misastreria/reportes/reporte_alquileres.html', context)
 
@@ -2946,7 +4529,7 @@ def exportar_reporte_alquileres_pdf(request, alquileres, fecha_desde, fecha_hast
             pass
     selected_estado = request.GET.get('estado')
     if selected_estado and selected_estado != '':
-        filter_text += f"Estado: {dict(Alquiler.ESTADO_OPCIONES).get(selected_estado, selected_estado)}. "
+        filter_text += f"Estado: {selected_estado.replace('_', ' ').title()}. "
     if filter_text:
         elements.append(Paragraph(filter_text.strip(), styles['SubTitle']))
         elements.append(Spacer(1, 0.1 * inch))
@@ -2965,7 +4548,7 @@ def exportar_reporte_alquileres_pdf(request, alquileres, fecha_desde, fecha_hast
 
     for alquiler in alquileres:
         cliente_str = f"{alquiler.cliente.nombres} {alquiler.cliente.apellido_paterno}".strip() if alquiler.cliente else "N/A"
-        items = list(alquiler.items.all())
+        items = list(alquiler.items.select_related('prenda_item__prenda').all())
         if items:
             for idx, item in enumerate(items):
                 data.append([
@@ -2973,9 +4556,9 @@ def exportar_reporte_alquileres_pdf(request, alquileres, fecha_desde, fecha_hast
                     Paragraph(alquiler.fecha_alquiler.strftime('%d/%m/%Y') if idx == 0 else '', styles['TableContent']),
                     Paragraph(alquiler.fecha_devolucion.strftime('%d/%m/%Y') if idx == 0 else '', styles['TableContent']),
                     Paragraph(cliente_str if idx == 0 else '', styles['TableContent']),
-                    Paragraph(alquiler.get_estado_display() if idx == 0 else '', styles['TableContent']),
-                    Paragraph(str(item.articulo), styles['TableContent']),
-                    Paragraph(str(item.cantidad), styles['TableContent']),
+                    Paragraph(alquiler.estado_display if idx == 0 else '', styles['TableContent']),
+                    Paragraph(str(item.prenda_item.prenda) if item.prenda_item else '—', styles['TableContent']),
+                    Paragraph('1', styles['TableContent']),
                     Paragraph(f"{item.precio_unitario:.2f}", styles['TableContent']),
                     Paragraph(f"{alquiler.total:.2f}" if idx == len(items) - 1 else '', styles['TableContent']),
                 ])
@@ -2985,7 +4568,7 @@ def exportar_reporte_alquileres_pdf(request, alquileres, fecha_desde, fecha_hast
                 Paragraph(alquiler.fecha_alquiler.strftime('%d/%m/%Y'), styles['TableContent']),
                 Paragraph(alquiler.fecha_devolucion.strftime('%d/%m/%Y'), styles['TableContent']),
                 Paragraph(cliente_str, styles['TableContent']),
-                Paragraph(alquiler.get_estado_display(), styles['TableContent']),
+                Paragraph(alquiler.estado_display, styles['TableContent']),
                 Paragraph('—', styles['TableContent']),
                 Paragraph('', styles['TableContent']),
                 Paragraph('', styles['TableContent']),
@@ -3075,7 +4658,7 @@ def exportar_reporte_alquileres_excel(request, alquileres, fecha_desde, fecha_ha
             pass
     selected_estado = request.GET.get('estado')
     if selected_estado and selected_estado != '':
-        filter_text += f"Estado: {dict(Alquiler.ESTADO_OPCIONES).get(selected_estado, selected_estado)}. "
+        filter_text += f"Estado: {selected_estado.replace('_', ' ').title()}. "
     if filter_text:
         ws.merge_cells(f'A{filter_row}:{col_letter}{filter_row}')
         ws[f'A{filter_row}'] = filter_text.strip()
@@ -3094,7 +4677,7 @@ def exportar_reporte_alquileres_excel(request, alquileres, fecha_desde, fecha_ha
 
     for alquiler in alquileres:
         cliente_str = f"{alquiler.cliente.nombres} {alquiler.cliente.apellido_paterno}".strip() if alquiler.cliente else "N/A"
-        items = list(alquiler.items.all())
+        items = list(alquiler.items.select_related('prenda_item__prenda').all())
         rows = items if items else [None]
         for idx, item in enumerate(rows):
             row_data = [
@@ -3102,9 +4685,9 @@ def exportar_reporte_alquileres_excel(request, alquileres, fecha_desde, fecha_ha
                 alquiler.fecha_alquiler.strftime('%d/%m/%Y') if idx == 0 else '',
                 alquiler.fecha_devolucion.strftime('%d/%m/%Y') if idx == 0 else '',
                 cliente_str if idx == 0 else '',
-                alquiler.get_estado_display() if idx == 0 else '',
-                str(item.articulo) if item else '—',
-                item.cantidad if item else '',
+                alquiler.estado_display if idx == 0 else '',
+                str(item.prenda_item.prenda) if item and item.prenda_item else '—',
+                1 if item else '',
                 float(item.precio_unitario) if item else '',
                 float(item.subtotal) if item else float(alquiler.total),
             ]
@@ -3151,60 +4734,65 @@ def exportar_reporte_alquileres_excel(request, alquileres, fecha_desde, fecha_ha
 
 @login_required
 def reporte_transacciones(request):
-    transacciones = Transaccion.objects.all()
-    tipo_transaccion_choices = Transaccion.TIPO_TRANSACCION_CHOICES
-    tipo_servicio_choices = Transaccion.TIPO_SERVICIO_CHOICES
+    periodo = request.GET.get('periodo', '').strip() or 'mes'
+    hoy_txn = django_tz.localdate()
 
-    fecha_desde = request.GET.get('fecha_desde')
-    fecha_hasta = request.GET.get('fecha_hasta')
-    selected_tipo_transaccion = request.GET.get('tipo_transaccion')
-    selected_tipo_servicio = request.GET.get('tipo_servicio')
-    descripcion_filtro = request.GET.get('descripcion')
+    # Compute date range; default to current month when no periodo param given
+    if periodo == 'hoy':
+        desde = hasta = hoy_txn
+    elif periodo == 'semana':
+        desde = hoy_txn - timedelta(days=6)
+        hasta = hoy_txn
+    elif periodo == 'custom':
+        try:
+            desde = date.fromisoformat(request.GET.get('desde', str(hoy_txn)))
+            hasta = date.fromisoformat(request.GET.get('hasta', str(hoy_txn)))
+        except (ValueError, TypeError):
+            desde = hasta = hoy_txn
+    else:  # 'mes' and any unrecognized value
+        desde = hoy_txn.replace(day=1)
+        hasta = hoy_txn
 
-    # Aplicar filtros
-    if fecha_desde:
-        transacciones = transacciones.filter(fecha__gte=fecha_desde) 
-    if fecha_hasta:
-        fecha_hasta_dt = datetime.strptime(fecha_hasta, '%Y-%m-%d').date() + timedelta(days=1)
-        transacciones = transacciones.filter(fecha__lt=fecha_hasta_dt)
-    
-    if selected_tipo_transaccion and selected_tipo_transaccion != '':
-        transacciones = transacciones.filter(tipo_transaccion=selected_tipo_transaccion)
-    
-    if selected_tipo_servicio and selected_tipo_servicio != '':
-        transacciones = transacciones.filter(tipo_servicio=selected_tipo_servicio)
+    tipo_filter = request.GET.get('tipo', '').strip()
+    concepto_filter = request.GET.get('concepto', '').strip()
 
-    if descripcion_filtro:
-        # Busca la descripción de forma insensible a mayúsculas/minúsculas y que contenga el texto
-        transacciones = transacciones.filter(descripcion__icontains=descripcion_filtro)
+    qs = CajaMovimiento.objects.filter(
+        fecha__date__gte=desde,
+        fecha__date__lte=hasta,
+        movimiento_reverso__isnull=True,
+    ).exclude(
+        concepto__in=['apertura_caja', 'sobrante_caja', 'faltante_caja']
+    ).order_by('-fecha')
 
-    transacciones = transacciones.order_by('fecha') 
+    if tipo_filter:
+        qs = qs.filter(tipo=tipo_filter)
+    if concepto_filter:
+        qs = qs.filter(concepto=concepto_filter)
 
-    # Calcular totales de ingresos y gastos
-    total_ingresos = transacciones.filter(tipo_transaccion='ingreso').aggregate(Sum('monto'))['monto__sum'] or 0.00
-    total_gastos = transacciones.filter(tipo_transaccion='gasto').aggregate(Sum('monto'))['monto__sum'] or 0.00
-    saldo_neto = total_ingresos - total_gastos
+    total_ingresos = qs.filter(tipo='ingreso').aggregate(t=Sum('monto'))['t'] or Decimal('0')
+    total_egresos = qs.filter(tipo='egreso').aggregate(t=Sum('monto'))['t'] or Decimal('0')
+    saldo = total_ingresos - total_egresos
 
-    export_format = request.GET.get('export_format')
-    if export_format == 'pdf':
-        return exportar_reporte_transacciones_pdf(request, transacciones, fecha_desde, fecha_hasta, total_ingresos, total_gastos, saldo_neto)
-    elif export_format == 'excel':
-        return exportar_reporte_transacciones_excel(request, transacciones, fecha_desde, fecha_hasta, total_ingresos, total_gastos, saldo_neto)
+    paginator = Paginator(qs, 15)
+    page_obj = paginator.get_page(request.GET.get('page'))
 
-    context = {
-        'transacciones': transacciones,
-        'tipo_transaccion_choices': tipo_transaccion_choices,
-        'tipo_servicio_choices': tipo_servicio_choices,
-        'selected_fecha_desde': fecha_desde,
-        'selected_fecha_hasta': fecha_hasta,
-        'selected_tipo_transaccion': selected_tipo_transaccion,
-        'selected_tipo_servicio': selected_tipo_servicio,
-        'selected_descripcion': descripcion_filtro,
+    mostrar_banner = isinstance(desde, date) and desde < FECHA_MIGRACION_CAJA
+
+    return render(request, 'misastreria/reportes/reporte_transacciones.html', {
+        'page_obj': page_obj,
+        'total': qs.count(),
+        'desde': desde.isoformat() if hasattr(desde, 'isoformat') else desde,
+        'hasta': hasta.isoformat() if hasattr(hasta, 'isoformat') else hasta,
+        'periodo': periodo,
+        'tipo_filter': tipo_filter,
+        'concepto_filter': concepto_filter,
         'total_ingresos': total_ingresos,
-        'total_gastos': total_gastos,
-        'saldo_neto': saldo_neto,
-    }
-    return render(request, 'misastreria/reportes/reporte_transacciones.html', context)
+        'total_egresos': total_egresos,
+        'saldo': saldo,
+        'concepto_choices': list(CONCEPTO_LABELS.items()),
+        'fecha_migracion': FECHA_MIGRACION_CAJA,
+        'mostrar_banner': mostrar_banner,
+    })
 
 
 def exportar_reporte_transacciones_pdf(request, transacciones, fecha_desde, fecha_hasta, total_ingresos, total_gastos, saldo_neto):
@@ -3522,20 +5110,25 @@ def reporte_inventario(request):
     tipo   = request.GET.get('tipo', '').strip()
     estado = request.GET.get('estado', 'ACT').strip()
 
-    qs = PrendaInventario.objects.all().order_by('nombre', 'talla')
+    qs = PrendaInventario.objects.annotate(
+        items_alquiler=Count('items', filter=Q(items__tipo='alquiler') & ~Q(items__estado='baja')),
+        items_venta=Count('items', filter=Q(items__tipo='venta') & ~Q(items__estado='baja')),
+    ).order_by('nombre', 'talla')
     if q:
         qs = qs.filter(
             Q(codigo__icontains=q) | Q(nombre__icontains=q) |
             Q(color__icontains=q)  | Q(talla__icontains=q)
         )
     if tipo:
-        qs = qs.filter(tipo=tipo)
+        qs = qs.filter(items__tipo=tipo).distinct()
     if estado:
         qs = qs.filter(estado=estado)
 
-    valor_total = qs.filter(estado='ACT').annotate(
-        valor_item=ExpressionWrapper(F('cantidad') * F('precio'), output_field=DecimalField())
-    ).aggregate(total=Sum('valor_item'))['total'] or 0
+    valor_total = PrendaInventario.objects.filter(estado='ACT').annotate(
+        count_active=Count('items', filter=~Q(items__estado='baja')),
+    ).aggregate(
+        total=Sum(ExpressionWrapper(F('count_active') * F('precio'), output_field=DecimalField()))
+    )['total'] or 0
 
     total = qs.count()
     paginator = Paginator(qs, 20)
@@ -3548,30 +5141,22 @@ def reporte_inventario(request):
         'tipo':         tipo,
         'estado':       estado,
         'valor_total':  valor_total,
-        'tipo_choices':   PrendaInventario.TIPO_CHOICES,
+        'tipo_choices':   PrendaItem.TIPO_CHOICES,
         'estado_choices': PrendaInventario.ESTADO_OPCIONES,
     })
 
 
 @login_required
 def reporte_stock(request):
-    prendas = PrendaInventario.objects.filter(estado='ACT').order_by('nombre')
+    prendas = PrendaInventario.objects.filter(estado='ACT').annotate(
+        items_alquiler=Count('items', filter=Q(items__tipo='alquiler') & ~Q(items__estado='baja')),
+        items_venta=Count('items', filter=Q(items__tipo='venta') & ~Q(items__estado='baja')),
+    ).order_by('nombre')
     return render(request, 'misastreria/reportes/stock.html', {'prendas': prendas})
 
 @login_required
 def reporte_ingresos(request):
-    fecha_inicio = request.GET.get('fecha_inicio')
-    fecha_fin = request.GET.get('fecha_fin')
-    transacciones = Transaccion.objects.all()
-
-    if fecha_inicio and fecha_fin:
-        transacciones = transacciones.filter(fecha__range=[fecha_inicio, fecha_fin])
-
-    total_ingresos = transacciones.aggregate(Sum('precio'))['precio__sum'] or 0
-    return render(request, 'misastreria/reportes/ingresos.html', {
-        'transacciones': transacciones,
-        'total_ingresos': total_ingresos,
-    })
+    return redirect('kardex_financiero', permanent=True)
 
 
 # ── Producción ─────────────────────────────────────────────────────────────
@@ -3610,12 +5195,13 @@ def _guardar_insumos_orden(orden, post_data):
 def _insumos_json():
     import json
     insumos = list(
-        Insumo.objects.filter(estado='ACT')
-        .values('id', 'articulo', 'unidad_medida', 'cantidad')
+        Insumo.objects.filter(estado='ACT').select_related('unidad_medida')
+        .values('id', 'articulo', 'unidad_medida__nombre', 'cantidad')
     )
     for ins in insumos:
         ins['cantidad'] = float(ins['cantidad'])
-        ins['label'] = f"{ins['articulo']} ({ins['unidad_medida']}) — stock: {ins['cantidad']}"
+        unidad = ins.pop('unidad_medida__nombre') or ''
+        ins['label'] = f"{ins['articulo']} ({unidad}) — stock: {ins['cantidad']}"
     return json.dumps(insumos)
 
 
@@ -3627,7 +5213,7 @@ def lista_ordenes(request):
     hasta   = request.GET.get('hasta', '').strip()
     periodo = request.GET.get('periodo', '').strip()
 
-    hoy = date.today()
+    hoy = django_tz.localdate()
     if periodo == 'semana':
         desde = (hoy - timedelta(days=7)).isoformat(); hasta = ''
     elif periodo == 'mes':
@@ -3729,15 +5315,2629 @@ def eliminar_orden(request, id):
     return render(request, 'misastreria/produccion/eliminar.html', {'orden': orden})
 
 
+def _crear_items_desde_orden(orden):
+    """
+    Crea N PrendaItem para una OrdenProduccion de tipo 'stock' que acaba
+    de transicionar a 'terminado'. Emite un KardexEvento de ingreso por cada item
+    con descripcion trazable a la orden.
+
+    Precondiciones (caller responsibility):
+    - orden.tipo == 'stock'
+    - orden.prenda_inventario is not None
+    - orden.cantidad >= 1
+    - Llamada DENTRO de transaction.atomic()
+
+    Returns: int — numero de items creados (== orden.cantidad).
+    """
+    descripcion = f'Producción — {orden.codigo}'
+    for _ in range(orden.cantidad):
+        pi = PrendaItem.objects.create(
+            prenda=orden.prenda_inventario,
+            tipo='alquiler',
+            condicion='nueva',
+        )
+        kardex_events.emit_ingreso(pi, descripcion=descripcion)
+    return orden.cantidad
+
+
 @login_required
 def avanzar_estado_orden(request, id):
     orden = get_object_or_404(OrdenProduccion, id=id)
+
+    # Idempotencia explícita: si ya terminó, redirigir sin acción
+    if orden.estado == 'terminado':
+        messages.info(request, f"La orden {orden.codigo} ya está terminada.")
+        return redirect('lista_ordenes')
+
     siguiente = OrdenProduccion.ESTADO_SIGUIENTE.get(orden.estado)
     if not siguiente:
         messages.warning(request, 'Esta orden ya está en estado Terminado.')
         return redirect('lista_ordenes')
+
     if request.method == 'POST':
-        orden.estado = siguiente
-        orden.save()
-        messages.success(request, f"Orden {orden.codigo} avanzó a: {orden.get_estado_display()}.")
+        items_creados = 0
+        with transaction.atomic():
+            orden.estado = siguiente
+            orden.save()
+            if siguiente == 'terminado' and orden.tipo == 'stock':
+                items_creados = _crear_items_desde_orden(orden)
+
+        if items_creados:
+            messages.success(
+                request,
+                f"Orden {orden.codigo} terminada. Se ingresaron {items_creados} "
+                f"prenda{'s' if items_creados != 1 else ''} al inventario "
+                f"de {orden.prenda_inventario.nombre}.",
+            )
+        else:
+            messages.success(request, f"Orden {orden.codigo} avanzó a: {orden.get_estado_display()}.")
+
     return redirect('lista_ordenes')
+
+
+# === Kardex ===
+
+@login_required
+def kardex_item(request, codigo_item):
+    item = get_object_or_404(
+        PrendaItem.objects.select_related('prenda'),
+        codigo_item=codigo_item,
+    )
+
+    eventos = item.kardex_eventos.select_related(
+        'alquiler', 'venta', 'cliente'
+    ).order_by('timestamp')
+
+    metricas = {
+        'total_alquileres': item.alquiler_items.count(),
+        'total_ventas': item.venta_items.count(),
+        'ingreso_acumulado': (
+            sum((ai.precio_unitario for ai in item.alquiler_items.all()), Decimal('0')) +
+            sum((vi.precio_unitario for vi in item.venta_items.all()), Decimal('0'))
+        ),
+    }
+
+    return render(request, 'misastreria/kardex/item.html', {
+        'item': item,
+        'prenda': item.prenda,
+        'eventos': eventos,
+        'metricas': metricas,
+    })
+
+
+@login_required
+def kardex_inventario(request, prenda_id):
+    prenda = get_object_or_404(
+        PrendaInventario.objects.annotate(
+            count_disponible=Count('items', filter=Q(items__estado='disponible')),
+            count_alquilado=Count('items', filter=Q(items__estado='alquilado')),
+            count_reservado=Count('items', filter=Q(items__estado='reservado')),
+            count_baja=Count('items', filter=Q(items__estado='baja')),
+        ),
+        id=prenda_id,
+    )
+
+    items_qs = (
+        prenda.items
+              .select_related('prenda')
+              .prefetch_related('venta_items', 'alquiler_items')
+              .order_by('codigo_item')
+    )
+
+    items_vendidos_ids = set(
+        prenda.items
+              .filter(venta_items__isnull=False)
+              .values_list('id', flat=True)
+              .distinct()
+    )
+
+    resumen = {
+        'disponible': prenda.count_disponible,
+        'alquilado':  prenda.count_alquilado,
+        'reservado':  prenda.count_reservado,
+        'baja':       prenda.count_baja,
+        'vendido':    len(items_vendidos_ids),
+        'total':      prenda.count_disponible + prenda.count_alquilado + prenda.count_reservado + prenda.count_baja,
+    }
+
+    items_view = []
+    for it in items_qs:
+        items_view.append({
+            'obj': it,
+            'is_vendido': it.id in items_vendidos_ids,
+            'count_alquileres': it.alquiler_items.count(),
+            'count_ventas': it.venta_items.count(),
+        })
+
+    return render(request, 'misastreria/kardex/inventario.html', {
+        'prenda': prenda,
+        'resumen': resumen,
+        'items': items_view,
+    })
+
+
+@login_required
+def kardex_financiero(request):
+    hoy = django_tz.localdate()
+    desde_default = hoy.replace(day=1).isoformat()
+    ultimo_dia = calendar.monthrange(hoy.year, hoy.month)[1]
+    hasta_default = hoy.replace(day=ultimo_dia).isoformat()
+
+    desde = request.GET.get('desde', desde_default).strip() or desde_default
+    hasta = request.GET.get('hasta', hasta_default).strip() or hasta_default
+
+    # Read totals from CajaMovimiento ledger (KARDEX-01)
+    movimientos_qs = CajaMovimiento.objects.filter(
+        fecha__date__gte=desde,
+        fecha__date__lte=hasta,
+        movimiento_reverso__isnull=True,
+    ).exclude(concepto__in=['apertura_caja', 'sobrante_caja', 'faltante_caja'])
+
+    total_ingresos = movimientos_qs.filter(tipo='ingreso').aggregate(t=Sum('monto'))['t'] or Decimal('0')
+    total_egresos = movimientos_qs.filter(tipo='egreso').aggregate(t=Sum('monto'))['t'] or Decimal('0')
+    saldo = total_ingresos - total_egresos
+
+    breakdown = (
+        movimientos_qs
+        .values('concepto', 'tipo')
+        .annotate(total=Sum('monto'))
+        .order_by('tipo', 'concepto')
+    )
+
+    # Display-only querysets for service reference (not summed — totals come from ledger)
+    alquileres = Alquiler.objects.filter(
+        fecha_alquiler__range=[desde, hasta]
+    ).select_related('cliente').order_by('-fecha_alquiler')
+    ventas = Venta.objects.filter(
+        fecha_venta__range=[desde, hasta]
+    ).select_related('cliente').order_by('-fecha_venta')
+    transacciones = Transaccion.objects.filter(
+        fecha__range=[desde, hasta]
+    ).order_by('-fecha')
+
+    # Analytics charts
+    chart_daily = _kardex_daily_chart(movimientos_qs, desde, hasta)
+    chart_donut_kardex = _kardex_donut_chart(movimientos_qs)
+
+    breakdown_list = [
+        {
+            'concepto': row['concepto'],
+            'label': CONCEPTO_LABELS.get(row['concepto'], row['concepto'].replace('_', ' ').title()),
+            'tipo': row['tipo'],
+            'total': row['total'],
+        }
+        for row in breakdown
+    ]
+
+    return render(request, 'misastreria/kardex/financiero.html', {
+        'total_ingresos': total_ingresos,
+        'total_egresos': total_egresos,
+        'saldo': saldo,
+        'breakdown': breakdown_list,
+        'alquileres': alquileres,
+        'ventas': ventas,
+        'transacciones': transacciones,
+        'desde': desde,
+        'hasta': hasta,
+        'fecha_migracion': FECHA_MIGRACION_CAJA,
+        'chart_daily': chart_daily,
+        'chart_donut_kardex': chart_donut_kardex,
+    })
+
+
+# ============================================================
+# CAJA — Private helpers
+# ============================================================
+
+def _get_periodo_range(request):
+    """Returns (date_desde, date_hasta) for the requested period."""
+    periodo = request.GET.get('periodo', 'hoy')
+    hoy = django_tz.localdate()
+    if periodo == 'semana':
+        return hoy - timedelta(days=6), hoy
+    elif periodo == 'mes':
+        return hoy.replace(day=1), hoy
+    elif periodo == 'custom':
+        desde_str = request.GET.get('desde', str(hoy))
+        hasta_str = request.GET.get('hasta', str(hoy))
+        try:
+            return date.fromisoformat(desde_str), date.fromisoformat(hasta_str)
+        except (ValueError, TypeError):
+            return hoy, hoy
+    else:  # 'hoy' and default
+        return hoy, hoy
+
+
+def _calcular_arqueo(sesion):
+    """Returns dict keyed by forma_pago with {ingresos, egresos, neto} for a session. Excluye garantías."""
+    from collections import defaultdict
+    arqueo = defaultdict(lambda: {'ingresos': Decimal('0'), 'egresos': Decimal('0'), 'neto': Decimal('0')})
+
+    movs = CajaMovimiento.objects.filter(
+        sesion=sesion,
+        movimiento_reverso__isnull=True,
+    ).exclude(
+        concepto__in=('garantia_alquiler', 'garantia_devolucion', 'apertura_caja', 'sobrante_caja', 'faltante_caja')
+    ).values('forma_pago', 'tipo').annotate(total=Sum('monto'))
+
+    for row in movs:
+        fp = row['forma_pago']
+        if row['tipo'] == 'ingreso':
+            arqueo[fp]['ingresos'] += row['total']
+        else:
+            arqueo[fp]['egresos'] += row['total']
+
+    for fp, vals in arqueo.items():
+        vals['neto'] = vals['ingresos'] - vals['egresos']
+
+    return dict(arqueo)
+
+
+def _build_resumen_context(request):
+    """Builds aggregated context shared by HTML/PDF/Excel resumen views."""
+    desde, hasta = _get_periodo_range(request)
+    periodo = request.GET.get('periodo', 'hoy')
+
+    base_qs = CajaMovimiento.objects.filter(
+        fecha__date__gte=desde,
+        fecha__date__lte=hasta,
+        movimiento_reverso__isnull=True,
+    ).exclude(concepto__in=['apertura_caja', 'sobrante_caja', 'faltante_caja', 'garantia_alquiler', 'garantia_devolucion'])
+
+    total_ingresos = base_qs.filter(tipo='ingreso').aggregate(t=Sum('monto'))['t'] or Decimal('0')
+    total_egresos = base_qs.filter(tipo='egreso').aggregate(t=Sum('monto'))['t'] or Decimal('0')
+    saldo = total_ingresos - total_egresos
+
+    breakdown_concepto = (
+        base_qs
+        .values('concepto', 'tipo')
+        .annotate(total=Sum('monto'))
+        .order_by('tipo', 'concepto')
+    )
+
+    breakdown_forma_pago = (
+        base_qs
+        .values('forma_pago', 'tipo')
+        .annotate(total=Sum('monto'))
+        .order_by('forma_pago', 'tipo')
+    )
+
+    # Daily flow: list of {'fecha': date, 'ingresos': Decimal, 'egresos': Decimal}
+    flujo_por_dia_ingresos = (
+        base_qs.filter(tipo='ingreso')
+        .values('fecha__date')
+        .annotate(total=Sum('monto'))
+    )
+    flujo_por_dia_egresos = (
+        base_qs.filter(tipo='egreso')
+        .values('fecha__date')
+        .annotate(total=Sum('monto'))
+    )
+
+    flujo_map = {}
+    for row in flujo_por_dia_ingresos:
+        d = row['fecha__date']
+        flujo_map.setdefault(d, {'fecha': d, 'ingresos': Decimal('0'), 'egresos': Decimal('0')})
+        flujo_map[d]['ingresos'] += row['total']
+    for row in flujo_por_dia_egresos:
+        d = row['fecha__date']
+        flujo_map.setdefault(d, {'fecha': d, 'ingresos': Decimal('0'), 'egresos': Decimal('0')})
+        flujo_map[d]['egresos'] += row['total']
+
+    flujo_diario = sorted(flujo_map.values(), key=lambda x: x['fecha'])
+
+    sesiones_periodo = CajaSesion.objects.filter(
+        fecha_apertura__date__gte=desde,
+        fecha_apertura__date__lte=hasta,
+    ).order_by('-fecha_apertura')
+
+    movimientos_detalle = CajaMovimiento.objects.filter(
+        fecha__date__gte=desde,
+        fecha__date__lte=hasta,
+    ).select_related('sesion', 'cliente', 'tipo_gasto').order_by('-fecha')
+
+    return {
+        'desde': desde,
+        'hasta': hasta,
+        'periodo': periodo,
+        'total_ingresos': total_ingresos,
+        'total_egresos': total_egresos,
+        'saldo': saldo,
+        'breakdown_concepto': [
+            {**row, 'label': CONCEPTO_LABELS.get(row['concepto'], row['concepto'].replace('_', ' ').title())}
+            for row in breakdown_concepto
+        ],
+        'breakdown_forma_pago': list(breakdown_forma_pago),
+        'flujo_diario': flujo_diario,
+        'sesiones_periodo': sesiones_periodo,
+        'movimientos_detalle': movimientos_detalle,
+    }
+
+
+# ============================================================
+# Analytics — Dashboard helpers
+# ============================================================
+
+def _dashboard_kpis(hoy):
+    """Returns KPI dict for the dashboard analytics section."""
+    from collections import defaultdict
+    mes_inicio = hoy.replace(day=1)
+
+    # Current month ingresos (excluding operational concepts)
+    ingresos_qs = CajaMovimiento.objects.filter(
+        fecha__date__gte=mes_inicio,
+        fecha__date__lte=hoy,
+        movimiento_reverso__isnull=True,
+        tipo='ingreso',
+    ).exclude(concepto__in=CONCEPTOS_OPERATIVOS)
+    ingresos_actual = ingresos_qs.aggregate(t=Sum('monto'))['t'] or Decimal('0')
+
+    egresos_qs = CajaMovimiento.objects.filter(
+        fecha__date__gte=mes_inicio,
+        fecha__date__lte=hoy,
+        movimiento_reverso__isnull=True,
+        tipo='egreso',
+    ).exclude(concepto__in=CONCEPTOS_OPERATIVOS)
+    egresos_actual = egresos_qs.aggregate(t=Sum('monto'))['t'] or Decimal('0')
+
+    # Previous month ingresos
+    mes_anterior_fin = mes_inicio - timedelta(days=1)
+    mes_anterior_inicio = mes_anterior_fin.replace(day=1)
+    ingresos_anterior = CajaMovimiento.objects.filter(
+        fecha__date__gte=mes_anterior_inicio,
+        fecha__date__lte=mes_anterior_fin,
+        movimiento_reverso__isnull=True,
+        tipo='ingreso',
+    ).exclude(concepto__in=CONCEPTOS_OPERATIVOS).aggregate(t=Sum('monto'))['t'] or Decimal('0')
+
+    # Delta percentage
+    if ingresos_anterior == 0:
+        delta_pct = None
+    else:
+        delta_pct = round(float(ingresos_actual - ingresos_anterior) / float(ingresos_anterior) * 100, 1)
+
+    # Servicios activos
+    servicios_activos = (
+        Alquiler.objects.filter(estado='alquilado').count()
+        + Reparacion.objects.filter(estado__in=['pendiente', 'en_proceso']).count()
+        + Confeccion.objects.filter(estado__in=['pendiente', 'en_proceso']).count()
+    )
+
+    # Nuevos clientes del mes
+    clientes_nuevos = Cliente.objects.filter(
+        creado__date__gte=mes_inicio,
+        creado__date__lte=hoy,
+    ).count()
+
+    return {
+        'ingresos_mes': ingresos_actual,
+        'egresos_mes': egresos_actual,
+        'ingresos_anterior': ingresos_anterior,
+        'delta_pct': delta_pct,
+        'servicios_activos': servicios_activos,
+        'clientes_nuevos': clientes_nuevos,
+    }
+
+
+def _dashboard_trend_chart(hoy):
+    """Returns JSON string of weekly ingresos/egresos from FECHA_MIGRACION_CAJA to today (max 12 weeks)."""
+    from collections import defaultdict
+
+    # Only show weeks with real data (from migration date onwards, max 12 weeks back)
+    fecha_inicio_trend = max(hoy - timedelta(weeks=12), FECHA_MIGRACION_CAJA)
+
+    base_qs = (
+        CajaMovimiento.objects
+        .filter(
+            fecha__date__gte=fecha_inicio_trend,
+            fecha__date__lte=hoy,
+            movimiento_reverso__isnull=True,
+        )
+        .exclude(concepto__in=CONCEPTOS_OPERATIVOS)
+    )
+
+    ingresos_rows = base_qs.filter(tipo='ingreso').values('fecha__date').annotate(total=Sum('monto'))
+    egresos_rows  = base_qs.filter(tipo='egreso').values('fecha__date').annotate(total=Sum('monto'))
+
+    week_data = defaultdict(lambda: {'ingresos': 0.0, 'egresos': 0.0, 'start': None})
+    for row in ingresos_rows:
+        d = row['fecha__date']
+        key = d - timedelta(days=d.weekday())  # Monday of that week
+        week_data[key]['ingresos'] += float(row['total'])
+        if week_data[key]['start'] is None:
+            week_data[key]['start'] = key
+    for row in egresos_rows:
+        d = row['fecha__date']
+        key = d - timedelta(days=d.weekday())
+        week_data[key]['egresos'] += float(row['total'])
+        if week_data[key]['start'] is None:
+            week_data[key]['start'] = key
+
+    result = []
+    for week_start in sorted(week_data):
+        data = week_data[week_start]
+        label = week_start.strftime('%-d/%-m')
+        result.append({
+            'label': label,
+            'ingresos': data['ingresos'],
+            'egresos': data['egresos'],
+        })
+
+    return result
+
+
+def _dashboard_donut_chart(hoy):
+    """Returns JSON string of current-month revenue grouped by service type."""
+    mes_inicio = max(hoy.replace(day=1), FECHA_MIGRACION_CAJA)
+
+    SERVICE_GROUPS = [
+        ('Alquiler',   ['alquiler_cobro']),
+        ('Venta',      ['venta_cobro']),
+        ('Confección', ['confeccion_cobro', 'confeccion_adelanto', 'confeccion_saldo']),
+        ('Reparación', ['reparacion_cobro']),
+    ]
+    all_conceptos = [c for _, cs in SERVICE_GROUPS for c in cs]
+
+    rows = (
+        CajaMovimiento.objects
+        .filter(
+            fecha__date__gte=mes_inicio,
+            fecha__date__lte=hoy,
+            tipo='ingreso',
+            concepto__in=all_conceptos,
+            movimiento_reverso__isnull=True,
+        )
+        .values('concepto')
+        .annotate(total=Sum('monto'))
+    )
+
+    # Aggregate per-concepto totals into service groups
+    totals_by_concepto = {row['concepto']: float(row['total']) for row in rows}
+    result = []
+    for label, conceptos in SERVICE_GROUPS:
+        total = sum(totals_by_concepto.get(c, 0.0) for c in conceptos)
+        if total > 0:
+            result.append({'label': label, 'value': total})
+
+    return result
+
+
+# ============================================================
+# Analytics — Fase 2 helpers
+# ============================================================
+
+# --- Batch 1: KPI helpers for existing report views ---
+
+def _kpis_ventas(qs):
+    """Compute KPI summary for a filtered Venta queryset."""
+    agg = qs.aggregate(
+        total=Count('id'),
+        ingreso_total=Sum('total'),
+        ticket_promedio=Avg('total'),
+    )
+    items_vendidos = VentaItem.objects.filter(venta__in=qs).aggregate(total=Count('id'))['total'] or 0
+    return {
+        'total': agg['total'] or 0,
+        'ingreso_total': agg['ingreso_total'] or 0,
+        'ticket_promedio': agg['ticket_promedio'] or 0,
+        'items_vendidos': items_vendidos,
+    }
+
+
+def _kpis_alquileres(qs):
+    """Compute KPI summary for a filtered Alquiler queryset."""
+    agg = qs.aggregate(
+        total=Count('id'),
+        ingreso_total=Sum('total'),
+        ticket_promedio=Avg('total'),
+    )
+    return {
+        'total': agg['total'] or 0,
+        'ingreso_total': agg['ingreso_total'] or 0,
+        'ticket_promedio': agg['ticket_promedio'] or 0,
+        'devueltos': qs.filter(fecha_devolucion__isnull=False).count(),
+        'pendientes': qs.filter(fecha_devolucion__isnull=True).count(),
+    }
+
+
+def _kpis_confecciones(qs):
+    """Compute KPI summary for a filtered Confeccion queryset. Uses precio field (nullable)."""
+    agg = qs.aggregate(
+        total=Count('id'),
+        ingreso_total=Sum('precio'),
+        ticket_promedio=Avg('precio'),
+    )
+    return {
+        'total': agg['total'] or 0,
+        'ingreso_total': agg['ingreso_total'] or 0,
+        'ticket_promedio': agg['ticket_promedio'] or 0,
+        'entregadas': qs.filter(fecha_entrega__isnull=False).count(),
+        'pendientes': qs.filter(fecha_entrega__isnull=True).count(),
+    }
+
+
+def _kpis_reparaciones(qs):
+    agg = qs.aggregate(
+        total=Count('id'),
+        ingreso_total=Sum('total'),
+        ticket_promedio=Avg('total'),
+    )
+    return {
+        'total': agg['total'] or 0,
+        'ingreso_total': agg['ingreso_total'] or 0,
+        'ticket_promedio': agg['ticket_promedio'] or 0,
+        'entregadas': qs.filter(fecha_entrega__isnull=False).count(),
+        'pendientes': qs.filter(fecha_entrega__isnull=True).count(),
+    }
+
+
+# --- Batch 2: Analytics helpers ---
+
+def _top_clients(fecha_inicio, fecha_fin, limit=10):
+    """
+    Generalized cross-service LTV helper.
+    Returns list of dicts sorted by total_global DESC, truncated to limit.
+    fecha_inicio and fecha_fin are date instances.
+    Uses __date__gte / __date__lte filters on each service queryset.
+    Guards Confeccion.precio with or 0.
+    """
+    from collections import defaultdict
+    totals = defaultdict(lambda: {
+        'total_ventas': 0.0, 'total_alquileres': 0.0,
+        'total_confecciones': 0.0, 'total_reparaciones': 0.0,
+        'num_transacciones': 0,
+    })
+
+    # Ventas
+    for row in Venta.objects.filter(
+        fecha_venta__gte=fecha_inicio,
+        fecha_venta__lte=fecha_fin,
+        cliente__isnull=False,
+    ).values('cliente_id').annotate(subtotal=Sum('total'), num=Count('id')):
+        totals[row['cliente_id']]['total_ventas'] += float(row['subtotal'] or 0)
+        totals[row['cliente_id']]['num_transacciones'] += row['num'] or 0
+
+    # Alquileres
+    for row in Alquiler.objects.filter(
+        fecha_alquiler__gte=fecha_inicio,
+        fecha_alquiler__lte=fecha_fin,
+        cliente__isnull=False,
+    ).values('cliente_id').annotate(subtotal=Sum('total'), num=Count('id')):
+        totals[row['cliente_id']]['total_alquileres'] += float(row['subtotal'] or 0)
+        totals[row['cliente_id']]['num_transacciones'] += row['num'] or 0
+
+    # Confecciones (precio nullable)
+    for row in Confeccion.objects.filter(
+        fecha_inicio__gte=fecha_inicio,
+        fecha_inicio__lte=fecha_fin,
+        cliente__isnull=False,
+    ).values('cliente_id').annotate(subtotal=Sum('precio'), num=Count('id')):
+        totals[row['cliente_id']]['total_confecciones'] += float(row['subtotal'] or 0)
+        totals[row['cliente_id']]['num_transacciones'] += row['num'] or 0
+
+    # Reparaciones (costo nullable)
+    for row in Reparacion.objects.filter(
+        creado__date__gte=fecha_inicio,
+        creado__date__lte=fecha_fin,
+        cliente__isnull=False,
+    ).values('cliente_id').annotate(subtotal=Sum('total'), num=Count('id')):
+        totals[row['cliente_id']]['total_reparaciones'] += float(row['subtotal'] or 0)
+        totals[row['cliente_id']]['num_transacciones'] += row['num'] or 0
+
+    if not totals:
+        return []
+
+    for cid, data in totals.items():
+        data['total_global'] = (
+            data['total_ventas'] + data['total_alquileres'] +
+            data['total_confecciones'] + data['total_reparaciones']
+        )
+
+    sorted_ids = sorted(totals.keys(), key=lambda cid: totals[cid]['total_global'], reverse=True)[:limit]
+    clientes_map = {c.pk: c for c in Cliente.objects.filter(pk__in=sorted_ids)}
+
+    result = []
+    for cid in sorted_ids:
+        c = clientes_map.get(cid)
+        if c:
+            data = totals[cid]
+            result.append({
+                'cliente_id': cid,
+                'cliente_nombre': f'{c.nombres} {c.apellido_paterno}'.strip(),
+                'total_ventas': data['total_ventas'],
+                'total_alquileres': data['total_alquileres'],
+                'total_confecciones': data['total_confecciones'],
+                'total_reparaciones': data['total_reparaciones'],
+                'total_global': data['total_global'],
+                'num_transacciones': data['num_transacciones'],
+            })
+    return result
+
+
+def _top_items(fecha_inicio, fecha_fin, servicio='ambos', sort_by='ingreso', limit=200):
+    """
+    Aggregates VentaItem and/or AlquilerItem by prenda_item__prenda__nombre.
+    Returns list of dicts merged in Python, sorted DESC by chosen metric.
+    Product path: prenda_item__prenda__nombre (2-hop, never prenda__nombre).
+    """
+    merged = {}  # keyed on prenda_nombre
+
+    if servicio in ('venta', 'ambos'):
+        rows = VentaItem.objects.filter(
+            venta__fecha_venta__gte=fecha_inicio,
+            venta__fecha_venta__lte=fecha_fin,
+        ).values('prenda_item__prenda__nombre').annotate(
+            cant=Count('id'),
+            ingreso=Sum('subtotal'),
+        )
+        for row in rows:
+            nombre = row['prenda_item__prenda__nombre'] or 'Sin nombre'
+            entry = merged.setdefault(nombre, {
+                'prenda_nombre': nombre,
+                'cantidad_venta': 0, 'ingreso_venta': 0,
+                'cantidad_alquiler': 0, 'ingreso_alquiler': 0,
+            })
+            entry['cantidad_venta'] += row['cant'] or 0
+            entry['ingreso_venta'] += float(row['ingreso'] or 0)
+
+    if servicio in ('alquiler', 'ambos'):
+        rows = AlquilerItem.objects.filter(
+            alquiler__fecha_alquiler__gte=fecha_inicio,
+            alquiler__fecha_alquiler__lte=fecha_fin,
+        ).values('prenda_item__prenda__nombre').annotate(
+            cant=Count('id'),
+            ingreso=Sum('subtotal'),
+        )
+        for row in rows:
+            nombre = row['prenda_item__prenda__nombre'] or 'Sin nombre'
+            entry = merged.setdefault(nombre, {
+                'prenda_nombre': nombre,
+                'cantidad_venta': 0, 'ingreso_venta': 0,
+                'cantidad_alquiler': 0, 'ingreso_alquiler': 0,
+            })
+            entry['cantidad_alquiler'] += row['cant'] or 0
+            entry['ingreso_alquiler'] += float(row['ingreso'] or 0)
+
+    result = []
+    for entry in merged.values():
+        entry['cantidad_total'] = entry['cantidad_venta'] + entry['cantidad_alquiler']
+        entry['ingreso_total'] = entry['ingreso_venta'] + entry['ingreso_alquiler']
+        entry['tiene_venta'] = entry['cantidad_venta'] > 0
+        entry['tiene_alquiler'] = entry['cantidad_alquiler'] > 0
+        result.append(entry)
+
+    sort_key = 'ingreso_total' if sort_by == 'ingreso' else 'cantidad_total'
+    result.sort(key=lambda x: x[sort_key], reverse=True)
+    return result[:limit]
+
+
+def _empty_empleado_row():
+    return {
+        'empleado_id': None, 'empleado_nombre': '',
+        'num_ventas': 0, 'ingreso_ventas': 0,
+        'num_alquileres': 0, 'ingreso_alquileres': 0,
+        'num_confecciones': 0, 'ingreso_confecciones': 0,
+        'num_reparaciones': 0, 'ingreso_reparaciones': 0,
+        'num_total': 0, 'ingreso_total': 0,
+    }
+
+
+def _top_empleados(fecha_inicio, fecha_fin, limit=200):
+    """
+    Four per-service aggregations keyed by empleado_id, merged in Python.
+    Returns list of dicts sorted DESC by ingreso_total.
+    """
+    merged = {}
+
+    # Ventas
+    for row in Venta.objects.filter(
+        empleado__isnull=False,
+        fecha_venta__gte=fecha_inicio,
+        fecha_venta__lte=fecha_fin,
+    ).values('empleado_id').annotate(num=Count('id'), ingreso=Sum('total')):
+        eid = row['empleado_id']
+        merged.setdefault(eid, _empty_empleado_row())
+        merged[eid]['num_ventas'] = row['num'] or 0
+        merged[eid]['ingreso_ventas'] = float(row['ingreso'] or 0)
+
+    # Alquileres
+    for row in Alquiler.objects.filter(
+        empleado__isnull=False,
+        fecha_alquiler__gte=fecha_inicio,
+        fecha_alquiler__lte=fecha_fin,
+    ).values('empleado_id').annotate(num=Count('id'), ingreso=Sum('total')):
+        eid = row['empleado_id']
+        merged.setdefault(eid, _empty_empleado_row())
+        merged[eid]['num_alquileres'] = row['num'] or 0
+        merged[eid]['ingreso_alquileres'] = float(row['ingreso'] or 0)
+
+    # Confecciones (precio, nullable)
+    for row in Confeccion.objects.filter(
+        empleado__isnull=False,
+        fecha_inicio__gte=fecha_inicio,
+        fecha_inicio__lte=fecha_fin,
+    ).values('empleado_id').annotate(num=Count('id'), ingreso=Sum('precio')):
+        eid = row['empleado_id']
+        merged.setdefault(eid, _empty_empleado_row())
+        merged[eid]['num_confecciones'] = row['num'] or 0
+        merged[eid]['ingreso_confecciones'] = float(row['ingreso'] or 0)
+
+    # Reparaciones (costo, nullable)
+    for row in Reparacion.objects.filter(
+        empleado__isnull=False,
+        creado__date__gte=fecha_inicio,
+        creado__date__lte=fecha_fin,
+    ).values('empleado_id').annotate(num=Count('id'), ingreso=Sum('total')):
+        eid = row['empleado_id']
+        merged.setdefault(eid, _empty_empleado_row())
+        merged[eid]['num_reparaciones'] = row['num'] or 0
+        merged[eid]['ingreso_reparaciones'] = float(row['ingreso'] or 0)
+
+    # Get names from Empleado model
+    emp_ids = list(merged.keys())
+    for emp in Empleado.objects.filter(id__in=emp_ids):
+        parts = [emp.nombres or '', emp.apellido_paterno or '', emp.apellido_materno or '']
+        merged[emp.id]['empleado_nombre'] = ' '.join(p for p in parts if p).strip()
+        merged[emp.id]['empleado_id'] = emp.id
+
+    result = []
+    for eid, row in merged.items():
+        row['num_total'] = row['num_ventas'] + row['num_alquileres'] + row['num_confecciones'] + row['num_reparaciones']
+        row['ingreso_total'] = row['ingreso_ventas'] + row['ingreso_alquileres'] + row['ingreso_confecciones'] + row['ingreso_reparaciones']
+        result.append(row)
+
+    result.sort(key=lambda x: x['ingreso_total'], reverse=True)
+    return result[:limit]
+
+
+def _kpis_operativas(fecha_inicio, fecha_fin):
+    """
+    Computes operational KPIs at Python level (no DurationField per D1).
+    Returns scalar dict with avg/min/max durations (days) and inventory occupation.
+    """
+    # Alquiler durations
+    pares = list(Alquiler.objects.filter(
+        fecha_alquiler__gte=fecha_inicio,
+        fecha_alquiler__lte=fecha_fin,
+        fecha_devolucion__isnull=False,
+    ).values_list('fecha_alquiler', 'fecha_devolucion'))
+    dur_alq = [(b - a).days for a, b in pares if b is not None]
+
+    # Confeccion delivery
+    pares_conf = list(Confeccion.objects.filter(
+        fecha_inicio__gte=fecha_inicio,
+        fecha_inicio__lte=fecha_fin,
+        fecha_entrega__isnull=False,
+    ).values_list('fecha_inicio', 'fecha_entrega'))
+    dur_conf = [(b - a).days for a, b in pares_conf if a and b]
+
+    # Reparacion turnaround (creado is DateTimeField, fecha_entrega is DateField)
+    pares_rep = list(Reparacion.objects.filter(
+        creado__date__gte=fecha_inicio,
+        creado__date__lte=fecha_fin,
+        fecha_entrega__isnull=False,
+    ).values_list('creado', 'fecha_entrega'))
+    dur_rep = [(b - a.date()).days for a, b in pares_rep if a and b]
+
+    # Inventario occupation
+    total_items = PrendaItem.objects.count()
+    ocupados = PrendaItem.objects.filter(
+        alquiler_items__alquiler__fecha_devolucion__isnull=True
+    ).distinct().count()
+    tasa = (ocupados / total_items) if total_items else 0
+
+    def safe_avg(lst): return round(sum(lst) / len(lst), 1) if lst else None
+    def safe_min(lst): return min(lst) if lst else None
+    def safe_max(lst): return max(lst) if lst else None
+
+    return {
+        'alquiler_duracion_avg': safe_avg(dur_alq),
+        'alquiler_duracion_min': safe_min(dur_alq),
+        'alquiler_duracion_max': safe_max(dur_alq),
+        'alquiler_count': len(dur_alq),
+        'confeccion_entrega_avg': safe_avg(dur_conf),
+        'confeccion_entrega_min': safe_min(dur_conf),
+        'confeccion_entrega_max': safe_max(dur_conf),
+        'confeccion_count': len(dur_conf),
+        'reparacion_turnaround_avg': safe_avg(dur_rep),
+        'reparacion_turnaround_min': safe_min(dur_rep),
+        'reparacion_turnaround_max': safe_max(dur_rep),
+        'reparacion_count': len(dur_rep),
+        'inventario_ocupados': ocupados,
+        'inventario_total': total_items,
+        'inventario_tasa_ocupacion': round(tasa * 100, 1),
+    }
+
+
+# --- Batch 3: YoY helpers ---
+
+def _yoy_totals(fecha_inicio, fecha_fin):
+    """
+    Computes service-model totals for a single period.
+    Uses __date__gte / __date__lte. Does NOT touch CajaMovimiento (per D2).
+    Guards Confeccion.precio with or 0.
+    """
+    v = Venta.objects.filter(
+        fecha_venta__gte=fecha_inicio,
+        fecha_venta__lte=fecha_fin,
+    ).aggregate(total=Sum('total'), count=Count('id'))
+    a = Alquiler.objects.filter(
+        fecha_alquiler__gte=fecha_inicio,
+        fecha_alquiler__lte=fecha_fin,
+    ).aggregate(total=Sum('total'), count=Count('id'))
+    c = Confeccion.objects.filter(
+        fecha_inicio__gte=fecha_inicio,
+        fecha_inicio__lte=fecha_fin,
+    ).aggregate(total=Sum('precio'), count=Count('id'))
+    r = Reparacion.objects.filter(
+        creado__date__gte=fecha_inicio,
+        creado__date__lte=fecha_fin,
+    ).aggregate(total=Sum('total'), count=Count('id'))
+    ventas = float(v['total'] or 0)
+    alquileres = float(a['total'] or 0)
+    confecciones = float(c['total'] or 0)
+    reparaciones = float(r['total'] or 0)
+    return {
+        'ventas': ventas,
+        'alquileres': alquileres,
+        'confecciones': confecciones,
+        'reparaciones': reparaciones,
+        'total': ventas + alquileres + confecciones + reparaciones,
+        'count_ventas': v['count'] or 0,
+        'count_alquileres': a['count'] or 0,
+        'count_confecciones': c['count'] or 0,
+        'count_reparaciones': r['count'] or 0,
+        'count_total': (v['count'] or 0) + (a['count'] or 0) + (c['count'] or 0) + (r['count'] or 0),
+    }
+
+
+def _yoy_comparativa(fecha_inicio, fecha_fin):
+    """
+    Calls _yoy_totals twice (current + prior-year periods).
+    Computes deltas absolute and percentage; guards division by zero.
+    Returns nested dict.
+    """
+    try:
+        from dateutil.relativedelta import relativedelta
+        fi_ant = fecha_inicio - relativedelta(years=1)
+        ff_ant = fecha_fin - relativedelta(years=1)
+    except ImportError:
+        fi_ant = fecha_inicio.replace(year=fecha_inicio.year - 1)
+        ff_ant = fecha_fin.replace(year=fecha_fin.year - 1)
+
+    actual = _yoy_totals(fecha_inicio, fecha_fin)
+    anterior = _yoy_totals(fi_ant, ff_ant)
+
+    def pct(a, b):
+        if b == 0:
+            return None
+        return round((a - b) / b * 100, 1)
+
+    metricas = ['ventas', 'alquileres', 'confecciones', 'reparaciones', 'total']
+    deltas = {}
+    for m in metricas:
+        deltas[f'{m}_abs'] = actual[m] - anterior[m]
+        deltas[f'{m}_pct'] = pct(actual[m], anterior[m])
+
+    return {
+        'periodo_actual': {'fecha_inicio': fecha_inicio, 'fecha_fin': fecha_fin, **actual},
+        'periodo_anterior': {'fecha_inicio': fi_ant, 'fecha_fin': ff_ant, **anterior},
+        'deltas': deltas,
+    }
+
+
+# ============================================================
+# Analytics — New Analytics Views (Fase 2)
+# ============================================================
+
+@login_required
+def analitica_items(request):
+    today = date.today()
+    fecha_fin_default = today
+    fecha_inicio_default = today - timedelta(days=30)
+
+    fecha_inicio_str = request.GET.get('fecha_inicio', fecha_inicio_default.strftime('%Y-%m-%d'))
+    fecha_fin_str = request.GET.get('fecha_fin', fecha_fin_default.strftime('%Y-%m-%d'))
+    servicio = request.GET.get('servicio', 'ambos')
+    sort_by = request.GET.get('sort', 'ingreso')
+    export_format = request.GET.get('export_format', '')
+
+    try:
+        fecha_inicio = date.fromisoformat(fecha_inicio_str)
+        fecha_fin = date.fromisoformat(fecha_fin_str)
+    except (ValueError, TypeError):
+        fecha_inicio = fecha_inicio_default
+        fecha_fin = fecha_fin_default
+
+    if servicio not in ('venta', 'alquiler', 'ambos'):
+        servicio = 'ambos'
+    if sort_by not in ('ingreso', 'cantidad'):
+        sort_by = 'ingreso'
+
+    rows = _top_items(fecha_inicio, fecha_fin, servicio=servicio, sort_by=sort_by)
+    filtros = {'fecha_inicio': fecha_inicio, 'fecha_fin': fecha_fin, 'servicio': servicio, 'sort': sort_by}
+
+    if export_format == 'pdf':
+        return exportar_analitica_items_pdf(request, rows, filtros)
+    elif export_format == 'excel':
+        return exportar_analitica_items_excel(request, rows, filtros)
+
+    paginator = Paginator(rows, 15)
+    page_number = request.GET.get('page', 1)
+    page_obj = paginator.get_page(page_number)
+
+    return render(request, 'misastreria/analitica/analitica_items.html', {
+        'page_obj': page_obj,
+        'filtros': filtros,
+        'fecha_inicio': fecha_inicio_str,
+        'fecha_fin': fecha_fin_str,
+        'servicio': servicio,
+        'sort': sort_by,
+        'total_items': len(rows),
+    })
+
+
+@login_required
+def analitica_empleados(request):
+    today = date.today()
+    fecha_fin_default = today
+    fecha_inicio_default = today - timedelta(days=30)
+
+    fecha_inicio_str = request.GET.get('fecha_inicio', fecha_inicio_default.strftime('%Y-%m-%d'))
+    fecha_fin_str = request.GET.get('fecha_fin', fecha_fin_default.strftime('%Y-%m-%d'))
+    export_format = request.GET.get('export_format', '')
+
+    try:
+        fecha_inicio = date.fromisoformat(fecha_inicio_str)
+        fecha_fin = date.fromisoformat(fecha_fin_str)
+    except (ValueError, TypeError):
+        fecha_inicio = fecha_inicio_default
+        fecha_fin = fecha_fin_default
+
+    rows = _top_empleados(fecha_inicio, fecha_fin)
+    filtros = {'fecha_inicio': fecha_inicio, 'fecha_fin': fecha_fin}
+
+    if export_format == 'pdf':
+        return exportar_analitica_empleados_pdf(request, rows, filtros)
+    elif export_format == 'excel':
+        return exportar_analitica_empleados_excel(request, rows, filtros)
+
+    return render(request, 'misastreria/analitica/analitica_empleados.html', {
+        'empleados': rows,
+        'filtros': filtros,
+        'fecha_inicio': fecha_inicio_str,
+        'fecha_fin': fecha_fin_str,
+        'total_empleados': len(rows),
+    })
+
+
+@login_required
+def analitica_clientes_ltv(request):
+    today = date.today()
+    fecha_fin_default = today
+    fecha_inicio_default = today - timedelta(days=30)
+
+    fecha_inicio_str = request.GET.get('fecha_inicio', fecha_inicio_default.strftime('%Y-%m-%d'))
+    fecha_fin_str = request.GET.get('fecha_fin', fecha_fin_default.strftime('%Y-%m-%d'))
+    export_format = request.GET.get('export_format', '')
+
+    try:
+        fecha_inicio = date.fromisoformat(fecha_inicio_str)
+        fecha_fin = date.fromisoformat(fecha_fin_str)
+    except (ValueError, TypeError):
+        fecha_inicio = fecha_inicio_default
+        fecha_fin = fecha_fin_default
+
+    try:
+        limit = min(int(request.GET.get('limit', 50)), 200)
+    except (ValueError, TypeError):
+        limit = 50
+
+    rows = _top_clients(fecha_inicio, fecha_fin, limit=limit)
+    filtros = {'fecha_inicio': fecha_inicio, 'fecha_fin': fecha_fin, 'limit': limit}
+
+    if export_format == 'pdf':
+        return exportar_analitica_clientes_ltv_pdf(request, rows, filtros)
+    elif export_format == 'excel':
+        return exportar_analitica_clientes_ltv_excel(request, rows, filtros)
+
+    paginator = Paginator(rows, 15)
+    page_number = request.GET.get('page', 1)
+    page_obj = paginator.get_page(page_number)
+
+    return render(request, 'misastreria/analitica/analitica_clientes_ltv.html', {
+        'page_obj': page_obj,
+        'filtros': filtros,
+        'fecha_inicio': fecha_inicio_str,
+        'fecha_fin': fecha_fin_str,
+        'limit': limit,
+        'total_clientes': len(rows),
+    })
+
+
+@login_required
+def analitica_operativas(request):
+    today = date.today()
+    fecha_fin_default = today
+    fecha_inicio_default = today - timedelta(days=30)
+
+    fecha_inicio_str = request.GET.get('fecha_inicio', fecha_inicio_default.strftime('%Y-%m-%d'))
+    fecha_fin_str = request.GET.get('fecha_fin', fecha_fin_default.strftime('%Y-%m-%d'))
+    export_format = request.GET.get('export_format', '')
+
+    try:
+        fecha_inicio = date.fromisoformat(fecha_inicio_str)
+        fecha_fin = date.fromisoformat(fecha_fin_str)
+    except (ValueError, TypeError):
+        fecha_inicio = fecha_inicio_default
+        fecha_fin = fecha_fin_default
+
+    kpis = _kpis_operativas(fecha_inicio, fecha_fin)
+    filtros = {'fecha_inicio': fecha_inicio, 'fecha_fin': fecha_fin}
+
+    if export_format == 'pdf':
+        return exportar_analitica_operativas_pdf(request, kpis, filtros)
+    elif export_format == 'excel':
+        return exportar_analitica_operativas_excel(request, kpis, filtros)
+
+    return render(request, 'misastreria/analitica/analitica_operativas.html', {
+        'kpis': kpis,
+        'filtros': filtros,
+        'fecha_inicio': fecha_inicio_str,
+        'fecha_fin': fecha_fin_str,
+    })
+
+
+@login_required
+def analitica_comparativas(request):
+    today = date.today()
+    periodo = request.GET.get('periodo', 'this_month')
+    export_format = request.GET.get('export_format', '')
+
+    # Compute fecha_inicio / fecha_fin from preset or explicit GET params
+    if periodo == 'last_month':
+        if today.month == 1:
+            fi = today.replace(year=today.year - 1, month=12, day=1)
+        else:
+            fi = today.replace(month=today.month - 1, day=1)
+        try:
+            import calendar as _cal
+            last_day = _cal.monthrange(fi.year, fi.month)[1]
+        except Exception:
+            last_day = 28
+        ff = fi.replace(day=last_day)
+    elif periodo == 'this_quarter':
+        quarter_month = ((today.month - 1) // 3) * 3 + 1
+        fi = today.replace(month=quarter_month, day=1)
+        ff = today
+    elif periodo == 'this_year':
+        fi = today.replace(month=1, day=1)
+        ff = today
+    else:
+        # Default: this_month
+        periodo = 'this_month'
+        fi = today.replace(day=1)
+        ff = today
+
+    # Allow explicit override
+    fecha_inicio_str = request.GET.get('fecha_inicio', fi.strftime('%Y-%m-%d'))
+    fecha_fin_str = request.GET.get('fecha_fin', ff.strftime('%Y-%m-%d'))
+    try:
+        fecha_inicio = date.fromisoformat(fecha_inicio_str)
+        fecha_fin = date.fromisoformat(fecha_fin_str)
+    except (ValueError, TypeError):
+        fecha_inicio = fi
+        fecha_fin = ff
+
+    comparativa = _yoy_comparativa(fecha_inicio, fecha_fin)
+    filtros = {'fecha_inicio': fecha_inicio, 'fecha_fin': fecha_fin, 'periodo': periodo}
+
+    if export_format == 'pdf':
+        return exportar_analitica_comparativas_pdf(request, comparativa, filtros)
+    elif export_format == 'excel':
+        return exportar_analitica_comparativas_excel(request, comparativa, filtros)
+
+    return render(request, 'misastreria/analitica/analitica_comparativas.html', {
+        'comparativa': comparativa,
+        'filtros': filtros,
+        'fecha_inicio': fecha_inicio_str,
+        'fecha_fin': fecha_fin_str,
+        'periodo': periodo,
+    })
+
+
+@login_required
+def estacionalidad(request):
+    hoy = date.today()
+
+    # Available years: from earliest record up to current year
+    años_candidatos = [
+        Alquiler.objects.order_by('fecha_alquiler').values_list('fecha_alquiler__year', flat=True).first(),
+        Venta.objects.order_by('fecha_venta').values_list('fecha_venta__year', flat=True).first(),
+        Confeccion.objects.order_by('fecha_inicio').values_list('fecha_inicio__year', flat=True).first(),
+        Reparacion.objects.order_by('creado').values_list('creado__year', flat=True).first(),
+    ]
+    año_min = min((y for y in años_candidatos if y), default=hoy.year)
+    años_disponibles = list(range(año_min, hoy.year + 1))
+
+    try:
+        año = int(request.GET.get('año', hoy.year))
+    except (ValueError, TypeError):
+        año = hoy.year
+    if año not in años_disponibles:
+        año = hoy.year
+
+    def _por_mes(qs, campo_mes):
+        rows = qs.values(campo_mes).annotate(n=Count('id'))
+        return {row[campo_mes]: row['n'] for row in rows}
+
+    alq  = _por_mes(Alquiler.objects.filter(fecha_alquiler__year=año),   'fecha_alquiler__month')
+    ven  = _por_mes(Venta.objects.filter(fecha_venta__year=año),          'fecha_venta__month')
+    conf = _por_mes(Confeccion.objects.filter(fecha_inicio__year=año),    'fecha_inicio__month')
+    rep  = _por_mes(Reparacion.objects.filter(creado__year=año),          'creado__month')
+
+    def _arr(d):
+        return [d.get(m, 0) for m in range(1, 13)]
+
+    series = {
+        'alquileres':   _arr(alq),
+        'ventas':       _arr(ven),
+        'confecciones': _arr(conf),
+        'reparaciones': _arr(rep),
+    }
+
+    tabla = []
+    for i, mes in enumerate(MESES_ES):
+        fila = {k: series[k][i] for k in series}
+        fila['mes'] = mes
+        fila['total'] = sum(series[k][i] for k in series)
+        tabla.append(fila)
+
+    return render(request, 'misastreria/analitica/estacionalidad.html', {
+        'año': año,
+        'años_disponibles': años_disponibles,
+        'data_json': json.dumps({**series, 'meses': MESES_ES}),
+        'tabla': tabla,
+        'total_año': sum(f['total'] for f in tabla),
+    })
+
+
+@login_required
+def prendas_temporada(request):
+    hoy = date.today()
+
+    try:
+        año = int(request.GET.get('año', hoy.year))
+    except (ValueError, TypeError):
+        año = hoy.year
+    servicio = request.GET.get('servicio', 'alquiler')
+    try:
+        top = min(int(request.GET.get('top', 20)), 50)
+    except (ValueError, TypeError):
+        top = 20
+
+    # Build cross-tab {prenda_nombre: {mes: count}}
+    if servicio == 'venta':
+        qs = (VentaItem.objects
+              .filter(venta__fecha_venta__year=año)
+              .values(nombre=F('prenda_item__prenda__nombre'),
+                      mes=F('venta__fecha_venta__month'))
+              .annotate(n=Count('id')))
+    else:  # alquiler (default)
+        qs = (AlquilerItem.objects
+              .filter(alquiler__fecha_alquiler__year=año)
+              .values(nombre=F('prenda_item__prenda__nombre'),
+                      mes=F('alquiler__fecha_alquiler__month'))
+              .annotate(n=Count('id')))
+
+    cross = {}
+    for row in qs:
+        nombre = row['nombre'] or 'Sin nombre'
+        cross.setdefault(nombre, {})
+        cross[nombre][row['mes']] = row['n']
+
+    filas = []
+    for nombre, meses_dict in cross.items():
+        meses_vals = [meses_dict.get(m, 0) for m in range(1, 13)]
+        filas.append({
+            'nombre': nombre,
+            'meses': meses_vals,
+            'total': sum(meses_vals),
+            'pico': MESES_ES[meses_vals.index(max(meses_vals))] if any(meses_vals) else '—',
+        })
+
+    filas.sort(key=lambda x: x['total'], reverse=True)
+    filas = filas[:top]
+
+    max_val = max((v for f in filas for v in f['meses']), default=1) or 1
+
+    def _alpha(v):
+        if not v:
+            return '0'
+        return f'{0.15 + (v / max_val) * 0.85:.2f}'
+
+    for fila in filas:
+        fila['meses_data'] = [
+            {'val': v, 'alpha': _alpha(v), 'light': v < max_val * 0.55}
+            for v in fila['meses']
+        ]
+
+    # Year range from earliest AlquilerItem
+    primer_alq = AlquilerItem.objects.order_by('alquiler__fecha_alquiler').values_list('alquiler__fecha_alquiler__year', flat=True).first()
+    primer_ven = VentaItem.objects.order_by('venta__fecha_venta').values_list('venta__fecha_venta__year', flat=True).first()
+    año_min = min(y for y in [primer_alq, primer_ven, hoy.year] if y)
+    años_disponibles = list(range(año_min, hoy.year + 1))
+
+    return render(request, 'misastreria/analitica/prendas_temporada.html', {
+        'año': año,
+        'años_disponibles': años_disponibles,
+        'servicio': servicio,
+        'top': top,
+        'filas': filas,
+        'meses': MESES_ES,
+        'max_val': max_val,
+    })
+
+
+# ============================================================
+# Analytics — Fase 2 PDF/Excel Exporters
+# ============================================================
+
+def _pdf_styles():
+    """Returns a getSampleStyleSheet with project-standard named styles added."""
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name='CompanyTitle', fontSize=14, leading=18,
+                              alignment=TA_CENTER, fontName='DejaVuSans',
+                              textColor=colors.HexColor('#1e3a8a')))
+    styles.add(ParagraphStyle(name='ReportTitle', fontSize=12, leading=16,
+                              alignment=TA_CENTER, fontName='DejaVuSans',
+                              textColor=colors.HexColor('#2563eb')))
+    styles.add(ParagraphStyle(name='SubTitle', fontSize=9, leading=12,
+                              alignment=TA_CENTER, fontName='DejaVuSans'))
+    styles.add(ParagraphStyle(name='InfoBanner', fontSize=8, leading=11,
+                              alignment=TA_LEFT, fontName='DejaVuSans',
+                              textColor=colors.HexColor('#374151')))
+    return styles
+
+
+def _pdf_table_style(header_rows=1):
+    """Returns a TableStyle with project-standard header/row formatting."""
+    return TableStyle([
+        ('BACKGROUND', (0, 0), (-1, header_rows - 1), colors.HexColor('#1F2937')),
+        ('TEXTCOLOR', (0, 0), (-1, header_rows - 1), colors.white),
+        ('FONTNAME', (0, 0), (-1, header_rows - 1), 'DejaVuSans'),
+        ('FONTSIZE', (0, 0), (-1, header_rows - 1), 8),
+        ('ALIGN', (0, 0), (-1, header_rows - 1), 'CENTER'),
+        ('FONTNAME', (0, header_rows), (-1, -1), 'DejaVuSans'),
+        ('FONTSIZE', (0, header_rows), (-1, -1), 7),
+        ('ROWBACKGROUNDS', (0, header_rows), (-1, -1), [colors.white, colors.HexColor('#F9FAFB')]),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E2E8F0')),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+    ])
+
+
+def exportar_analitica_items_pdf(request, rows, filtros):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter,
+                            rightMargin=inch / 2, leftMargin=inch / 2,
+                            topMargin=inch / 2, bottomMargin=inch / 2)
+    styles = _pdf_styles()
+    elements = []
+
+    fi = filtros.get('fecha_inicio', '')
+    ff = filtros.get('fecha_fin', '')
+    servicio = filtros.get('servicio', 'ambos')
+
+    elements.append(Paragraph("SISTEMA DE GESTION SASTRERIA CONFORT Y MAS", styles['CompanyTitle']))
+    elements.append(Spacer(1, 0.1 * inch))
+    elements.append(Paragraph("ANÁLISIS DE ITEMS", styles['ReportTitle']))
+    elements.append(Spacer(1, 0.1 * inch))
+    elements.append(Paragraph(f"Período: {fi} al {ff} | Servicio: {servicio}", styles['SubTitle']))
+    elements.append(Spacer(1, 0.15 * inch))
+
+    header = ['Prenda', 'Cant.Venta', 'Ing.Venta (S/)', 'Cant.Alq', 'Ing.Alq (S/)', 'Cant.Total', 'Ing.Total (S/)']
+    data = [header]
+    for row in rows:
+        data.append([
+            row['prenda_nombre'],
+            str(row['cantidad_venta']),
+            f"{row['ingreso_venta']:,.2f}",
+            str(row['cantidad_alquiler']),
+            f"{row['ingreso_alquiler']:,.2f}",
+            str(row['cantidad_total']),
+            f"{row['ingreso_total']:,.2f}",
+        ])
+
+    if len(data) > 1:
+        col_widths = [2.5 * inch, 0.8 * inch, 1.2 * inch, 0.8 * inch, 1.2 * inch, 0.8 * inch, 1.2 * inch]
+        table = Table(data, colWidths=col_widths, repeatRows=1)
+        table.setStyle(_pdf_table_style())
+        elements.append(table)
+    else:
+        elements.append(Paragraph("Sin datos para los filtros seleccionados.", styles['SubTitle']))
+
+    doc.build(elements)
+    filename = f"analitica_items_{fi}_{ff}.pdf"
+    response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+def exportar_analitica_items_excel(request, rows, filtros):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Items'
+
+    fi = filtros.get('fecha_inicio', '')
+    ff = filtros.get('fecha_fin', '')
+    servicio = filtros.get('servicio', 'ambos')
+
+    header_fill = PatternFill('solid', fgColor='1F2937')
+    header_font = Font(bold=True, color='FFFFFF', name='Calibri')
+    bold_font = Font(bold=True, name='Calibri')
+
+    ws.merge_cells('A1:G1')
+    ws['A1'] = 'Análisis de Items — Fortium Tailor'
+    ws['A1'].font = Font(bold=True, size=14, name='Calibri')
+    ws['A1'].alignment = Alignment(horizontal='center')
+
+    ws.merge_cells('A2:G2')
+    ws['A2'] = f'Período: {fi} al {ff} | Servicio: {servicio}'
+    ws['A2'].font = Font(italic=True, name='Calibri')
+
+    headers = ['Prenda', 'Cant. Venta', 'Ing. Venta (S/)', 'Cant. Alquiler', 'Ing. Alquiler (S/)', 'Cant. Total', 'Ing. Total (S/)']
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=4, column=col, value=h)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal='center')
+
+    for r, row in enumerate(rows, 5):
+        ws.cell(row=r, column=1, value=row['prenda_nombre'])
+        ws.cell(row=r, column=2, value=row['cantidad_venta']).number_format = '#,##0'
+        c = ws.cell(row=r, column=3, value=row['ingreso_venta'])
+        c.number_format = '"S/ "#,##0.00'
+        ws.cell(row=r, column=4, value=row['cantidad_alquiler']).number_format = '#,##0'
+        c = ws.cell(row=r, column=5, value=row['ingreso_alquiler'])
+        c.number_format = '"S/ "#,##0.00'
+        ws.cell(row=r, column=6, value=row['cantidad_total']).number_format = '#,##0'
+        c = ws.cell(row=r, column=7, value=row['ingreso_total'])
+        c.number_format = '"S/ "#,##0.00'
+
+    for col, width in zip('ABCDEFG', [35, 12, 16, 14, 16, 12, 16]):
+        ws.column_dimensions[col].width = width
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    filename = f"analitica_items_{fi}_{ff}.xlsx"
+    response = HttpResponse(buffer.getvalue(),
+                            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+def exportar_analitica_empleados_pdf(request, rows, filtros):
+    from reportlab.lib.pagesizes import landscape
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(letter),
+                            rightMargin=inch / 2, leftMargin=inch / 2,
+                            topMargin=inch / 2, bottomMargin=inch / 2)
+    styles = _pdf_styles()
+    elements = []
+
+    fi = filtros.get('fecha_inicio', '')
+    ff = filtros.get('fecha_fin', '')
+
+    elements.append(Paragraph("SISTEMA DE GESTION SASTRERIA CONFORT Y MAS", styles['CompanyTitle']))
+    elements.append(Spacer(1, 0.1 * inch))
+    elements.append(Paragraph("PERFORMANCE POR EMPLEADO", styles['ReportTitle']))
+    elements.append(Spacer(1, 0.1 * inch))
+    elements.append(Paragraph(f"Período: {fi} al {ff}", styles['SubTitle']))
+    elements.append(Spacer(1, 0.15 * inch))
+
+    header = ['Empleado', 'Ventas (n)', 'Ventas (S/)', 'Alq (n)', 'Alq (S/)', 'Conf (n)', 'Conf (S/)', 'Rep (n)', 'Rep (S/)', 'Total (n)', 'Total (S/)']
+    data = [header]
+    for row in rows:
+        data.append([
+            row['empleado_nombre'],
+            str(row['num_ventas']),
+            f"{row['ingreso_ventas']:,.2f}",
+            str(row['num_alquileres']),
+            f"{row['ingreso_alquileres']:,.2f}",
+            str(row['num_confecciones']),
+            f"{row['ingreso_confecciones']:,.2f}",
+            str(row['num_reparaciones']),
+            f"{row['ingreso_reparaciones']:,.2f}",
+            str(row['num_total']),
+            f"{row['ingreso_total']:,.2f}",
+        ])
+
+    if len(data) > 1:
+        col_widths = [2.0 * inch, 0.65 * inch, 0.9 * inch, 0.65 * inch, 0.9 * inch, 0.65 * inch, 0.9 * inch, 0.65 * inch, 0.9 * inch, 0.65 * inch, 0.9 * inch]
+        table = Table(data, colWidths=col_widths, repeatRows=1)
+        table.setStyle(_pdf_table_style())
+        elements.append(table)
+    else:
+        elements.append(Paragraph("Sin datos para los filtros seleccionados.", styles['SubTitle']))
+
+    doc.build(elements)
+    filename = f"analitica_empleados_{fi}_{ff}.pdf"
+    response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+def exportar_analitica_empleados_excel(request, rows, filtros):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Empleados'
+
+    fi = filtros.get('fecha_inicio', '')
+    ff = filtros.get('fecha_fin', '')
+
+    header_fill = PatternFill('solid', fgColor='1F2937')
+    header_font = Font(bold=True, color='FFFFFF', name='Calibri')
+
+    ws.merge_cells('A1:K1')
+    ws['A1'] = 'Performance por Empleado — Fortium Tailor'
+    ws['A1'].font = Font(bold=True, size=14, name='Calibri')
+    ws['A1'].alignment = Alignment(horizontal='center')
+
+    ws.merge_cells('A2:K2')
+    ws['A2'] = f'Período: {fi} al {ff}'
+    ws['A2'].font = Font(italic=True, name='Calibri')
+
+    headers = ['Empleado', 'Ventas (n)', 'Ventas (S/)', 'Alq (n)', 'Alq (S/)', 'Conf (n)', 'Conf (S/)', 'Rep (n)', 'Rep (S/)', 'Total (n)', 'Total (S/)']
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=4, column=col, value=h)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal='center')
+
+    for r, row in enumerate(rows, 5):
+        ws.cell(row=r, column=1, value=row['empleado_nombre'])
+        ws.cell(row=r, column=2, value=row['num_ventas']).number_format = '#,##0'
+        ws.cell(row=r, column=3, value=row['ingreso_ventas']).number_format = '"S/ "#,##0.00'
+        ws.cell(row=r, column=4, value=row['num_alquileres']).number_format = '#,##0'
+        ws.cell(row=r, column=5, value=row['ingreso_alquileres']).number_format = '"S/ "#,##0.00'
+        ws.cell(row=r, column=6, value=row['num_confecciones']).number_format = '#,##0'
+        ws.cell(row=r, column=7, value=row['ingreso_confecciones']).number_format = '"S/ "#,##0.00'
+        ws.cell(row=r, column=8, value=row['num_reparaciones']).number_format = '#,##0'
+        ws.cell(row=r, column=9, value=row['ingreso_reparaciones']).number_format = '"S/ "#,##0.00'
+        ws.cell(row=r, column=10, value=row['num_total']).number_format = '#,##0'
+        ws.cell(row=r, column=11, value=row['ingreso_total']).number_format = '"S/ "#,##0.00'
+
+    for col, width in zip('ABCDEFGHIJK', [28, 10, 14, 10, 14, 10, 14, 10, 14, 10, 14]):
+        ws.column_dimensions[col].width = width
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    filename = f"analitica_empleados_{fi}_{ff}.xlsx"
+    response = HttpResponse(buffer.getvalue(),
+                            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+def exportar_analitica_clientes_ltv_pdf(request, rows, filtros):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter,
+                            rightMargin=inch / 2, leftMargin=inch / 2,
+                            topMargin=inch / 2, bottomMargin=inch / 2)
+    styles = _pdf_styles()
+    elements = []
+
+    fi = filtros.get('fecha_inicio', '')
+    ff = filtros.get('fecha_fin', '')
+    limit = filtros.get('limit', 50)
+
+    elements.append(Paragraph("SISTEMA DE GESTION SASTRERIA CONFORT Y MAS", styles['CompanyTitle']))
+    elements.append(Spacer(1, 0.1 * inch))
+    elements.append(Paragraph("LIFETIME VALUE DE CLIENTES", styles['ReportTitle']))
+    elements.append(Spacer(1, 0.1 * inch))
+    elements.append(Paragraph(f"Período: {fi} al {ff} | Top {limit} clientes", styles['SubTitle']))
+    elements.append(Spacer(1, 0.15 * inch))
+
+    header = ['Cliente', 'Ventas (S/)', 'Alquil. (S/)', 'Conf. (S/)', 'Rep. (S/)', 'LTV (S/)', '# Tx']
+    data = [header]
+    for row in rows:
+        data.append([
+            row['cliente_nombre'],
+            f"{row['total_ventas']:,.2f}",
+            f"{row['total_alquileres']:,.2f}",
+            f"{row['total_confecciones']:,.2f}",
+            f"{row['total_reparaciones']:,.2f}",
+            f"{row['total_global']:,.2f}",
+            str(row['num_transacciones']),
+        ])
+
+    if len(data) > 1:
+        col_widths = [2.3 * inch, 1.0 * inch, 1.0 * inch, 1.0 * inch, 1.0 * inch, 1.0 * inch, 0.7 * inch]
+        table = Table(data, colWidths=col_widths, repeatRows=1)
+        table.setStyle(_pdf_table_style())
+        elements.append(table)
+    else:
+        elements.append(Paragraph("Sin datos para los filtros seleccionados.", styles['SubTitle']))
+
+    doc.build(elements)
+    filename = f"analitica_clientes_ltv_{fi}_{ff}.pdf"
+    response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+def exportar_analitica_clientes_ltv_excel(request, rows, filtros):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Clientes LTV'
+
+    fi = filtros.get('fecha_inicio', '')
+    ff = filtros.get('fecha_fin', '')
+    limit = filtros.get('limit', 50)
+
+    header_fill = PatternFill('solid', fgColor='1F2937')
+    header_font = Font(bold=True, color='FFFFFF', name='Calibri')
+
+    ws.merge_cells('A1:G1')
+    ws['A1'] = 'Lifetime Value de Clientes — Fortium Tailor'
+    ws['A1'].font = Font(bold=True, size=14, name='Calibri')
+    ws['A1'].alignment = Alignment(horizontal='center')
+
+    ws.merge_cells('A2:G2')
+    ws['A2'] = f'Período: {fi} al {ff} | Top {limit} clientes'
+    ws['A2'].font = Font(italic=True, name='Calibri')
+
+    headers = ['Cliente', 'Ventas (S/)', 'Alquileres (S/)', 'Confecciones (S/)', 'Reparaciones (S/)', 'LTV Total (S/)', '# Transacciones']
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=4, column=col, value=h)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal='center')
+
+    for r, row in enumerate(rows, 5):
+        ws.cell(row=r, column=1, value=row['cliente_nombre'])
+        ws.cell(row=r, column=2, value=row['total_ventas']).number_format = '"S/ "#,##0.00'
+        ws.cell(row=r, column=3, value=row['total_alquileres']).number_format = '"S/ "#,##0.00'
+        ws.cell(row=r, column=4, value=row['total_confecciones']).number_format = '"S/ "#,##0.00'
+        ws.cell(row=r, column=5, value=row['total_reparaciones']).number_format = '"S/ "#,##0.00'
+        ws.cell(row=r, column=6, value=row['total_global']).number_format = '"S/ "#,##0.00'
+        ws.cell(row=r, column=7, value=row['num_transacciones']).number_format = '#,##0'
+
+    for col, width in zip('ABCDEFG', [30, 14, 16, 18, 18, 16, 16]):
+        ws.column_dimensions[col].width = width
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    filename = f"analitica_clientes_ltv_{fi}_{ff}.xlsx"
+    response = HttpResponse(buffer.getvalue(),
+                            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+def exportar_analitica_operativas_pdf(request, kpis, filtros):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter,
+                            rightMargin=inch, leftMargin=inch,
+                            topMargin=inch / 2, bottomMargin=inch / 2)
+    styles = _pdf_styles()
+    elements = []
+
+    fi = filtros.get('fecha_inicio', '')
+    ff = filtros.get('fecha_fin', '')
+
+    elements.append(Paragraph("SISTEMA DE GESTION SASTRERIA CONFORT Y MAS", styles['CompanyTitle']))
+    elements.append(Spacer(1, 0.1 * inch))
+    elements.append(Paragraph("MÉTRICAS OPERATIVAS", styles['ReportTitle']))
+    elements.append(Spacer(1, 0.1 * inch))
+    elements.append(Paragraph(f"Período: {fi} al {ff}", styles['SubTitle']))
+    elements.append(Spacer(1, 0.15 * inch))
+
+    def fmt_days(val): return f"{val} días" if val is not None else "N/A"
+
+    rows = [
+        ['Métrica', 'Valor'],
+        ['--- Alquileres ---', ''],
+        ['Duración promedio', fmt_days(kpis['alquiler_duracion_avg'])],
+        ['Duración mínima', fmt_days(kpis['alquiler_duracion_min'])],
+        ['Duración máxima', fmt_days(kpis['alquiler_duracion_max'])],
+        ['Alquileres con devolución', str(kpis['alquiler_count'])],
+        ['--- Confecciones ---', ''],
+        ['Entrega promedio', fmt_days(kpis['confeccion_entrega_avg'])],
+        ['Entrega mínima', fmt_days(kpis['confeccion_entrega_min'])],
+        ['Entrega máxima', fmt_days(kpis['confeccion_entrega_max'])],
+        ['Confecciones entregadas', str(kpis['confeccion_count'])],
+        ['--- Reparaciones ---', ''],
+        ['Turnaround promedio', fmt_days(kpis['reparacion_turnaround_avg'])],
+        ['Turnaround mínimo', fmt_days(kpis['reparacion_turnaround_min'])],
+        ['Turnaround máximo', fmt_days(kpis['reparacion_turnaround_max'])],
+        ['Reparaciones entregadas', str(kpis['reparacion_count'])],
+        ['--- Inventario ---', ''],
+        ['Items ocupados (alquiler activo)', str(kpis['inventario_ocupados'])],
+        ['Items totales', str(kpis['inventario_total'])],
+        ['Tasa de ocupación', f"{kpis['inventario_tasa_ocupacion']}%"],
+    ]
+
+    table = Table(rows, colWidths=[4 * inch, 2 * inch], repeatRows=1)
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1F2937')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTNAME', (0, 0), (-1, -1), 'DejaVuSans'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E2E8F0')),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F9FAFB')]),
+        ('FONTNAME', (0, 1), (-1, -1), 'DejaVuSans'),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+    ]))
+    elements.append(table)
+
+    doc.build(elements)
+    filename = f"analitica_operativas_{fi}_{ff}.pdf"
+    response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+def exportar_analitica_operativas_excel(request, kpis, filtros):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Operativas'
+
+    fi = filtros.get('fecha_inicio', '')
+    ff = filtros.get('fecha_fin', '')
+
+    header_fill = PatternFill('solid', fgColor='1F2937')
+    header_font = Font(bold=True, color='FFFFFF', name='Calibri')
+
+    ws.merge_cells('A1:B1')
+    ws['A1'] = 'Métricas Operativas — Fortium Tailor'
+    ws['A1'].font = Font(bold=True, size=14, name='Calibri')
+    ws['A1'].alignment = Alignment(horizontal='center')
+
+    ws.merge_cells('A2:B2')
+    ws['A2'] = f'Período: {fi} al {ff}'
+    ws['A2'].font = Font(italic=True, name='Calibri')
+
+    for col, h in enumerate(['Métrica', 'Valor'], 1):
+        cell = ws.cell(row=4, column=col, value=h)
+        cell.fill = header_fill
+        cell.font = header_font
+
+    def fmt_days(val): return f"{val} días" if val is not None else "N/A"
+
+    rows = [
+        ('Duración promedio alquiler', fmt_days(kpis['alquiler_duracion_avg'])),
+        ('Duración mínima alquiler', fmt_days(kpis['alquiler_duracion_min'])),
+        ('Duración máxima alquiler', fmt_days(kpis['alquiler_duracion_max'])),
+        ('Alquileres con devolución', kpis['alquiler_count']),
+        ('Entrega promedio confección', fmt_days(kpis['confeccion_entrega_avg'])),
+        ('Entrega mínima confección', fmt_days(kpis['confeccion_entrega_min'])),
+        ('Entrega máxima confección', fmt_days(kpis['confeccion_entrega_max'])),
+        ('Confecciones entregadas', kpis['confeccion_count']),
+        ('Turnaround promedio reparación', fmt_days(kpis['reparacion_turnaround_avg'])),
+        ('Turnaround mínimo reparación', fmt_days(kpis['reparacion_turnaround_min'])),
+        ('Turnaround máximo reparación', fmt_days(kpis['reparacion_turnaround_max'])),
+        ('Reparaciones entregadas', kpis['reparacion_count']),
+        ('Items ocupados (alquiler activo)', kpis['inventario_ocupados']),
+        ('Items totales en inventario', kpis['inventario_total']),
+        ('Tasa de ocupación', f"{kpis['inventario_tasa_ocupacion']}%"),
+    ]
+    for r, (key, val) in enumerate(rows, 5):
+        ws.cell(row=r, column=1, value=key)
+        ws.cell(row=r, column=2, value=val)
+
+    ws.column_dimensions['A'].width = 38
+    ws.column_dimensions['B'].width = 18
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    filename = f"analitica_operativas_{fi}_{ff}.xlsx"
+    response = HttpResponse(buffer.getvalue(),
+                            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+def exportar_analitica_comparativas_pdf(request, comparativa, filtros):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter,
+                            rightMargin=inch / 2, leftMargin=inch / 2,
+                            topMargin=inch / 2, bottomMargin=inch / 2)
+    styles = _pdf_styles()
+    elements = []
+
+    pa = comparativa['periodo_actual']
+    pant = comparativa['periodo_anterior']
+    deltas = comparativa['deltas']
+
+    elements.append(Paragraph("SISTEMA DE GESTION SASTRERIA CONFORT Y MAS", styles['CompanyTitle']))
+    elements.append(Spacer(1, 0.1 * inch))
+    elements.append(Paragraph("COMPARATIVA AÑO VS AÑO", styles['ReportTitle']))
+    elements.append(Spacer(1, 0.1 * inch))
+    elements.append(Paragraph(
+        "Comparativa basada en datos históricos de servicios (no ajustados por reversiones de caja).",
+        styles['InfoBanner']
+    ))
+    elements.append(Spacer(1, 0.15 * inch))
+
+    def fmt_currency(v): return f"S/ {v:,.2f}"
+    def fmt_pct(v): return f"{v:+.1f}%" if v is not None else "N/A"
+
+    header = ['Métrica', f"Actual\n{pa['fecha_inicio']} – {pa['fecha_fin']}", f"Anterior\n{pant['fecha_inicio']} – {pant['fecha_fin']}", 'Δ Abs', 'Δ %']
+    data = [header]
+
+    for metrica, key in [('Ventas', 'ventas'), ('Alquileres', 'alquileres'), ('Confecciones', 'confecciones'), ('Reparaciones', 'reparaciones'), ('Total', 'total')]:
+        data.append([
+            metrica,
+            fmt_currency(pa[key]),
+            fmt_currency(pant[key]),
+            fmt_currency(deltas[f'{key}_abs']),
+            fmt_pct(deltas[f'{key}_pct']),
+        ])
+
+    col_widths = [1.5 * inch, 1.8 * inch, 1.8 * inch, 1.5 * inch, 1.0 * inch]
+    table = Table(data, colWidths=col_widths, repeatRows=1)
+    table.setStyle(_pdf_table_style())
+    elements.append(table)
+
+    doc.build(elements)
+    fi = filtros.get('fecha_inicio', '')
+    ff = filtros.get('fecha_fin', '')
+    filename = f"analitica_comparativas_{fi}_{ff}.pdf"
+    response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+def exportar_analitica_comparativas_excel(request, comparativa, filtros):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Comparativas YoY'
+
+    pa = comparativa['periodo_actual']
+    pant = comparativa['periodo_anterior']
+    deltas = comparativa['deltas']
+    fi = filtros.get('fecha_inicio', '')
+    ff = filtros.get('fecha_fin', '')
+
+    header_fill = PatternFill('solid', fgColor='1F2937')
+    header_font = Font(bold=True, color='FFFFFF', name='Calibri')
+
+    ws.merge_cells('A1:E1')
+    ws['A1'] = 'Comparativa Año vs Año — Fortium Tailor'
+    ws['A1'].font = Font(bold=True, size=14, name='Calibri')
+    ws['A1'].alignment = Alignment(horizontal='center')
+
+    ws.merge_cells('A2:E2')
+    ws['A2'] = 'Comparativa basada en datos históricos de servicios (no ajustados por reversiones de caja).'
+    ws['A2'].font = Font(italic=True, name='Calibri')
+
+    ws.merge_cells('A3:E3')
+    ws['A3'] = f'Período actual: {pa["fecha_inicio"]} al {pa["fecha_fin"]} | Período anterior: {pant["fecha_inicio"]} al {pant["fecha_fin"]}'
+    ws['A3'].font = Font(italic=True, name='Calibri')
+
+    headers = ['Métrica', f'Actual ({pa["fecha_inicio"]})', f'Anterior ({pant["fecha_inicio"]})', 'Δ Absoluto (S/)', 'Δ %']
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=5, column=col, value=h)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal='center')
+
+    for r, (metrica, key) in enumerate([('Ventas', 'ventas'), ('Alquileres', 'alquileres'), ('Confecciones', 'confecciones'), ('Reparaciones', 'reparaciones'), ('Total', 'total')], 6):
+        ws.cell(row=r, column=1, value=metrica)
+        ws.cell(row=r, column=2, value=pa[key]).number_format = '"S/ "#,##0.00'
+        ws.cell(row=r, column=3, value=pant[key]).number_format = '"S/ "#,##0.00'
+        ws.cell(row=r, column=4, value=deltas[f'{key}_abs']).number_format = '"S/ "#,##0.00'
+        pct_val = deltas[f'{key}_pct']
+        ws.cell(row=r, column=5, value=pct_val if pct_val is not None else 'N/A')
+
+    for col, width in zip('ABCDE', [18, 20, 20, 20, 12]):
+        ws.column_dimensions[col].width = width
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    filename = f"analitica_comparativas_{fi}_{ff}.xlsx"
+    response = HttpResponse(buffer.getvalue(),
+                            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+# ============================================================
+# Analytics — Kardex helpers
+# ============================================================
+
+def _kardex_daily_chart(movimientos_qs, desde, hasta):
+    """Returns JSON string of daily or weekly ingresos/egresos for the kardex view."""
+    from collections import defaultdict
+
+    # Normalize desde/hasta to date objects
+    if isinstance(desde, str):
+        desde = date.fromisoformat(desde)
+    if isinstance(hasta, str):
+        hasta = date.fromisoformat(hasta)
+
+    delta_days = (hasta - desde).days
+    use_weekly = delta_days > 60
+
+    base_qs = movimientos_qs.exclude(concepto__in=CONCEPTOS_OPERATIVOS)
+
+    # Use two separate queries (combining fecha__date transform + tipo in values() is broken in Django 5.2)
+    ingresos_rows = base_qs.filter(tipo='ingreso').values('fecha__date').annotate(total=Sum('monto'))
+    egresos_rows = base_qs.filter(tipo='egreso').values('fecha__date').annotate(total=Sum('monto'))
+
+    if use_weekly:
+        # ISO week bucketing
+        week_data = defaultdict(lambda: {'ingresos': 0.0, 'egresos': 0.0})
+        seen_weeks = []
+        for row in ingresos_rows:
+            d = row['fecha__date']
+            year, week, _ = d.isocalendar()
+            key = (year, week)
+            if key not in week_data:
+                seen_weeks.append(key)
+            week_data[key]['ingresos'] += float(row['total'])
+        for row in egresos_rows:
+            d = row['fecha__date']
+            year, week, _ = d.isocalendar()
+            key = (year, week)
+            if key not in week_data:
+                seen_weeks.append(key)
+            week_data[key]['egresos'] += float(row['total'])
+
+        result = [
+            {
+                'label': f'{y}-W{w:02d}',
+                'ingresos': week_data[(y, w)]['ingresos'],
+                'egresos': week_data[(y, w)]['egresos'],
+            }
+            for y, w in sorted(set(seen_weeks))
+        ]
+    else:
+        # Daily bucketing with zero-fill for every day in range
+        day_data = {}
+        current = desde
+        while current <= hasta:
+            day_data[str(current)] = {'ingresos': 0.0, 'egresos': 0.0}
+            current += timedelta(days=1)
+        for row in ingresos_rows:
+            key = str(row['fecha__date'])
+            if key in day_data:
+                day_data[key]['ingresos'] += float(row['total'])
+        for row in egresos_rows:
+            key = str(row['fecha__date'])
+            if key in day_data:
+                day_data[key]['egresos'] += float(row['total'])
+
+        result = [
+            {'label': d, 'ingresos': v['ingresos'], 'egresos': v['egresos']}
+            for d, v in sorted(day_data.items())
+        ]
+
+    return result
+
+
+def _kardex_donut_chart(movimientos_qs):
+    """Returns JSON string of income breakdown by concepto for the kardex view."""
+    rows = (
+        movimientos_qs
+        .filter(tipo='ingreso')
+        .exclude(concepto__in=CONCEPTOS_OPERATIVOS)
+        .values('concepto')
+        .annotate(total=Sum('monto'))
+    )
+
+    result = [
+        {'label': CONCEPTO_LABELS.get(row['concepto'], row['concepto']), 'value': float(row['total'])}
+        for row in rows
+        if row['total']
+    ]
+    return result
+
+
+# ============================================================
+# CAJA — Movimientos views
+# ============================================================
+
+@login_required
+def lista_movimientos_caja(request):
+    q = request.GET.get('q', '').strip()
+    tipo = request.GET.get('tipo', '').strip()
+    concepto = request.GET.get('concepto', '').strip()
+    forma_pago = request.GET.get('forma_pago', '').strip()
+    origen = request.GET.get('origen', '').strip()
+    sesion_id = request.GET.get('sesion', '').strip()
+    desde = request.GET.get('desde', '').strip()
+    hasta = request.GET.get('hasta', '').strip()
+    periodo = request.GET.get('periodo', '').strip()
+
+    hoy = django_tz.localdate()
+    if periodo == 'hoy':
+        desde = hoy.isoformat()
+        hasta = hoy.isoformat()
+    elif periodo == 'semana':
+        desde = (hoy - timedelta(days=6)).isoformat()
+        hasta = hoy.isoformat()
+    elif periodo == 'mes':
+        desde = hoy.replace(day=1).isoformat()
+        hasta = hoy.isoformat()
+
+    qs = CajaMovimiento.objects.select_related(
+        'sesion', 'cliente', 'tipo_gasto'
+    ).annotate(
+        tiene_reverso=Exists(
+            CajaMovimiento.objects.filter(movimiento_reverso_id=OuterRef('pk'))
+        )
+    ).order_by('-fecha', '-id')
+
+    if q:
+        qs = qs.filter(
+            Q(codigo__icontains=q) |
+            Q(descripcion__icontains=q) |
+            Q(cliente__nombres__icontains=q)
+        )
+    if tipo:
+        qs = qs.filter(tipo=tipo)
+    if concepto:
+        qs = qs.filter(concepto=concepto)
+    if forma_pago:
+        qs = qs.filter(forma_pago=forma_pago)
+    if origen:
+        qs = qs.filter(origen=origen)
+    if sesion_id:
+        qs = qs.filter(sesion_id=sesion_id)
+    if desde:
+        qs = qs.filter(fecha__date__gte=desde)
+    if hasta:
+        qs = qs.filter(fecha__date__lte=hasta)
+
+    total = qs.count()
+    paginator = Paginator(qs, 15)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
+    return render(request, 'misastreria/caja/lista_movimientos.html', {
+        'page_obj': page_obj,
+        'total': total,
+        'q': q,
+        'tipo': tipo,
+        'concepto': concepto,
+        'forma_pago': forma_pago,
+        'origen': origen,
+        'sesion_id': sesion_id,
+        'desde': desde,
+        'hasta': hasta,
+        'periodo': periodo,
+        'tipo_choices': CajaMovimiento.TIPO_CHOICES,
+        'concepto_choices': CajaMovimiento.CONCEPTO_CHOICES,
+        'forma_pago_choices': CajaMovimiento.FORMA_PAGO_MOV_CHOICES,
+        'origen_choices': CajaMovimiento.ORIGEN_CHOICES,
+        'sesiones': CajaSesion.objects.order_by('-fecha_apertura')[:30],
+    })
+
+
+@login_required
+def crear_movimiento_caja(request):
+    sesion_activa = CajaSesion.objects.filter(estado='abierta').first()
+    next_sesion = request.GET.get('sesion', '') or request.POST.get('next_sesion', '')
+
+    if request.method == 'POST':
+        form = CajaMovimientoManualForm(request.POST)
+        if form.is_valid():
+            movimiento = form.save(commit=False)
+            movimiento.origen = 'manual'
+            movimiento.sesion = sesion_activa
+            movimiento.usuario = request.user
+            movimiento.tipo = CajaMovimiento.concepto_tipo(movimiento.concepto)
+            movimiento.save()
+            messages.success(request, f"Movimiento {movimiento.codigo} creado exitosamente.")
+            if next_sesion:
+                return redirect('detalle_sesion_caja', pk=next_sesion)
+            return redirect('detalle_movimiento_caja', pk=movimiento.pk)
+        else:
+            messages.error(request, "Por favor corrige los errores del formulario.")
+    else:
+        form = CajaMovimientoManualForm()
+
+    return render(request, 'misastreria/caja/form_movimiento.html', {
+        'form': form,
+        'titulo': 'Crear Movimiento Manual',
+        'sesion_activa': sesion_activa,
+        'requiere_tipo_gasto': CajaMovimiento.REQUIERE_TIPO_GASTO,
+        'next_sesion': next_sesion,
+    })
+
+
+@login_required
+def detalle_movimiento_caja(request, pk):
+    movimiento = get_object_or_404(
+        CajaMovimiento.objects.select_related(
+            'sesion', 'cliente', 'tipo_gasto', 'usuario',
+            'referencia_alquiler', 'referencia_venta',
+            'referencia_confeccion', 'referencia_reparacion',
+        ),
+        pk=pk,
+    )
+    puede_reversar = (
+        not movimiento.fue_reversado and
+        movimiento.movimiento_reverso is None and
+        movimiento.origen == 'manual'
+    )
+    return render(request, 'misastreria/caja/detalle_movimiento.html', {
+        'movimiento': movimiento,
+        'puede_reversar': puede_reversar,
+    })
+
+
+@login_required
+@require_POST
+def revertir_movimiento_caja(request, pk):
+    movimiento = get_object_or_404(CajaMovimiento, pk=pk)
+
+    if movimiento.origen != 'manual':
+        messages.error(request, "Solo se pueden anular movimientos manuales.")
+        return redirect('detalle_movimiento_caja', pk=pk)
+
+    # Block reversal of a reversal (movement already has a reverso_de)
+    if movimiento.fue_reversado:
+        messages.error(request, "Este movimiento ya fue reversado.")
+        return redirect('detalle_movimiento_caja', pk=pk)
+
+    # Block if this movement IS itself a reversal (has movimiento_reverso set)
+    if movimiento.movimiento_reverso is not None:
+        messages.error(request, "No se puede reversar un movimiento que ya es un reverso.")
+        return redirect('detalle_movimiento_caja', pk=pk)
+
+    # Determine reversal concepto
+    if movimiento.tipo == 'ingreso':
+        concepto_reverso = 'anulacion_cobro'
+    else:
+        concepto_reverso = 'ingreso_manual'
+
+    tipo_reverso = 'egreso' if movimiento.tipo == 'ingreso' else 'ingreso'
+
+    sesion_activa = CajaSesion.objects.filter(estado='abierta').first()
+
+    with transaction.atomic():
+        reverso = CajaMovimiento.objects.create(
+            sesion=sesion_activa,
+            tipo=tipo_reverso,
+            concepto=concepto_reverso,
+            origen='manual',
+            forma_pago=movimiento.forma_pago,
+            monto=movimiento.monto,
+            cliente=movimiento.cliente,
+            descripcion=f"Reverso de {movimiento.codigo}",
+            usuario=request.user,
+        )
+        movimiento.movimiento_reverso = reverso
+        movimiento.save(update_fields=['movimiento_reverso'])
+
+    messages.success(request, f"Movimiento {movimiento.codigo} reversado. Se creó {reverso.codigo}.")
+    return redirect('detalle_movimiento_caja', pk=movimiento.pk)
+
+
+# ============================================================
+# CAJA — Sesiones views
+# ============================================================
+
+@login_required
+def lista_sesiones_caja(request):
+    qs = CajaSesion.objects.order_by('-fecha_apertura')
+    total = qs.count()
+    paginator = Paginator(qs, 15)
+    page_obj = paginator.get_page(request.GET.get('page'))
+    return render(request, 'misastreria/caja/lista_sesiones.html', {
+        'page_obj': page_obj,
+        'total': total,
+    })
+
+
+@login_required
+def abrir_sesion_caja(request):
+    sesion_existente = CajaSesion.objects.filter(estado='abierta').first()
+
+    if request.method == 'POST':
+        form = CajaSesionAperturaForm(request.POST)
+        if form.is_valid():
+            try:
+                with transaction.atomic():
+                    sesion = form.save(commit=False)
+                    sesion.usuario_apertura = request.user
+                    sesion.estado = 'abierta'
+                    sesion.save()
+                    CajaMovimiento.objects.create(
+                        sesion=sesion,
+                        tipo='ingreso',
+                        concepto='apertura_caja',
+                        origen='automatico',
+                        forma_pago='efectivo',
+                        monto=sesion.monto_apertura,
+                        descripcion=f"Apertura de caja sesión #{sesion.pk}",
+                        usuario=request.user,
+                    )
+                messages.success(request, f"Sesión de caja #{sesion.pk} abierta exitosamente.")
+                return redirect('detalle_sesion_caja', pk=sesion.pk)
+            except IntegrityError:
+                form.add_error(None, "Ya existe una sesión de caja abierta. Ciérrala antes de abrir una nueva.")
+    else:
+        form = CajaSesionAperturaForm()
+
+    return render(request, 'misastreria/caja/abrir_caja.html', {
+        'form': form,
+        'sesion_existente': sesion_existente,
+    })
+
+
+@login_required
+def detalle_sesion_caja(request, pk):
+    sesion = get_object_or_404(CajaSesion.objects.select_related('usuario_apertura', 'usuario_cierre'), pk=pk)
+    movimientos = CajaMovimiento.objects.filter(sesion=sesion).select_related('cliente', 'tipo_gasto').annotate(
+        tiene_reverso=Exists(CajaMovimiento.objects.filter(movimiento_reverso_id=OuterRef('pk')))
+    ).order_by('fecha', 'id')
+    movimientos_garantia = movimientos.filter(concepto__in=('garantia_alquiler', 'garantia_devolucion'))
+    arqueo = _calcular_arqueo(sesion)
+    return render(request, 'misastreria/caja/detalle_sesion.html', {
+        'sesion': sesion,
+        'movimientos': movimientos,
+        'movimientos_garantia': movimientos_garantia,
+        'arqueo': arqueo,
+    })
+
+
+@login_required
+def cerrar_sesion_caja(request, pk):
+    sesion = get_object_or_404(CajaSesion, pk=pk, estado='abierta')
+
+    if request.method == 'POST':
+        form = CajaSesionCierreForm(request.POST)
+        if form.is_valid():
+            monto_declarado = form.cleaned_data['monto_cierre_declarado']
+            observaciones = form.cleaned_data.get('observaciones', '')
+            saldo_sistema = sesion.saldo_sistema
+            diferencia = monto_declarado - saldo_sistema
+
+            # Require observaciones when there is a difference
+            if diferencia != Decimal('0') and not observaciones:
+                form.add_error('observaciones', 'Las observaciones son requeridas cuando hay diferencia.')
+            else:
+                with transaction.atomic():
+                    sesion_locked = CajaSesion.objects.select_for_update().get(pk=sesion.pk)
+
+                    if diferencia > Decimal('0'):
+                        CajaMovimiento.objects.create(
+                            sesion=sesion_locked,
+                            tipo='ingreso',
+                            concepto='sobrante_caja',
+                            origen='automatico',
+                            forma_pago='efectivo',
+                            monto=abs(diferencia),
+                            descripcion=f"Sobrante al cerrar sesión #{sesion.pk}",
+                            usuario=request.user,
+                        )
+                    elif diferencia < Decimal('0'):
+                        CajaMovimiento.objects.create(
+                            sesion=sesion_locked,
+                            tipo='egreso',
+                            concepto='faltante_caja',
+                            origen='automatico',
+                            forma_pago='efectivo',
+                            monto=abs(diferencia),
+                            descripcion=f"Faltante al cerrar sesión #{sesion.pk}",
+                            usuario=request.user,
+                        )
+
+                    sesion_locked.monto_cierre_sistema = saldo_sistema
+                    sesion_locked.monto_cierre_declarado = monto_declarado
+                    sesion_locked.diferencia = diferencia
+                    sesion_locked.estado = 'cerrada'
+                    sesion_locked.fecha_cierre = django_tz.now()
+                    sesion_locked.usuario_cierre = request.user
+                    sesion_locked.observaciones = observaciones
+                    sesion_locked.save()
+
+                messages.success(request, f"Sesión #{sesion.pk} cerrada. Diferencia: Bs {diferencia:+.2f}.")
+                return redirect('detalle_sesion_caja', pk=sesion.pk)
+    else:
+        form = CajaSesionCierreForm()
+
+    saldo_sistema = sesion.saldo_sistema
+    arqueo = _calcular_arqueo(sesion)
+
+    return render(request, 'misastreria/caja/cerrar_caja.html', {
+        'form': form,
+        'sesion': sesion,
+        'saldo_sistema': saldo_sistema,
+        'arqueo': arqueo,
+    })
+
+
+# ============================================================
+# CAJA — Resumen y Exports
+# ============================================================
+
+@login_required
+def resumen_caja(request):
+    ctx = _build_resumen_context(request)
+    return render(request, 'misastreria/caja/resumen_caja.html', ctx)
+
+
+@login_required
+def export_resumen_caja_pdf(request):
+    ctx = _build_resumen_context(request)
+    buffer = BytesIO()
+
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    styles = getSampleStyleSheet()
+    elements = []
+
+    title_style = ParagraphStyle(
+        'TitleStyle',
+        parent=styles['Heading1'],
+        fontName='DejaVuSans',
+        fontSize=16,
+        alignment=TA_CENTER,
+        spaceAfter=12,
+    )
+    header_style = ParagraphStyle(
+        'HeaderStyle',
+        parent=styles['Heading2'],
+        fontName='DejaVuSans',
+        fontSize=12,
+        spaceAfter=6,
+    )
+    normal_style = ParagraphStyle(
+        'NormalStyle',
+        parent=styles['Normal'],
+        fontName='DejaVuSans',
+        fontSize=9,
+    )
+
+    elements.append(Paragraph("Fortium Tailor — Resumen de Caja", title_style))
+    elements.append(Paragraph(
+        f"Período: {ctx['desde']} al {ctx['hasta']}",
+        normal_style,
+    ))
+    elements.append(Spacer(1, 0.2 * inch))
+
+    # Totals section
+    elements.append(Paragraph("Totales del Período", header_style))
+    totals_data = [
+        ['Concepto', 'Monto (Bs)'],
+        ['Total Ingresos', f"{ctx['total_ingresos']:.2f}"],
+        ['Total Egresos', f"{ctx['total_egresos']:.2f}"],
+        ['Saldo Neto', f"{ctx['saldo']:.2f}"],
+    ]
+    totals_table = Table(totals_data, colWidths=[3 * inch, 2 * inch])
+    totals_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2563eb')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTNAME', (0, 0), (-1, -1), 'DejaVuSans'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+    ]))
+    elements.append(totals_table)
+    elements.append(Spacer(1, 0.2 * inch))
+
+    # Breakdown by concepto
+    elements.append(Paragraph("Desglose por Concepto", header_style))
+    concepto_data = [['Concepto', 'Tipo', 'Total (Bs)']]
+    for row in ctx['breakdown_concepto']:
+        concepto_data.append([row['concepto'], row['tipo'], f"{row['total']:.2f}"])
+    if len(concepto_data) > 1:
+        c_table = Table(concepto_data, colWidths=[2.5 * inch, 1.5 * inch, 1.5 * inch])
+        c_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#dbeafe')),
+            ('FONTNAME', (0, 0), (-1, -1), 'DejaVuSans'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.3, colors.lightgrey),
+            ('ALIGN', (2, 0), (2, -1), 'RIGHT'),
+        ]))
+        elements.append(c_table)
+    else:
+        elements.append(Paragraph("Sin movimientos en el período.", normal_style))
+
+    elements.append(Spacer(1, 0.2 * inch))
+
+    # Breakdown by forma de pago
+    elements.append(Paragraph("Desglose por Forma de Pago", header_style))
+    fp_data = [['Forma de Pago', 'Tipo', 'Total (Bs)']]
+    for row in ctx['breakdown_forma_pago']:
+        fp_data.append([row['forma_pago'], row['tipo'], f"{row['total']:.2f}"])
+    if len(fp_data) > 1:
+        fp_table = Table(fp_data, colWidths=[2.5 * inch, 1.5 * inch, 1.5 * inch])
+        fp_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#dbeafe')),
+            ('FONTNAME', (0, 0), (-1, -1), 'DejaVuSans'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.3, colors.lightgrey),
+            ('ALIGN', (2, 0), (2, -1), 'RIGHT'),
+        ]))
+        elements.append(fp_table)
+
+    doc.build(elements)
+    buffer.seek(0)
+    filename = f"resumen_caja_{ctx['desde']}_{ctx['hasta']}.pdf"
+    response = HttpResponse(buffer.read(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+@login_required
+def export_resumen_caja_excel(request):
+    ctx = _build_resumen_context(request)
+
+    wb = openpyxl.Workbook()
+
+    header_font = Font(bold=True, color='FFFFFF')
+    header_fill = PatternFill(start_color='2563EB', end_color='2563EB', fill_type='solid')
+    center_align = Alignment(horizontal='center')
+
+    def _style_header_row(ws, row_num=1):
+        for cell in ws[row_num]:
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center_align
+
+    def _auto_width(ws):
+        for col in ws.columns:
+            max_len = max((len(str(cell.value or '')) for cell in col), default=10)
+            ws.column_dimensions[get_column_letter(col[0].column)].width = max_len + 4
+
+    # Sheet 1: Resumen
+    ws_resumen = wb.active
+    ws_resumen.title = 'Resumen'
+    ws_resumen.append(['Fortium Tailor — Resumen de Caja'])
+    ws_resumen.append([f"Período: {ctx['desde']} al {ctx['hasta']}"])
+    ws_resumen.append([])
+    ws_resumen.append(['Concepto', 'Monto (Bs)'])
+    _style_header_row(ws_resumen, 4)
+    ws_resumen.append(['Total Ingresos', float(ctx['total_ingresos'])])
+    ws_resumen.append(['Total Egresos', float(ctx['total_egresos'])])
+    ws_resumen.append(['Saldo Neto', float(ctx['saldo'])])
+    _auto_width(ws_resumen)
+
+    # Sheet 2: Detalle
+    ws_detalle = wb.create_sheet('Detalle')
+    ws_detalle.append(['Código', 'Fecha', 'Tipo', 'Concepto', 'Forma Pago', 'Monto (Bs)', 'Sesión', 'Descripción'])
+    _style_header_row(ws_detalle)
+    for mov in ctx['movimientos_detalle']:
+        ws_detalle.append([
+            mov.codigo,
+            mov.creado.strftime('%Y-%m-%d %H:%M'),
+            mov.get_tipo_display(),
+            mov.get_concepto_display(),
+            mov.get_forma_pago_display(),
+            float(mov.monto),
+            str(mov.sesion) if mov.sesion else 'Sin sesión',
+            mov.descripcion,
+        ])
+    _auto_width(ws_detalle)
+
+    # Sheet 3: Por Concepto
+    ws_concepto = wb.create_sheet('Por Concepto')
+    ws_concepto.append(['Concepto', 'Tipo', 'Total (Bs)'])
+    _style_header_row(ws_concepto)
+    for row in ctx['breakdown_concepto']:
+        ws_concepto.append([row['concepto'], row['tipo'], float(row['total'])])
+    _auto_width(ws_concepto)
+
+    # Sheet 4: Por Forma de Pago
+    ws_fp = wb.create_sheet('Por Forma de Pago')
+    ws_fp.append(['Forma de Pago', 'Tipo', 'Total (Bs)'])
+    _style_header_row(ws_fp)
+    for row in ctx['breakdown_forma_pago']:
+        ws_fp.append([row['forma_pago'], row['tipo'], float(row['total'])])
+    _auto_width(ws_fp)
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    filename = f"resumen_caja_{ctx['desde']}_{ctx['hasta']}.xlsx"
+    response = HttpResponse(
+        output.read(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+# ============================================================
+# CAJA — Conceptos de gasto (TipoGasto CRUD)
+# ============================================================
+
+@login_required
+def lista_tipo_gasto(request):
+    q = request.GET.get('q', '').strip()
+    activo = request.GET.get('activo', '').strip()
+
+    qs = TipoGasto.objects.all()
+    if q:
+        qs = qs.filter(nombre__icontains=q)
+    if activo == '1':
+        qs = qs.filter(activo=True)
+    elif activo == '0':
+        qs = qs.filter(activo=False)
+
+    total = qs.count()
+    paginator = Paginator(qs, 15)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
+    return render(request, 'misastreria/caja/lista_tipo_gasto.html', {
+        'page_obj': page_obj,
+        'total': total,
+        'q': q,
+        'activo': activo,
+    })
+
+
+@login_required
+def crear_tipo_gasto(request):
+    if request.method == 'POST':
+        form = TipoGastoForm(request.POST)
+        if form.is_valid():
+            tipo = form.save()
+            messages.success(request, f'Concepto "{tipo.nombre}" creado.')
+            return redirect('lista_tipo_gasto')
+        else:
+            messages.error(request, 'Por favor corrige los errores del formulario.')
+    else:
+        form = TipoGastoForm()
+
+    return render(request, 'misastreria/caja/form_tipo_gasto.html', {
+        'form': form,
+        'titulo': 'Nuevo Concepto de Gasto',
+    })
+
+
+@login_required
+def editar_tipo_gasto(request, pk):
+    tipo = get_object_or_404(TipoGasto, pk=pk)
+    if request.method == 'POST':
+        form = TipoGastoForm(request.POST, instance=tipo)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f'Concepto "{tipo.nombre}" actualizado.')
+            return redirect('lista_tipo_gasto')
+        else:
+            messages.error(request, 'Por favor corrige los errores del formulario.')
+    else:
+        form = TipoGastoForm(instance=tipo)
+
+    return render(request, 'misastreria/caja/form_tipo_gasto.html', {
+        'form': form,
+        'titulo': f'Editar: {tipo.nombre}',
+        'objeto': tipo,
+    })
+
+
+@login_required
+@require_POST
+def eliminar_tipo_gasto(request, pk):
+    tipo = get_object_or_404(TipoGasto, pk=pk)
+    nombre = tipo.nombre
+    try:
+        tipo.delete()
+        messages.success(request, f'Concepto "{nombre}" eliminado.')
+    except ProtectedError:
+        messages.error(request, f'No se puede eliminar "{nombre}" — tiene movimientos asociados.')
+    return redirect('lista_tipo_gasto')
+
+
+# ============================================================
+# MÓDULO DE CONJUNTOS
+# ============================================================
+
+@login_required
+def lista_conjuntos(request):
+    q = request.GET.get('q', '').strip()
+    activo = request.GET.get('activo', '').strip()
+
+    qs = Conjunto.objects.all().order_by('nombre')
+    if q:
+        qs = qs.filter(nombre__icontains=q)
+    if activo in ('True', 'False'):
+        qs = qs.filter(activo=(activo == 'True'))
+
+    total = qs.count()
+    paginator = Paginator(qs, 15)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
+    return render(request, 'misastreria/conjuntos/lista.html', {
+        'page_obj': page_obj,
+        'total': total,
+        'q': q,
+        'activo': activo,
+    })
+
+
+@login_required
+def crear_conjunto(request):
+    if request.method == 'POST':
+        form = ConjuntoForm(request.POST)
+        tipo = request.POST.get('tipo', 'alquiler')
+        formset = ConjuntoSlotFormSet(request.POST, form_kwargs={'tipo': tipo})
+        if form.is_valid() and formset.is_valid():
+            conjunto = form.save()
+            formset.instance = conjunto
+            formset.save()
+            messages.success(request, f'Conjunto "{conjunto.nombre}" creado exitosamente.')
+            return redirect('lista_conjuntos')
+        else:
+            messages.error(request, 'Por favor corrige los errores del formulario.')
+    else:
+        tipo = 'alquiler'
+        form = ConjuntoForm()
+        formset = ConjuntoSlotFormSet(form_kwargs={'tipo': tipo})
+    prenda_item_opts = _build_prenda_item_opts(tipo)
+    return render(request, 'misastreria/conjuntos/form.html', {
+        'form': form,
+        'formset': formset,
+        'titulo': 'Nuevo Conjunto',
+        'prenda_item_opts': json.dumps(prenda_item_opts),
+    })
+
+
+@login_required
+def editar_conjunto(request, pk):
+    conjunto = get_object_or_404(Conjunto, pk=pk)
+    if request.method == 'POST':
+        form = ConjuntoForm(request.POST, instance=conjunto)
+        tipo = request.POST.get('tipo', conjunto.tipo)
+        formset = ConjuntoSlotFormSet(request.POST, instance=conjunto, form_kwargs={'tipo': tipo})
+        if form.is_valid() and formset.is_valid():
+            form.save()
+            formset.save()
+            messages.success(request, f'Conjunto "{conjunto.nombre}" actualizado.')
+            return redirect('lista_conjuntos')
+        else:
+            messages.error(request, 'Por favor corrige los errores del formulario.')
+    else:
+        tipo = conjunto.tipo
+        form = ConjuntoForm(instance=conjunto)
+        formset = ConjuntoSlotFormSet(instance=conjunto, form_kwargs={'tipo': tipo})
+    prenda_item_opts = _build_prenda_item_opts(tipo)
+    return render(request, 'misastreria/conjuntos/form.html', {
+        'form': form,
+        'formset': formset,
+        'titulo': 'Editar Conjunto',
+        'conjunto': conjunto,
+        'prenda_item_opts': json.dumps(prenda_item_opts),
+    })
+
+
+@login_required
+def eliminar_conjunto(request, pk):
+    conjunto = get_object_or_404(Conjunto, pk=pk)
+    if request.method == 'POST':
+        conjunto.activo = False
+        conjunto.save(update_fields=['activo'])
+        messages.success(request, f'Conjunto "{conjunto.nombre}" desactivado.')
+        return redirect('lista_conjuntos')
+    return render(request, 'misastreria/conjuntos/confirmar_eliminar.html', {
+        'conjunto': conjunto,
+    })
+
+
+def buscar_prenda_items(request):
+    q = request.GET.get('q', '').strip()
+    qs = PrendaItem.objects.exclude(estado='baja').select_related('prenda').order_by('codigo_item')
+    if q:
+        qs = qs.filter(
+            Q(codigo_item__icontains=q) | Q(prenda__nombre__icontains=q)
+        )
+    results = []
+    for pi in qs[:15]:
+        nombre = pi.prenda.nombre
+        if pi.prenda.talla:
+            nombre += f' T{pi.prenda.talla}'
+        results.append({
+            'id': pi.id,
+            'codigo_item': pi.codigo_item,
+            'nombre': nombre,
+            'estado': pi.estado,
+        })
+    return JsonResponse(results, safe=False)

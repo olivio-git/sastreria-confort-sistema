@@ -1,0 +1,97 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Confirmar Reserva{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'detalle_alquiler' alquiler.id %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left"></i>Volver
+      </a>
+    </div>
+    <div class="col">
+      <h2 class="page-title"><i data-lucide="check-circle" class="me-2 text-muted"></i>Confirmar Reserva</h2>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+<div class="row justify-content-center">
+  <div class="col-12 col-sm-9 col-md-6 col-lg-5">
+    <div class="card card-md">
+      <div class="card-status-top bg-warning"></div>
+      <div class="card-header">
+        <h3 class="card-title">{{ alquiler.codigo }}</h3>
+        {% if alquiler.cliente %}
+        <span class="text-muted ms-2 small">{{ alquiler.cliente }}</span>
+        {% endif %}
+      </div>
+      <div class="card-body">
+        <div class="mb-3">
+          <div class="row g-2 text-muted small">
+            <div class="col-6">
+              <span class="fw-semibold">Fecha alquiler:</span>
+              {{ alquiler.fecha_alquiler|date:"d/m/Y" }}
+            </div>
+            <div class="col-6">
+              <span class="fw-semibold">Fecha devolución:</span>
+              {{ alquiler.fecha_devolucion|date:"d/m/Y" }}
+            </div>
+            {% if alquiler.fecha_evento %}
+            <div class="col-6">
+              <span class="fw-semibold">Fecha del evento:</span>
+              {{ alquiler.fecha_evento|date:"d/m/Y" }}
+            </div>
+            {% endif %}
+            {% if alquiler.empleado %}
+            <div class="col-6">
+              <span class="fw-semibold">Empleado:</span>
+              {{ alquiler.empleado }}
+            </div>
+            {% endif %}
+          </div>
+        </div>
+        <p class="text-muted mb-3">Al confirmar, las siguientes prendas pasarán a estado alquilado y se emitirá un registro en el kardex:</p>
+        <div class="table-responsive">
+          <table class="table table-vcenter card-table table-sm mb-0">
+            <thead>
+              <tr>
+                <th>Código item</th>
+                <th>Prenda</th>
+                <th>Condición</th>
+                <th>Estado actual</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in alquiler.items.all %}
+              <tr>
+                <td><code>{{ item.prenda_item.codigo_item }}</code></td>
+                <td>{{ item.prenda_item.prenda.nombre }}</td>
+                <td>{{ item.prenda_item.get_condicion_display }}</td>
+                <td><span class="badge-estado badge-reservado">{{ item.prenda_item.get_estado_display }}</span></td>
+              </tr>
+              {% empty %}
+              <tr>
+                <td colspan="4" class="text-muted text-center py-2">Sin prendas registradas.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card-footer d-flex justify-content-center gap-3">
+        <a href="{% url 'detalle_alquiler' alquiler.id %}" class="btn btn-outline-secondary">
+          <i data-lucide="x"></i>Cancelar
+        </a>
+        <form method="post" id="form-confirmar" class="d-inline">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-success d-flex align-items-center gap-1">
+            <i data-lucide="check"></i>Confirmar reserva
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

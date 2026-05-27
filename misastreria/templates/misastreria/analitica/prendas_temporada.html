@@ -1,0 +1,124 @@
+{% extends 'misastreria/base.html' %}
+{% load static %}
+
+{% block titulo %}Prendas por temporada{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="layers" class="me-2 text-muted"></i>Prendas por temporada
+      </h2>
+      <div class="text-muted mt-1 small">Qué prendas se piden más en cada mes del año.</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <form method="GET" action="{% url 'analitica_prendas_temporada' %}" class="row g-2 align-items-end" id="filter-form">
+      <div class="col-md-2">
+        <label for="año" class="form-label small mb-1 fw-semibold text-muted">Año:</label>
+        <select class="form-select form-select-sm" id="año" name="año" data-debounce="0">
+          {% for a in años_disponibles %}
+          <option value="{{ a }}" {% if a == año %}selected{% endif %}>{{ a }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label for="servicio" class="form-label small mb-1 fw-semibold text-muted">Servicio:</label>
+        <select class="form-select form-select-sm" id="servicio" name="servicio" data-debounce="0">
+          <option value="alquiler" {% if servicio == 'alquiler' %}selected{% endif %}>Alquileres</option>
+          <option value="venta"    {% if servicio == 'venta'    %}selected{% endif %}>Ventas</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label for="top" class="form-label small mb-1 fw-semibold text-muted">Mostrar top:</label>
+        <select class="form-select form-select-sm" id="top" name="top" data-debounce="0">
+          <option value="10"  {% if top == 10  %}selected{% endif %}>10 prendas</option>
+          <option value="20"  {% if top == 20  %}selected{% endif %}>20 prendas</option>
+          <option value="50"  {% if top == 50  %}selected{% endif %}>50 prendas</option>
+        </select>
+      </div>
+      <div class="col-auto d-flex gap-2 align-items-end">
+        <button type="submit" class="btn btn-primary btn-sm">
+          <i data-lucide="filter"></i> Ver
+        </button>
+        <a href="{% url 'analitica_prendas_temporada' %}" class="btn btn-outline-secondary btn-sm">Limpiar</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% if filas %}
+<div class="card">
+  <div class="card-header d-flex align-items-center justify-content-between">
+    <span class="fw-semibold">
+      {{ filas|length }} prenda{{ filas|length|pluralize }} — {{ año }}
+      ({% if servicio == 'alquiler' %}alquileres{% else %}ventas{% endif %})
+    </span>
+    <span class="text-muted small d-flex align-items-center gap-2">
+      <span>Menos</span>
+      <span style="display:inline-flex;gap:2px">
+        <span style="width:14px;height:14px;background:rgba(37,99,235,0.15);border-radius:2px"></span>
+        <span style="width:14px;height:14px;background:rgba(37,99,235,0.35);border-radius:2px"></span>
+        <span style="width:14px;height:14px;background:rgba(37,99,235,0.55);border-radius:2px"></span>
+        <span style="width:14px;height:14px;background:rgba(37,99,235,0.75);border-radius:2px"></span>
+        <span style="width:14px;height:14px;background:rgba(37,99,235,1.00);border-radius:2px"></span>
+      </span>
+      <span>Más</span>
+    </span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table" style="font-size:.8rem">
+      <thead>
+        <tr>
+          <th style="min-width:160px">Prenda</th>
+          {% for mes in meses %}
+          <th class="text-center" style="width:52px;padding:.35rem .25rem">{{ mes }}</th>
+          {% endfor %}
+          <th class="text-end" style="min-width:60px">Total</th>
+          <th style="min-width:60px">Pico</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for fila in filas %}
+        <tr>
+          <td class="fw-semibold" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px" title="{{ fila.nombre }}">
+            {{ fila.nombre }}
+          </td>
+          {% for m in fila.meses_data %}
+          <td class="text-center" style="padding:.3rem .2rem">
+            {% if m.val %}
+            <span style="display:inline-block;width:36px;height:28px;line-height:28px;border-radius:4px;font-weight:600;font-size:.75rem;background:rgba(37,99,235,{{ m.alpha }});color:{% if m.light %}#1e3a8a{% else %}#fff{% endif %}" title="{{ m.val }}">{{ m.val }}</span>
+            {% else %}
+            <span class="text-muted" style="font-size:.7rem">—</span>
+            {% endif %}
+          </td>
+          {% endfor %}
+          <td class="text-end fw-semibold" style="color:var(--primary)">{{ fila.total }}</td>
+          <td>
+            <span class="badge" style="background:var(--primary-light);color:var(--primary);font-size:.7rem">{{ fila.pico }}</span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% else %}
+<div class="card">
+  <div class="card-body text-center text-muted py-4">
+    <i class="bi bi-inbox d-block mb-2" style="font-size:2rem"></i>
+    Sin datos para el año {{ año }}
+    {% if servicio == 'alquiler' %}en alquileres{% else %}en ventas{% endif %}.
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}

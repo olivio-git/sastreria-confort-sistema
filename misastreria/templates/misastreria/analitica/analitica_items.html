@@ -1,0 +1,144 @@
+{% extends 'misastreria/base.html' %}
+{% load static %}
+
+{% block titulo %}Prendas más vendidas{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="package" class="me-2 text-muted"></i>Prendas más vendidas
+      </h2>
+      <div class="text-muted mt-1 small">Prendas con mayor movimiento en el período seleccionado.</div>
+    </div>
+    <div class="col-auto ms-auto d-flex gap-2">
+      <button type="button" class="btn btn-outline-secondary" onclick="exportReport('pdf')">
+        <i data-lucide="file-text"></i> PDF
+      </button>
+      <button type="button" class="btn btn-outline-success" onclick="exportReport('excel')">
+        <i data-lucide="file-spreadsheet"></i> Excel
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <form method="GET" action="{% url 'analitica_items' %}" class="row g-2 align-items-end" id="filter-form">
+      <div class="col-md-3">
+        <label for="fecha_inicio" class="form-label small mb-1 fw-semibold text-muted">Fecha Inicio:</label>
+        <input type="date" class="form-control form-control-sm" id="fecha_inicio" name="fecha_inicio" value="{{ fecha_inicio }}">
+      </div>
+      <div class="col-md-3">
+        <label for="fecha_fin" class="form-label small mb-1 fw-semibold text-muted">Fecha Fin:</label>
+        <input type="date" class="form-control form-control-sm" id="fecha_fin" name="fecha_fin" value="{{ fecha_fin }}">
+      </div>
+      <div class="col-md-2">
+        <label for="servicio" class="form-label small mb-1 fw-semibold text-muted">Servicio:</label>
+        <select class="form-select form-select-sm" id="servicio" name="servicio">
+          <option value="ambos" {% if servicio == 'ambos' %}selected{% endif %}>Ambos</option>
+          <option value="venta" {% if servicio == 'venta' %}selected{% endif %}>Ventas</option>
+          <option value="alquiler" {% if servicio == 'alquiler' %}selected{% endif %}>Alquileres</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label for="sort" class="form-label small mb-1 fw-semibold text-muted">Ordenar por:</label>
+        <select class="form-select form-select-sm" id="sort" name="sort">
+          <option value="ingreso" {% if sort == 'ingreso' %}selected{% endif %}>Ingreso</option>
+          <option value="cantidad" {% if sort == 'cantidad' %}selected{% endif %}>Cantidad</option>
+        </select>
+      </div>
+      <div class="col-md-2 d-flex gap-2 align-items-end">
+        <button type="submit" class="btn btn-primary btn-sm">
+          <i data-lucide="filter"></i> Filtrar
+        </button>
+        <a href="{% url 'analitica_items' %}" class="btn btn-outline-secondary btn-sm">Limpiar</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header d-flex align-items-center">
+    <span class="text-muted small">{{ total_items }} prenda{{ total_items|pluralize }} encontrada{{ total_items|pluralize }}</span>
+  </div>
+  <div class="table-responsive">
+    {% if page_obj %}
+    <table class="table table-vcenter card-table table-hover">
+      <thead>
+        <tr>
+          <th>Prenda</th>
+          <th class="text-end">Cant. Venta</th>
+          <th class="text-end">Ing. Venta (S/)</th>
+          <th class="text-end">Cant. Alquiler</th>
+          <th class="text-end">Ing. Alquiler (S/)</th>
+          <th class="text-end">Cant. Total</th>
+          <th class="text-end">Ing. Total (S/)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in page_obj %}
+        <tr>
+          <td>{{ row.prenda_nombre }}</td>
+          <td class="text-end">{% if row.tiene_venta %}{{ row.cantidad_venta }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="text-end">{% if row.tiene_venta %}{{ row.ingreso_venta|floatformat:2 }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="text-end">{% if row.tiene_alquiler %}{{ row.cantidad_alquiler }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="text-end">{% if row.tiene_alquiler %}{{ row.ingreso_alquiler|floatformat:2 }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="text-end fw-semibold">{{ row.cantidad_total }}</td>
+          <td class="text-end fw-semibold" style="color:var(--success)">{{ row.ingreso_total|floatformat:2 }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="7">
+            <div class="text-center text-muted py-3">
+              <i class="bi bi-inbox d-block mb-2" style="font-size:2rem"></i>
+              Sin datos para los filtros seleccionados.
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="card-body">
+      <p class="text-center text-muted">Sin datos para los filtros seleccionados.</p>
+    </div>
+    {% endif %}
+  </div>
+  {% if page_obj.paginator.num_pages > 1 %}
+  <div class="card-footer d-flex align-items-center">
+    <span class="text-muted small">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+    <nav class="ms-auto">
+      <ul class="pagination pagination-sm mb-0">
+        {% if page_obj.has_previous %}
+          <li class="page-item"><a class="page-link" href="?page=1&fecha_inicio={{ fecha_inicio }}&fecha_fin={{ fecha_fin }}&servicio={{ servicio }}&sort={{ sort }}">«</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&fecha_inicio={{ fecha_inicio }}&fecha_fin={{ fecha_fin }}&servicio={{ servicio }}&sort={{ sort }}">‹</a></li>
+        {% endif %}
+        <li class="page-item active">
+          <span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+        </li>
+        {% if page_obj.has_next %}
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&fecha_inicio={{ fecha_inicio }}&fecha_fin={{ fecha_fin }}&servicio={{ servicio }}&sort={{ sort }}">›</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&fecha_inicio={{ fecha_inicio }}&fecha_fin={{ fecha_fin }}&servicio={{ servicio }}&sort={{ sort }}">»</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function exportReport(format) {
+    const params = new URLSearchParams(window.location.search);
+    params.set('export_format', format);
+    window.location.href = '?' + params.toString();
+}
+</script>
+{% endblock %}

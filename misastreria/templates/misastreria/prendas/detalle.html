@@ -1,0 +1,485 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}{{ prenda.codigo }} — {{ prenda.nombre }}{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'lista_prendas' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left"></i>Volver
+      </a>
+    </div>
+    <div class="col">
+      <div class="page-pretitle">Prendas</div>
+      <h2 class="page-title">
+        <i data-lucide="shopping-bag" class="me-2 text-muted"></i>
+        {{ prenda.nombre }}
+        <small class="text-muted ms-2 fs-6"><code>{{ prenda.codigo }}</code></small>
+      </h2>
+    </div>
+    <div class="col-auto ms-auto d-flex gap-2">
+      <a href="{% url 'kardex_inventario' prenda.id %}" class="btn btn-outline-info">
+        <i class="bi bi-clock-history me-1"></i>Kardex
+      </a>
+      <a href="{% url 'editar_prenda' prenda.id %}" class="btn btn-outline-primary">
+        <i data-lucide="pencil"></i>Editar SKU
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+
+<div class="row g-3 mb-3">
+  <!-- Info del SKU -->
+  <div class="col-12 col-lg-7">
+    <div class="card h-100">
+      <div class="card-header"><h3 class="card-title">Datos del SKU</h3></div>
+      <div class="card-body">
+        <div class="datagrid">
+          <div class="datagrid-item">
+            <div class="datagrid-title">Modelo</div>
+            <div class="datagrid-content">{{ prenda.modelo|default:"—" }}</div>
+          </div>
+          <div class="datagrid-item">
+            <div class="datagrid-title">Talla</div>
+            <div class="datagrid-content">{{ prenda.talla|default:"—" }}</div>
+          </div>
+          <div class="datagrid-item">
+            <div class="datagrid-title">Color</div>
+            <div class="datagrid-content">{{ prenda.color|default:"—" }}</div>
+          </div>
+          <div class="datagrid-item">
+            <div class="datagrid-title">Precio</div>
+            <div class="datagrid-content fw-semibold">Bs. {{ prenda.precio|floatformat:2 }}</div>
+          </div>
+          <div class="datagrid-item">
+            <div class="datagrid-title">Stock mínimo</div>
+            <div class="datagrid-content">{{ prenda.stock_minimo|default:"—" }}</div>
+          </div>
+          <div class="datagrid-item">
+            <div class="datagrid-title">Estado</div>
+            <div class="datagrid-content">
+              <span class="badge-estado {% if prenda.estado == 'ACT' %}badge-entregado{% else %}badge-inactivo{% endif %}">
+                {{ prenda.get_estado_display }}
+              </span>
+            </div>
+          </div>
+          {% if prenda.notas %}
+          <div class="datagrid-item" style="grid-column:1/-1">
+            <div class="datagrid-title">Notas</div>
+            <div class="datagrid-content">{{ prenda.notas }}</div>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Resumen de stock -->
+  <div class="col-12 col-lg-5">
+    <div class="card h-100">
+      <div class="card-header"><h3 class="card-title">Resumen de stock</h3></div>
+      <div class="card-body">
+        <div class="row g-3 text-center">
+          <div class="col-6">
+            <div class="card bg-success-lt border-0 p-3">
+              <div class="h2 mb-1 text-success">{{ resumen.disponible }}</div>
+              <div class="text-muted small">Disponible</div>
+            </div>
+          </div>
+          <div class="col-6">
+            <div class="card bg-azure-lt border-0 p-3">
+              <div class="h2 mb-1 text-azure">{{ resumen.alquilado }}</div>
+              <div class="text-muted small">Alquilado</div>
+            </div>
+          </div>
+          <div class="col-6">
+            <div class="card bg-danger-lt border-0 p-3">
+              <div class="h2 mb-1 text-danger">{{ resumen.baja }}</div>
+              <div class="text-muted small">Baja</div>
+            </div>
+          </div>
+          <div class="col-6">
+            <div class="card bg-secondary-lt border-0 p-3">
+              <div class="h2 mb-1">{{ resumen.total }}</div>
+              <div class="text-muted small">Total</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Tabla de items -->
+<div class="card">
+  <div class="card-header d-flex align-items-center">
+    <h3 class="card-title mb-0">Items individuales</h3>
+    <span class="ms-3 text-muted small">{{ resumen.total }} unidad{{ resumen.total|pluralize:"es" }}</span>
+    <button type="button" class="btn btn-success btn-sm ms-auto"
+            data-bs-toggle="modal" data-bs-target="#modalAgregarItems">
+      <i data-lucide="plus" class="me-1"></i>Agregar items
+    </button>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table">
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Tipo</th>
+          <th>Condición</th>
+          <th>Estado</th>
+          <th>Ubicación</th>
+          <th class="text-center">Veces alq.</th>
+          <th class="text-center">Vida útil</th>
+          <th>Notas</th>
+          <th data-no-toggle style="white-space:nowrap">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr>
+          <td><code>{{ item.codigo_item }}</code></td>
+          <td>
+            {% if item.tipo == 'alquiler' %}
+              <span class="badge-estado badge-alquilado">Alquiler</span>
+            {% else %}
+              <span class="badge-estado badge-entregado">Venta</span>
+            {% endif %}
+          </td>
+          <td>{{ item.get_condicion_display }}</td>
+          <td>
+            {% if item.estado == 'disponible' %}
+              <span class="badge-estado badge-devuelto">Disponible</span>
+            {% elif item.estado == 'alquilado' %}
+              <span class="badge-estado badge-alquilado">Alquilado</span>
+            {% else %}
+              <span class="badge-estado badge-inactivo">Baja</span>
+            {% endif %}
+          </td>
+          <td>{{ item.ubicacion|default:"—" }}</td>
+          <td class="text-center">{{ item.veces_alquilado }}</td>
+          <td class="text-center" style="min-width:120px">
+            {% if item.max_usos_efectivo %}
+            <div class="progress mb-1" style="height:8px" title="{{ item.veces_alquilado }} / {{ item.max_usos_efectivo }} usos">
+              <div class="progress-bar
+                {% if item.estado_vida_util == 'critico' %}bg-danger
+                {% elif item.estado_vida_util == 'advertencia' %}bg-warning
+                {% else %}bg-success{% endif %}"
+                role="progressbar"
+                style="width:{{ item.porcentaje_vida_util }}%"
+                aria-valuenow="{{ item.porcentaje_vida_util }}"
+                aria-valuemin="0" aria-valuemax="100">
+              </div>
+            </div>
+            <small class="text-muted">{{ item.veces_alquilado }} / {{ item.max_usos_efectivo }}</small>
+            {% else %}
+            <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td class="text-muted small">{{ item.notas|default:"—" }}</td>
+          <td style="white-space:nowrap">
+            <div class="btn-actions">
+              <a href="{% url 'kardex_item' item.codigo_item %}"
+                 class="btn btn-sm btn-icon btn-ghost-info"
+                 title="Ver kardex del item">
+                <i class="bi bi-clock-history"></i>
+              </a>
+              <button type="button"
+                class="btn btn-sm btn-icon btn-ghost-primary"
+                title="Editar"
+                data-edit-item-id="{{ item.id }}"
+                data-edit-item-tipo="{{ item.tipo }}"
+                data-edit-item-ubicacion="{{ item.ubicacion|default:'' }}"
+                data-edit-item-ubicacion-id="{{ item.ubicacion_id|default:'' }}"
+                data-edit-item-condicion="{{ item.condicion }}"
+                data-edit-item-notas="{{ item.notas|default:'' }}"
+                data-edit-item-maxusos="{{ item.max_usos|default:'' }}">
+                <i data-lucide="pencil"></i>
+              </button>
+              {% if item.estado == 'disponible' %}
+                {% if item.tipo == 'alquiler' %}
+                <a href="{% url 'crear_alquiler' %}?item={{ item.id }}"
+                   class="btn btn-sm btn-icon btn-ghost-success"
+                   title="Nuevo alquiler con este item">
+                  <i class="bi bi-file-earmark-plus"></i>
+                </a>
+                {% else %}
+                <a href="{% url 'crear_venta' %}?item={{ item.id }}"
+                   class="btn btn-sm btn-icon btn-ghost-success"
+                   title="Nueva venta con este item">
+                  <i class="bi bi-cart-plus"></i>
+                </a>
+                {% endif %}
+              <form method="post" action="{% url 'baja_prenda_item' item.id %}" class="d-inline"
+                    onsubmit="return confirm('¿Confirmar baja de {{ item.codigo_item }}?')">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm btn-icon btn-ghost-danger" title="Dar de baja">
+                  <i data-lucide="x-circle"></i>
+                </button>
+              </form>
+              {% else %}
+              <button type="button" class="btn btn-sm btn-icon btn-ghost-danger" disabled title="No disponible para baja">
+                <i data-lucide="x-circle"></i>
+              </button>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="10">
+            <div class="empty-state">
+              <i data-lucide="package" style="width:2.5rem;height:2.5rem;opacity:.3;display:block;margin:0 auto .75rem"></i>
+              No hay items registrados para este SKU.
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Modal de edición de item -->
+<div class="modal fade" id="modalEditarItem" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i data-lucide="pencil" class="me-2"></i>Editar Item</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="post" id="formEditarItem">
+        {% csrf_token %}
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">Ubicación <span class="text-muted">(opcional)</span></label>
+            <div class="input-group">
+              <div style="position:relative;flex:1">
+                <input type="text" class="form-control" id="edit_text_ubicacion"
+                       placeholder="Buscar ubicación…" autocomplete="off">
+                <input type="hidden" name="ubicacion" id="edit_id_ubicacion">
+              </div>
+              <button type="button" class="btn btn-outline-secondary"
+                      id="edit_btnNuevaUbicacion" data-ub-ctx="edit" title="Crear nueva ubicación">
+                <i data-lucide="plus"></i>
+              </button>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label for="edit_tipo" class="form-label">Tipo</label>
+            <select id="edit_tipo" name="tipo" class="form-select">
+              <option value="alquiler">Para Alquiler</option>
+              <option value="venta">Para Venta</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label for="edit_condicion" class="form-label">Condición</label>
+            <select id="edit_condicion" name="condicion" class="form-select">
+              <option value="nueva">Nueva</option>
+              <option value="usada">Usada</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label for="edit_max_usos" class="form-label">Máx. usos <span class="text-muted small">(opcional)</span></label>
+            <input type="number" id="edit_max_usos" name="max_usos" class="form-control"
+                   min="1" placeholder="Dejar vacío para heredar del SKU">
+            <div class="form-text">Máx. alquileres antes de baja sugerida</div>
+          </div>
+          <div class="mb-3">
+            <label for="edit_notas" class="form-label">Notas</label>
+            <textarea id="edit_notas" name="notas" class="form-control" rows="3"
+                      placeholder="Observaciones del item…"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary">
+            <i data-lucide="check"></i>Guardar cambios
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Agregar Items en Lote -->
+<div class="modal fade" id="modalAgregarItems" tabindex="-1" aria-labelledby="modalAgregarItemsLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modalAgregarItemsLabel">
+          <i data-lucide="plus" class="me-2"></i>Agregar items — {{ prenda.codigo }}
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form method="post" action="{% url 'agregar_items_prenda' prenda.id %}">
+        {% csrf_token %}
+        <div class="modal-body">
+          <p class="text-muted small mb-3">
+            Se crearán N items con códigos {{ prenda.codigo }}-ITM-NN auto-generados.
+            Todos compartirán los valores ingresados abajo.
+          </p>
+          <div class="mb-3">
+            <label for="agr_cantidad" class="form-label">Cantidad</label>
+            <input type="number" class="form-control" id="agr_cantidad" name="cantidad"
+                   min="1" max="50" value="1" required>
+          </div>
+          <div class="mb-3">
+            <label for="agr_tipo" class="form-label">Tipo</label>
+            <select class="form-select" id="agr_tipo" name="tipo">
+              <option value="alquiler" selected>Alquiler</option>
+              <option value="venta">Venta</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label for="agr_condicion" class="form-label">Condición</label>
+            <select class="form-select" id="agr_condicion" name="condicion">
+              <option value="nueva" selected>Nueva</option>
+              <option value="usada">Usada</option>
+              <option value="remate">Remate</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Ubicación <span class="text-muted">(opcional)</span></label>
+            <div class="input-group">
+              <div style="position:relative;flex:1">
+                <input type="text" class="form-control" id="agr_text_ubicacion"
+                       placeholder="Buscar ubicación…" autocomplete="off">
+                <input type="hidden" name="ubicacion" id="agr_id_ubicacion">
+              </div>
+              <button type="button" class="btn btn-outline-secondary"
+                      id="agr_btnNuevaUbicacion" data-ub-ctx="agr" title="Crear nueva ubicación">
+                <i data-lucide="plus"></i>
+              </button>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label for="agr_notas" class="form-label">Notas <span class="text-muted">(opcional)</span></label>
+            <textarea class="form-control" id="agr_notas" name="notas" rows="2"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-success">
+            <i data-lucide="check" class="me-1"></i>Agregar
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Nueva Ubicación -->
+<div class="modal fade" id="modalNuevaUbicacion" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Nueva ubicación</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label">Nombre</label>
+          <input type="text" class="form-control" id="nuevaUbicacionNombre" placeholder="Ej: Estante A2">
+        </div>
+        <div id="modalUbicacionError" class="text-danger small" style="display:none"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btnGuardarNuevaUbicacion">Guardar</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{% load static %}
+<script>
+(function() {
+  var opts = {{ ubicacion_opts|default:"[]"|safe }}.map(function(u) {
+    return { id: u.id, nombre: u.nombre };
+  });
+
+  // Agregar modal combobox
+  var agrText   = document.getElementById('agr_text_ubicacion');
+  var agrHidden = document.getElementById('agr_id_ubicacion');
+  if (agrText && agrHidden) {
+    window.makeLocalCombobox(agrText, agrHidden, opts);
+  }
+
+  // Editar modal combobox
+  var editText   = document.getElementById('edit_text_ubicacion');
+  var editHidden = document.getElementById('edit_id_ubicacion');
+  if (editText && editHidden) {
+    window.makeLocalCombobox(editText, editHidden, opts);
+  }
+
+  // Abrir modal editar + precargar valores
+  document.querySelectorAll('[data-edit-item-id]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var id = btn.dataset.editItemId;
+      document.getElementById('edit_tipo').value      = btn.dataset.editItemTipo || 'alquiler';
+      document.getElementById('edit_condicion').value = btn.dataset.editItemCondicion || 'nueva';
+      document.getElementById('edit_max_usos').value  = btn.dataset.editItemMaxusos || '';
+      document.getElementById('edit_notas').value     = btn.dataset.editItemNotas || '';
+      // Ubicacion: precargar text + hidden
+      if (editText)   editText.value   = btn.dataset.editItemUbicacion || '';
+      if (editHidden) editHidden.value = btn.dataset.editItemUbicacionId || '';
+      document.getElementById('formEditarItem').action = '/prendas/items/' + id + '/editar/';
+      new bootstrap.Modal(document.getElementById('modalEditarItem')).show();
+    });
+  });
+
+  // Modal Nueva Ubicación — un solo modal compartido para ambos contextos
+  var _ubCtx = null;  // 'agr' o 'edit'
+  var modalUb = document.getElementById('modalNuevaUbicacion');
+
+  function openNuevaUbicacion(ctx) {
+    _ubCtx = ctx;
+    document.getElementById('nuevaUbicacionNombre').value = '';
+    document.getElementById('modalUbicacionError').style.display = 'none';
+    new bootstrap.Modal(modalUb).show();
+  }
+
+  document.getElementById('agr_btnNuevaUbicacion').addEventListener('click', function() {
+    openNuevaUbicacion('agr');
+  });
+  document.getElementById('edit_btnNuevaUbicacion').addEventListener('click', function() {
+    openNuevaUbicacion('edit');
+  });
+
+  document.getElementById('btnGuardarNuevaUbicacion').addEventListener('click', function() {
+    var nombre = document.getElementById('nuevaUbicacionNombre').value.trim();
+    var errEl  = document.getElementById('modalUbicacionError');
+    if (!nombre) { errEl.textContent = 'El nombre es requerido.'; errEl.style.display = 'block'; return; }
+    var csrf = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    fetch('{% url "crear_ubicacion_item" %}', {
+      method: 'POST',
+      headers: { 'X-CSRFToken': csrf, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'nombre=' + encodeURIComponent(nombre),
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) { errEl.textContent = data.error; errEl.style.display = 'block'; return; }
+      // Agregar a opts locales para que el combobox lo tenga
+      opts.push({ id: data.id, nombre: data.nombre });
+      // Rellenar el combobox del contexto que abrió el modal
+      if (_ubCtx === 'agr') {
+        if (agrHidden) agrHidden.value = data.id;
+        if (agrText)   agrText.value   = data.nombre;
+      } else {
+        if (editHidden) editHidden.value = data.id;
+        if (editText)   editText.value   = data.nombre;
+      }
+      bootstrap.Modal.getInstance(modalUb).hide();
+    })
+    .catch(function() { errEl.textContent = 'Error al guardar.'; errEl.style.display = 'block'; });
+  });
+})();
+lucide.createIcons();
+</script>
+{% endblock %}

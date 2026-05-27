@@ -1,0 +1,182 @@
+{% extends 'misastreria/base.html' %}
+{% load static %}
+
+{% block titulo %}Este año vs. el anterior{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="bar-chart-2" class="me-2 text-muted"></i>Este año vs. el anterior
+      </h2>
+      <div class="text-muted mt-1 small">Comparación de ingresos del período elegido con el mismo período del año anterior.</div>
+    </div>
+    <div class="col-auto ms-auto d-flex gap-2">
+      <button type="button" class="btn btn-outline-secondary" onclick="exportReport('pdf')">
+        <i data-lucide="file-text"></i> PDF
+      </button>
+      <button type="button" class="btn btn-outline-success" onclick="exportReport('excel')">
+        <i data-lucide="file-spreadsheet"></i> Excel
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+
+<!-- Info Banner (D2 — always visible) -->
+<div class="alert alert-info d-flex align-items-center mb-3" role="alert" style="border-color:var(--info);background:rgba(6,182,212,.08)">
+  <i class="bi bi-info-circle-fill me-2" style="color:var(--info);font-size:1.1rem"></i>
+  <span>Comparativa basada en datos históricos de servicios (no ajustados por reversiones de caja).</span>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <form method="GET" action="{% url 'analitica_comparativas' %}" class="row g-2 align-items-end" id="filter-form">
+      <div class="col-md-3">
+        <label for="periodo" class="form-label small mb-1 fw-semibold text-muted">Período predefinido:</label>
+        <select class="form-select form-select-sm" id="periodo" name="periodo">
+          <option value="this_month" {% if periodo == 'this_month' %}selected{% endif %}>Este mes</option>
+          <option value="last_month" {% if periodo == 'last_month' %}selected{% endif %}>Mes anterior</option>
+          <option value="this_quarter" {% if periodo == 'this_quarter' %}selected{% endif %}>Este trimestre</option>
+          <option value="this_year" {% if periodo == 'this_year' %}selected{% endif %}>Este año</option>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label for="fecha_inicio" class="form-label small mb-1 fw-semibold text-muted">O desde (manual):</label>
+        <input type="date" class="form-control form-control-sm" id="fecha_inicio" name="fecha_inicio" value="{{ fecha_inicio }}">
+      </div>
+      <div class="col-md-3">
+        <label for="fecha_fin" class="form-label small mb-1 fw-semibold text-muted">Hasta (manual):</label>
+        <input type="date" class="form-control form-control-sm" id="fecha_fin" name="fecha_fin" value="{{ fecha_fin }}">
+      </div>
+      <div class="col-md-3 d-flex gap-2 align-items-end">
+        <button type="submit" class="btn btn-primary btn-sm">
+          <i data-lucide="filter"></i> Filtrar
+        </button>
+        <a href="{% url 'analitica_comparativas' %}" class="btn btn-outline-secondary btn-sm">Limpiar</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% with pa=comparativa.periodo_actual pant=comparativa.periodo_anterior deltas=comparativa.deltas %}
+<div class="card">
+  <div class="card-header">
+    <div class="row">
+      <div class="col">
+        <span class="fw-semibold">Período actual:</span>
+        <span class="text-muted ms-1">{{ pa.fecha_inicio }} — {{ pa.fecha_fin }}</span>
+      </div>
+      <div class="col text-muted small">
+        <span class="fw-semibold">Período anterior:</span>
+        <span class="text-muted ms-1">{{ pant.fecha_inicio }} — {{ pant.fecha_fin }}</span>
+      </div>
+    </div>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table">
+      <thead>
+        <tr>
+          <th>Servicio</th>
+          <th class="text-end">Este período (S/)</th>
+          <th class="text-end">Año anterior (S/)</th>
+          <th class="text-end">Diferencia (S/)</th>
+          <th class="text-end">Variación %</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Ventas</td>
+          <td class="text-end">{{ pa.ventas|floatformat:2 }}</td>
+          <td class="text-end">{{ pant.ventas|floatformat:2 }}</td>
+          <td class="text-end
+            {% if deltas.ventas_abs >= 0 %}text-success{% else %}text-danger{% endif %}">
+            {% if deltas.ventas_abs >= 0 %}+{% endif %}{{ deltas.ventas_abs|floatformat:2 }}
+          </td>
+          <td class="text-end
+            {% if deltas.ventas_pct is not None and deltas.ventas_pct >= 0 %}text-success{% elif deltas.ventas_pct is not None %}text-danger{% endif %}">
+            {% if deltas.ventas_pct is not None %}
+              {% if deltas.ventas_pct >= 0 %}+{% endif %}{{ deltas.ventas_pct }}%
+            {% else %}<span class="text-muted">Sin datos</span>{% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td>Alquileres</td>
+          <td class="text-end">{{ pa.alquileres|floatformat:2 }}</td>
+          <td class="text-end">{{ pant.alquileres|floatformat:2 }}</td>
+          <td class="text-end
+            {% if deltas.alquileres_abs >= 0 %}text-success{% else %}text-danger{% endif %}">
+            {% if deltas.alquileres_abs >= 0 %}+{% endif %}{{ deltas.alquileres_abs|floatformat:2 }}
+          </td>
+          <td class="text-end
+            {% if deltas.alquileres_pct is not None and deltas.alquileres_pct >= 0 %}text-success{% elif deltas.alquileres_pct is not None %}text-danger{% endif %}">
+            {% if deltas.alquileres_pct is not None %}
+              {% if deltas.alquileres_pct >= 0 %}+{% endif %}{{ deltas.alquileres_pct }}%
+            {% else %}<span class="text-muted">Sin datos</span>{% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td>Confecciones</td>
+          <td class="text-end">{{ pa.confecciones|floatformat:2 }}</td>
+          <td class="text-end">{{ pant.confecciones|floatformat:2 }}</td>
+          <td class="text-end
+            {% if deltas.confecciones_abs >= 0 %}text-success{% else %}text-danger{% endif %}">
+            {% if deltas.confecciones_abs >= 0 %}+{% endif %}{{ deltas.confecciones_abs|floatformat:2 }}
+          </td>
+          <td class="text-end
+            {% if deltas.confecciones_pct is not None and deltas.confecciones_pct >= 0 %}text-success{% elif deltas.confecciones_pct is not None %}text-danger{% endif %}">
+            {% if deltas.confecciones_pct is not None %}
+              {% if deltas.confecciones_pct >= 0 %}+{% endif %}{{ deltas.confecciones_pct }}%
+            {% else %}<span class="text-muted">Sin datos</span>{% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td>Reparaciones</td>
+          <td class="text-end">{{ pa.reparaciones|floatformat:2 }}</td>
+          <td class="text-end">{{ pant.reparaciones|floatformat:2 }}</td>
+          <td class="text-end
+            {% if deltas.reparaciones_abs >= 0 %}text-success{% else %}text-danger{% endif %}">
+            {% if deltas.reparaciones_abs >= 0 %}+{% endif %}{{ deltas.reparaciones_abs|floatformat:2 }}
+          </td>
+          <td class="text-end
+            {% if deltas.reparaciones_pct is not None and deltas.reparaciones_pct >= 0 %}text-success{% elif deltas.reparaciones_pct is not None %}text-danger{% endif %}">
+            {% if deltas.reparaciones_pct is not None %}
+              {% if deltas.reparaciones_pct >= 0 %}+{% endif %}{{ deltas.reparaciones_pct }}%
+            {% else %}<span class="text-muted">Sin datos</span>{% endif %}
+          </td>
+        </tr>
+        <tr class="table-active fw-semibold">
+          <td>Total</td>
+          <td class="text-end">{{ pa.total|floatformat:2 }}</td>
+          <td class="text-end">{{ pant.total|floatformat:2 }}</td>
+          <td class="text-end
+            {% if deltas.total_abs >= 0 %}text-success{% else %}text-danger{% endif %}">
+            {% if deltas.total_abs >= 0 %}+{% endif %}{{ deltas.total_abs|floatformat:2 }}
+          </td>
+          <td class="text-end
+            {% if deltas.total_pct is not None and deltas.total_pct >= 0 %}text-success{% elif deltas.total_pct is not None %}text-danger{% endif %}">
+            {% if deltas.total_pct is not None %}
+              {% if deltas.total_pct >= 0 %}+{% endif %}{{ deltas.total_pct }}%
+            {% else %}<span class="text-muted">Sin datos</span>{% endif %}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endwith %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function exportReport(format) {
+    const params = new URLSearchParams(window.location.search);
+    params.set('export_format', format);
+    window.location.href = '?' + params.toString();
+}
+</script>
+{% endblock %}

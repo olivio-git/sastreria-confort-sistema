@@ -1,0 +1,148 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Prendas próximas a baja{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'lista_prendas' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left"></i>Prendas
+      </a>
+    </div>
+    <div class="col">
+      <div class="page-pretitle">Inventario</div>
+      <h2 class="page-title">
+        <i class="bi bi-exclamation-triangle me-2 text-warning"></i>Prendas próximas a baja
+      </h2>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+
+<!-- Filtros de estado -->
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <div class="d-flex gap-2 flex-wrap align-items-center">
+      <span class="text-muted small fw-semibold me-1">Filtrar por estado:</span>
+      <a href="?estado=todos"
+         class="btn btn-sm {% if estado_filter == 'todos' %}btn-secondary{% else %}btn-outline-secondary{% endif %}">
+        Todos
+      </a>
+      <a href="?estado=advertencia"
+         class="btn btn-sm {% if estado_filter == 'advertencia' %}btn-warning{% else %}btn-outline-warning{% endif %}">
+        <i class="bi bi-exclamation-circle me-1"></i>Advertencia (≥70%)
+      </a>
+      <a href="?estado=critico"
+         class="btn btn-sm {% if estado_filter == 'critico' %}btn-danger{% else %}btn-outline-danger{% endif %}">
+        <i class="bi bi-x-octagon me-1"></i>Crítico (≥90%)
+      </a>
+    </div>
+  </div>
+</div>
+
+<!-- Tabla -->
+<div class="card">
+  <div class="card-header d-flex align-items-center">
+    <span class="text-muted small">{{ total }} item{{ total|pluralize }} en alerta</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table">
+      <thead>
+        <tr>
+          <th>Código item</th>
+          <th>Prenda (SKU)</th>
+          <th class="text-center">Usos / Máx</th>
+          <th class="text-center" style="min-width:130px">% Vida útil</th>
+          <th class="text-center">Estado</th>
+          <th data-no-toggle style="white-space:nowrap">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in page_obj %}
+        <tr>
+          <td><code>{{ item.codigo_item }}</code></td>
+          <td>
+            <a href="{% url 'detalle_prenda' item.prenda.id %}">{{ item.prenda.nombre }}</a>
+            {% if item.prenda.talla %}<small class="text-muted d-block">T{{ item.prenda.talla }}</small>{% endif %}
+          </td>
+          <td class="text-center">{{ item.veces_alquilado }} / {{ item.max_usos_efectivo }}</td>
+          <td class="text-center">
+            <div class="progress mb-1" style="height:8px">
+              <div class="progress-bar
+                {% if item.estado_vida_util == 'critico' %}bg-danger
+                {% elif item.estado_vida_util == 'advertencia' %}bg-warning
+                {% else %}bg-success{% endif %}"
+                role="progressbar"
+                style="width:{{ item.porcentaje_vida_util }}%"
+                aria-valuenow="{{ item.porcentaje_vida_util }}"
+                aria-valuemin="0" aria-valuemax="100">
+              </div>
+            </div>
+            <small class="text-muted">{{ item.porcentaje_vida_util }}%</small>
+          </td>
+          <td class="text-center">
+            {% if item.estado_vida_util == 'critico' %}
+              <span class="badge bg-danger">Crítico</span>
+            {% elif item.estado_vida_util == 'advertencia' %}
+              <span class="badge bg-warning text-dark">Advertencia</span>
+            {% else %}
+              <span class="badge bg-success">Ok</span>
+            {% endif %}
+          </td>
+          <td style="white-space:nowrap">
+            <div class="btn-actions">
+              <a href="{% url 'kardex_item' item.codigo_item %}"
+                 class="btn btn-sm btn-icon btn-ghost-info"
+                 title="Ver kardex del item">
+                <i class="bi bi-clock-history"></i>
+              </a>
+              <a href="{% url 'detalle_prenda' item.prenda.id %}"
+                 class="btn btn-sm btn-icon btn-ghost-secondary"
+                 title="Ver detalle del SKU">
+                <i data-lucide="eye"></i>
+              </a>
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="6">
+            <div class="empty-state">
+              <i class="bi bi-check-circle d-block" style="font-size:2.5rem;opacity:.3;margin:0 auto .75rem"></i>
+              No hay prendas en alerta de vida útil.
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer d-flex align-items-center">
+    <p class="m-0 text-muted small">
+      {% if page_obj.paginator.num_pages > 1 %}
+        Mostrando <strong>{{ page_obj.start_index }}–{{ page_obj.end_index }}</strong> de <strong>{{ total }}</strong>
+      {% else %}
+        <strong>{{ total }}</strong> item{{ total|pluralize }} en alerta
+      {% endif %}
+    </p>
+    <nav class="ms-auto">
+      <ul class="pagination pagination-sm m-0">
+        {% if page_obj.has_previous %}
+          <li class="page-item"><a class="page-link" href="?estado={{ estado_filter }}&page=1">«</a></li>
+          <li class="page-item"><a class="page-link" href="?estado={{ estado_filter }}&page={{ page_obj.previous_page_number }}">‹</a></li>
+        {% endif %}
+        {% if page_obj.paginator.num_pages > 1 %}
+          <li class="page-item active"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
+        {% endif %}
+        {% if page_obj.has_next %}
+          <li class="page-item"><a class="page-link" href="?estado={{ estado_filter }}&page={{ page_obj.next_page_number }}">›</a></li>
+          <li class="page-item"><a class="page-link" href="?estado={{ estado_filter }}&page={{ page_obj.paginator.num_pages }}">»</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+  </div>
+</div>
+
+{% endblock %}

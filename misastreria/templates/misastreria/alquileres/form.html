@@ -1,206 +1,396 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}{{ titulo }}{% endblock %}
 
-{% block contenido %}
-<div class="page-header">
-  <h1 class="page-title"><i class="bi bi-bag me-2"></i>{{ titulo }}</h1>
-  {% if alquiler %}<small class="text-muted ms-2">{{ alquiler.codigo }}</small>{% endif %}
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'lista_alquileres' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left"></i>Volver
+      </a>
+    </div>
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="shopping-bag" class="me-2 text-muted"></i>{{ titulo }}
+        {% if alquiler %}<small class="text-muted ms-2 fs-6">{{ alquiler.codigo }}</small>{% endif %}
+      </h2>
+    </div>
+  </div>
 </div>
+{% endblock %}
 
-<form method="post" id="alquilerForm">
-  {% csrf_token %}
+{% block contenido %}
+<div class="row justify-content-center">
+  <div class="col-12 col-lg-11 col-xl-10">
 
-  <!-- Cabecera del alquiler -->
-  <div class="form-card mb-3">
-    <h6 class="fw-semibold mb-3 text-muted">Datos del alquiler</h6>
-    <div class="row g-3">
-      <div class="col-md-6">
-        <label class="form-label">Cliente</label>
-        <div style="position:relative">
-          <input type="text"
-                 data-cliente-search="id_cliente"
-                 data-endpoint="{% url 'buscar_clientes' %}"
-                 class="form-control"
-                 placeholder="Buscar por CI o nombre…"
-                 value="{% if form.instance.pk and form.instance.cliente %}{{ form.instance.cliente }}{% endif %}"
-                 autocomplete="off">
-          <input type="hidden" name="cliente" id="id_cliente" value="{{ form.cliente.value|default:'' }}">
+    <form method="post" id="alquilerForm">
+      {% csrf_token %}
+      <input type="hidden" name="items_disposition" id="items_disposition" value="disponible">
+
+      <!-- Cabecera del alquiler -->
+      <div class="card mb-3">
+        <div class="card-header"><h3 class="card-title">Datos del alquiler</h3></div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">Cliente{% if not form.cliente.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              <div style="position:relative">
+                <input type="text"
+                       data-cliente-search="id_cliente"
+                       data-endpoint="{% url 'buscar_clientes' %}"
+                       class="form-control"
+                       placeholder="Buscar por CI o nombre…"
+                       value="{% if form.instance.pk and form.instance.cliente %}{{ form.instance.cliente }}{% endif %}"
+                       autocomplete="off">
+                <input type="hidden" name="cliente" id="id_cliente" value="{{ form.cliente.value|default:'' }}">
+              </div>
+              {% if form.cliente.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.cliente.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">{{ form.empleado.label }}{% if not form.empleado.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              <div style="position:relative">
+                <input type="text"
+                       data-empleado-search="id_empleado"
+                       data-endpoint="{% url 'buscar_empleados' %}"
+                       class="form-control"
+                       placeholder="Seleccionar empleado…"
+                       value="{% if form.instance.pk and form.instance.empleado %}{{ form.instance.empleado }}{% endif %}"
+                       autocomplete="off">
+                <input type="hidden" name="empleado" id="id_empleado" value="{{ form.empleado.value|default:'' }}">
+              </div>
+            </div>
+
+            <div class="col-md-3">
+              <label class="form-label">{{ form.fecha_alquiler.label }}{% if not form.fecha_alquiler.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.fecha_alquiler }}
+              {% if form.fecha_alquiler.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.fecha_alquiler.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">{{ form.fecha_devolucion.label }}{% if not form.fecha_devolucion.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.fecha_devolucion }}
+              {% if form.fecha_devolucion.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.fecha_devolucion.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-2">
+              <label class="form-label">{{ form.hora_devolucion.label }}{% if not form.hora_devolucion.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.hora_devolucion }}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">{{ form.estado.label }}{% if not form.estado.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              <div class="input-group">
+                <div style="position:relative;flex:1">
+                  <input type="text" class="form-control" id="text_estado_alquiler"
+                         placeholder="Buscar estado…" autocomplete="off"
+                         value="{{ form.instance.estado_display|default:'' }}">
+                  {{ form.estado }}
+                </div>
+                <button type="button" class="btn btn-outline-secondary" id="btnNuevoEstadoAlquiler" title="Crear nuevo estado">
+                  <i data-lucide="plus"></i>
+                </button>
+              </div>
+            </div>
+
+            <div class="col-12">
+              <label class="form-label fw-semibold">Garantía <span class="text-muted small">(Opcional)</span></label>
+              <div class="d-flex flex-wrap gap-2 mb-2">
+                <input class="btn-check" type="radio" name="garantia_tipo" id="gnt_sin" value=""
+                       autocomplete="off" {% if not form.garantia_tipo.value %}checked{% endif %}>
+                <label class="btn btn-sm btn-outline-secondary" for="gnt_sin">Sin garantía</label>
+
+                <input class="btn-check" type="radio" name="garantia_tipo" id="gnt_efectivo" value="efectivo"
+                       autocomplete="off" {% if form.garantia_tipo.value == 'efectivo' %}checked{% endif %}>
+                <label class="btn btn-sm btn-outline-secondary" for="gnt_efectivo">
+                  <i data-lucide="banknote" style="width:.9rem;height:.9rem;vertical-align:middle" class="me-1"></i>Efectivo
+                </label>
+
+                <input class="btn-check" type="radio" name="garantia_tipo" id="gnt_qr" value="qr"
+                       autocomplete="off" {% if form.garantia_tipo.value == 'qr' %}checked{% endif %}>
+                <label class="btn btn-sm btn-outline-secondary" for="gnt_qr">
+                  <i data-lucide="qr-code" style="width:.9rem;height:.9rem;vertical-align:middle" class="me-1"></i>QR
+                </label>
+
+                <input class="btn-check" type="radio" name="garantia_tipo" id="gnt_trans" value="transferencia"
+                       autocomplete="off" {% if form.garantia_tipo.value == 'transferencia' %}checked{% endif %}>
+                <label class="btn btn-sm btn-outline-secondary" for="gnt_trans">
+                  <i data-lucide="arrow-right-left" style="width:.9rem;height:.9rem;vertical-align:middle" class="me-1"></i>Transferencia
+                </label>
+
+                <input class="btn-check" type="radio" name="garantia_tipo" id="gnt_desc" value="descripcion"
+                       autocomplete="off" {% if form.garantia_tipo.value == 'descripcion' %}checked{% endif %}>
+                <label class="btn btn-sm btn-outline-secondary" for="gnt_desc">
+                  <i data-lucide="file-text" style="width:.9rem;height:.9rem;vertical-align:middle" class="me-1"></i>Descripción
+                </label>
+              </div>
+              <!-- Monto (efectivo / QR / transferencia) -->
+              <div id="garantia-monto-wrap" style="display:none">
+                <label class="form-label text-muted small mb-1">Monto (Bs.) <span class="text-muted small">(Opcional)</span></label>
+                {{ form.garantia_monto }}
+              </div>
+              <!-- Texto libre (descripción) -->
+              <div id="garantia-desc-wrap" style="display:none">
+                <label class="form-label text-muted small mb-1">Descripción <span class="text-muted small">(Opcional)</span></label>
+                {{ form.garantia }}
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">{{ form.notas.label }}{% if not form.notas.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
+              {{ form.notas }}
+            </div>
+          </div>
         </div>
-        {% if form.cliente.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.cliente.errors }}</div>{% endif %}
-      </div>
-      <div class="col-md-6">
-        <label class="form-label">{{ form.empleado.label }}</label>
-        {{ form.empleado }}
       </div>
 
-      <div class="col-md-4">
-        <label class="form-label">{{ form.fecha_alquiler.label }}</label>
-        {{ form.fecha_alquiler }}
-        {% if form.fecha_alquiler.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.fecha_alquiler.errors }}</div>{% endif %}
-      </div>
-      <div class="col-md-4">
-        <label class="form-label">{{ form.fecha_devolucion.label }}</label>
-        {{ form.fecha_devolucion }}
-        {% if form.fecha_devolucion.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.fecha_devolucion.errors }}</div>{% endif %}
-      </div>
-      <div class="col-md-4">
-        <label class="form-label">{{ form.estado.label }}</label>
-        {{ form.estado }}
-      </div>
-
-      <div class="col-md-6">
-        <label class="form-label">{{ form.garantia.label }}</label>
-        {{ form.garantia }}
-      </div>
-      <div class="col-md-6">
-        <label class="form-label">{{ form.notas.label }}</label>
-        {{ form.notas }}
-      </div>
-    </div>
-  </div>
-
-  <!-- Tabla de prendas (multi-item) -->
-  <div class="form-card mb-3">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-      <h6 class="fw-semibold mb-0 text-muted">Prendas</h6>
-      <button type="button" class="btn btn-outline-primary btn-sm" id="btnAgregarItem">
-        <i class="bi bi-plus-lg me-1"></i>Agregar prenda
-      </button>
-    </div>
-
-    <div class="table-responsive">
-      <table class="table table-sm" id="tablaItems">
-        <thead>
-          <tr>
-            <th style="min-width:260px">Prenda</th>
-            <th style="width:90px">Cant.</th>
-            <th style="width:130px">Precio unit.</th>
-            <th style="width:120px" class="text-end">Subtotal</th>
-            <th style="width:44px"></th>
-          </tr>
-        </thead>
-        <tbody id="itemsBody"></tbody>
-      </table>
-    </div>
-
-    <div id="sinItems" class="text-muted text-center py-3" style="display:none">
-      <i class="bi bi-bag-x me-1"></i>Sin prendas. Agrega al menos una.
-    </div>
-
-    <!-- Totales -->
-    <div class="d-flex flex-column align-items-end gap-1 mt-3 border-top pt-3">
-      <div class="d-flex gap-3 align-items-center">
-        <span class="text-muted">Subtotal</span>
-        <strong id="resSubtotal" style="min-width:110px;text-align:right">0.00</strong>
-      </div>
-      <div class="d-flex gap-3 align-items-center">
-        <label class="text-muted mb-0">Descuento</label>
-        <div class="input-group" style="width:140px">
-          {{ form.descuento }}
-          <span class="input-group-text">%</span>
+      <!-- Tabla de prendas (multi-item) -->
+      <div class="card mb-3">
+        <div class="card-header d-flex align-items-center">
+          <h3 class="card-title mb-0">Prendas</h3>
+          <div class="ms-auto d-flex gap-2">
+            <button type="button" class="btn btn-outline-success" id="btnAgregarConjunto" data-bs-toggle="modal" data-bs-target="#modalConjuntos">
+              <i data-lucide="layers"></i>Agregar conjunto
+            </button>
+            <button type="button" class="btn btn-outline-primary" id="btnAgregarItem">
+              <i data-lucide="plus"></i>Agregar prenda
+            </button>
+          </div>
         </div>
-        <strong id="resDescuento" style="min-width:110px;text-align:right">- 0.00</strong>
-      </div>
-      <div class="d-flex gap-3 align-items-center fs-5">
-        <span class="fw-semibold">Total</span>
-        <strong id="resTotal" style="min-width:110px;text-align:right">0.00</strong>
-      </div>
-    </div>
-  </div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table" id="tablaItems">
+              <thead>
+                <tr>
+                  <th style="min-width:300px">Item</th>
+                  <th style="width:130px">Precio unit.</th>
+                  <th style="width:120px" class="text-end">Subtotal</th>
+                  <th style="width:44px"></th>
+                </tr>
+              </thead>
+              <tbody id="itemsBody"></tbody>
+            </table>
+          </div>
 
-  <div class="d-flex gap-2">
-    <button type="submit" class="btn btn-primary">
-      <i class="bi bi-check-lg me-1"></i>Guardar
-    </button>
-    <a href="{% url 'lista_alquileres' %}" class="btn btn-outline-secondary">Cancelar</a>
+          <div id="sinItems" class="text-muted text-center py-3" style="display:none">
+            <i data-lucide="shopping-bag" class="me-1"></i>Sin prendas. Agrega al menos una.
+          </div>
+
+          <!-- Totales -->
+          <div class="d-flex flex-column align-items-end gap-1 mt-3 border-top pt-3">
+            <div class="d-flex gap-3 align-items-center">
+              <span class="text-muted">Subtotal</span>
+              <strong id="resSubtotal" style="min-width:110px;text-align:right">0.00</strong>
+            </div>
+            <div class="d-flex gap-3 align-items-center">
+              <label class="text-muted mb-0">Descuento{% if not form.descuento.field.required %} <span class="small">(Opcional)</span>{% endif %}</label>
+              <div class="input-group" style="width:140px">
+                {{ form.descuento }}
+                <span class="input-group-text">%</span>
+              </div>
+              <strong id="resDescuento" style="min-width:110px;text-align:right">- 0.00</strong>
+            </div>
+            <div class="d-flex gap-3 align-items-center fs-5">
+              <span class="fw-semibold">Total</span>
+              <strong id="resTotal" style="min-width:110px;text-align:right">0.00</strong>
+            </div>
+          </div>
+        </div>
+        <div class="card-footer text-end d-flex justify-content-end gap-2">
+          <a href="{% url 'lista_alquileres' %}" class="btn btn-outline-secondary">Cancelar</a>
+          <button type="submit" form="alquilerForm" class="btn btn-primary">
+            <i data-lucide="check"></i>Guardar
+          </button>
+        </div>
+      </div>
+    </form>
+
   </div>
-</form>
+</div>
 
 <!-- Template de fila de ítem (oculto, fuera del form) -->
 <template id="itemRowTemplate">
   <tr class="item-row">
     <td>
-      <select name="item_articulo" class="form-select form-select-sm item-articulo">
-        <option value="">— Seleccionar prenda —</option>
-      </select>
+      <div style="position:relative">
+        <input type="text" class="form-control item-articulo-text" placeholder="Buscar item por código…" autocomplete="off">
+        <input type="hidden" name="item_prenda_item" class="item-articulo">
+      </div>
     </td>
-    <td><input type="number" name="item_cantidad" class="form-control form-control-sm item-cantidad" value="1" min="1"></td>
-    <td><input type="number" name="item_precio" class="form-control form-control-sm item-precio" step="0.01" min="0" placeholder="0.00"></td>
+    <td><input type="number" name="item_precio" class="form-control item-precio" step="0.01" min="0" placeholder="0.00"></td>
     <td class="text-end align-middle"><span class="item-subtotal fw-semibold">0.00</span></td>
     <td class="align-middle">
-      <button type="button" class="btn btn-sm btn-outline-danger btn-remove-item" title="Quitar">
-        <i class="bi bi-x-lg"></i>
+      <button type="button" class="btn btn-sm btn-icon btn-ghost-danger btn-remove-item" title="Quitar">
+        <i data-lucide="x"></i>
       </button>
     </td>
   </tr>
 </template>
+<!-- Modal: Seleccionar conjunto -->
+<div class="modal fade" id="modalConjuntos" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i data-lucide="layers" class="me-2"></i>Seleccionar conjunto</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="modalConjuntosBody"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-success" id="btnConfirmarConjunto" disabled>Agregar al formulario</button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- Modal: Nuevo estado de alquiler -->
+<div class="modal fade" id="modalNuevoEstadoAlquiler" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Nuevo estado</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label">Nombre</label>
+          <input type="text" class="form-control" id="nuevoEstadoNombre" placeholder="Ej: Extraviado">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Color</label>
+          <select class="form-select" id="nuevoEstadoColor">
+            <option value="warning">Naranja (Alerta)</option>
+            <option value="danger">Rojo (Crítico)</option>
+          </select>
+        </div>
+        <div id="modalEstadoError" class="text-danger small" style="display:none"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btnGuardarEstadoAlquiler">Guardar</button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- Modal: disposición de prendas al cambiar a estado personalizado -->
+<div class="modal fade" id="modalDisposicion" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i data-lucide="alert-triangle" class="me-2 text-warning"></i>¿Qué pasa con las prendas?</h5>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted mb-3">
+          Estás cambiando el alquiler a un estado personalizado (<strong id="disposicion_estado_label"></strong>).
+          Las prendas que estaban alquiladas quedarán sin devolución formal.
+        </p>
+        <p class="mb-1 fw-semibold">¿Qué querés hacer con ellas?</p>
+        <div class="d-grid gap-2 mt-3">
+          <button type="button" class="btn btn-danger text-start" id="btnDisposicionBaja">
+            <i data-lucide="x-circle" class="me-2"></i>
+            <strong>Dar de baja</strong>
+            <small class="d-block text-white-50">Salen del inventario permanentemente (pérdida, rotura, etc.)</small>
+          </button>
+          <button type="button" class="btn btn-success text-start" id="btnDisposicionDisponible">
+            <i data-lucide="check-circle" class="me-2"></i>
+            <strong>Marcar como disponibles</strong>
+            <small class="d-block text-white-50">Volvieron al local en buen estado</small>
+          </button>
+          <button type="button" class="btn btn-outline-secondary text-start" id="btnDisposicionMantener">
+            <i data-lucide="lock" class="me-2"></i>
+            <strong>Mantener como alquiladas</strong>
+            <small class="d-block">No cambiar el estado de las prendas</small>
+          </button>
+        </div>
+      </div>
+      <div class="modal-footer justify-content-start">
+        <button type="button" class="btn btn-link text-muted" data-bs-dismiss="modal">Cancelar</button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
+// Garantia tipo selector
+(function() {
+  const montoWrap = document.getElementById('garantia-monto-wrap');
+  const descWrap  = document.getElementById('garantia-desc-wrap');
+
+  function applyTipo(val) {
+    if (montoWrap) montoWrap.style.display = (val && val !== 'descripcion') ? '' : 'none';
+    if (descWrap)  descWrap.style.display  = (val === 'descripcion') ? '' : 'none';
+  }
+
+  document.querySelectorAll('[name="garantia_tipo"]').forEach(r =>
+    r.addEventListener('change', () => applyTipo(r.value))
+  );
+
+  const checked = document.querySelector('[name="garantia_tipo"]:checked');
+  applyTipo(checked ? checked.value : '');
+})();
+
+const ESTADO_ALQUILER_OPTS = {{ estado_alquiler_opts|default:"[]"|safe }};
 const PRENDAS = {{ prendas_json|safe }};
+const CONJUNTOS = {{ conjuntos_json|default:"[]"|safe }};
 const ITEMS_INICIALES = {{ items_existentes|default:"[]"|safe }};
 
 const tbody     = document.getElementById('itemsBody');
 const sinItems  = document.getElementById('sinItems');
 const descInput = document.querySelector('[name="descuento"]');
 
-function buildOptions(selectedId) {
-  let opts = '<option value="">— Seleccionar prenda —</option>';
-  PRENDAS.forEach(p => {
-    const sel = (selectedId && p.id == selectedId) ? 'selected' : '';
-    opts += `<option value="${p.id}" data-precio="${p.precio}" ${sel}>${p.label} (stock: ${p.cantidad})</option>`;
-  });
-  return opts;
-}
-
 function calcFila(row) {
-  const cant   = parseFloat(row.querySelector('.item-cantidad').value) || 0;
-  const precio = parseFloat(row.querySelector('.item-precio').value)   || 0;
-  const sub    = cant * precio;
-  row.querySelector('.item-subtotal').textContent = sub.toFixed(2);
-  return sub;
+  const precio = parseFloat(row.querySelector('.item-precio').value) || 0;
+  row.querySelector('.item-subtotal').textContent = precio.toFixed(2);
+  return precio;
 }
 
 function calcTotales() {
   let subtotal = 0;
   tbody.querySelectorAll('.item-row').forEach(r => { subtotal += calcFila(r); });
-  const pct      = parseFloat(descInput.value) || 0;
+  const pct       = parseFloat(descInput.value) || 0;
   const descuento = subtotal * pct / 100;
-  const total    = subtotal - descuento;
+  const total     = subtotal - descuento;
   document.getElementById('resSubtotal').textContent  = subtotal.toFixed(2);
   document.getElementById('resDescuento').textContent = '- ' + descuento.toFixed(2);
   document.getElementById('resTotal').textContent     = total.toFixed(2);
   sinItems.style.display = tbody.querySelectorAll('.item-row').length ? 'none' : 'block';
 }
 
-function addRow(articuloId, cantidad, precio) {
-  const tmpl = document.getElementById('itemRowTemplate');
-  const row  = tmpl.content.cloneNode(true).querySelector('tr');
+function addRow(prendaItemId, precio) {
+  const tmpl        = document.getElementById('itemRowTemplate');
+  const row         = tmpl.content.cloneNode(true).querySelector('tr');
+  const textInput   = row.querySelector('.item-articulo-text');
+  const hiddenInput = row.querySelector('.item-articulo');
 
-  row.querySelector('.item-articulo').innerHTML = buildOptions(articuloId);
-  if (cantidad) row.querySelector('.item-cantidad').value = cantidad;
-  if (precio)   row.querySelector('.item-precio').value   = parseFloat(precio).toFixed(2);
+  if (prendaItemId) hiddenInput.value = prendaItemId;
+  if (precio)       row.querySelector('.item-precio').value = parseFloat(precio).toFixed(2);
 
-  row.querySelector('.item-articulo').addEventListener('change', function() {
-    const opt = this.selectedOptions[0];
-    if (opt && opt.dataset.precio) {
-      row.querySelector('.item-precio').value = parseFloat(opt.dataset.precio).toFixed(2);
+  window.makePrendaFlyoutCombobox(textInput, hiddenInput, PRENDAS);
+
+  hiddenInput.addEventListener('change', function() {
+    if (this.value) {
+      // Validar duplicados
+      const seleccionados = [...tbody.querySelectorAll('[name="item_prenda_item"]')].map(i => i.value);
+      const ocurrencias = seleccionados.filter(v => v === this.value).length;
+      if (ocurrencias > 1) {
+        alert('Ese item ya está seleccionado en otra fila.');
+        this.value = '';
+        textInput.value = '';
+        return;
+      }
+      const prenda = PRENDAS.find(p => String(p.prenda_item_id) === String(this.value));
+      if (prenda) row.querySelector('.item-precio').value = parseFloat(prenda.precio).toFixed(2);
     }
     calcTotales();
   });
-  row.querySelector('.item-cantidad').addEventListener('input', calcTotales);
   row.querySelector('.item-precio').addEventListener('input', calcTotales);
   row.querySelector('.btn-remove-item').addEventListener('click', function() {
     row.remove(); calcTotales();
   });
 
   tbody.appendChild(row);
+  lucide.createIcons();
   calcTotales();
 }
 
 if (ITEMS_INICIALES.length > 0) {
-  ITEMS_INICIALES.forEach(item => addRow(item.articulo_id, item.cantidad, item.precio_unitario));
+  ITEMS_INICIALES.forEach(item => addRow(item.prenda_item_id, item.precio_unitario));
 } else {
   addRow();
 }
@@ -208,13 +398,88 @@ if (ITEMS_INICIALES.length > 0) {
 document.getElementById('btnAgregarItem').addEventListener('click', () => addRow());
 descInput.addEventListener('input', calcTotales);
 
+window.initConjuntoModal('modalConjuntos', CONJUNTOS, function(conjunto, slotsIncluidos) {
+  const result = window.addConjuntoToForm(conjunto, slotsIncluidos, {
+    PRENDAS: PRENDAS, tbody: tbody, addRow: addRow,
+  });
+  if (result.faltantes.length > 0) {
+    alert('Conjunto agregado. Sin existencias: ' + result.faltantes.join(', '));
+  }
+});
+
+const ESTADO_ANTERIOR = '{{ alquiler.estado|default:"" }}';
+const ESTADOS_NORMALES = ['alquilado', 'devuelto'];
+
 document.getElementById('alquilerForm').addEventListener('submit', function(e) {
   const validas = [...tbody.querySelectorAll('.item-row')]
     .filter(r => r.querySelector('.item-articulo').value).length;
   if (validas === 0) {
     e.preventDefault();
     alert('Debes agregar al menos una prenda al alquiler.');
+    return;
+  }
+
+  // Sólo en edición de alquileres activos que cambian a estado personalizado
+  const estadoNuevo = document.getElementById('id_estado').value;
+  if (ESTADO_ANTERIOR === 'alquilado' && !ESTADOS_NORMALES.includes(estadoNuevo)) {
+    e.preventDefault();
+    document.getElementById('disposicion_estado_label').textContent = estadoNuevo;
+    lucide.createIcons();
+    new bootstrap.Modal(document.getElementById('modalDisposicion')).show();
   }
 });
+
+(function() {
+  function elegirDisposicion(valor) {
+    document.getElementById('items_disposition').value = valor;
+    bootstrap.Modal.getInstance(document.getElementById('modalDisposicion')).hide();
+    document.getElementById('alquilerForm').submit();
+  }
+  document.getElementById('btnDisposicionBaja').addEventListener('click',       () => elegirDisposicion('baja'));
+  document.getElementById('btnDisposicionDisponible').addEventListener('click', () => elegirDisposicion('disponible'));
+  document.getElementById('btnDisposicionMantener').addEventListener('click',   () => elegirDisposicion('mantener'));
+})();
+
+// Combobox estado alquiler
+(function() {
+  const estadoItems = ESTADO_ALQUILER_OPTS.map(e => ({
+    id: e.nombre,
+    nombre: e.nombre.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+  }));
+  const hiddenEstado = document.getElementById('id_estado');
+  const textEstado   = document.getElementById('text_estado_alquiler');
+  if (hiddenEstado && textEstado) {
+    if (!hiddenEstado.value) hiddenEstado.value = 'alquilado';
+    if (!textEstado.value)   textEstado.value   = 'Alquilado';
+    window.makeLocalCombobox(textEstado, hiddenEstado, estadoItems);
+  }
+  const modalEl = document.getElementById('modalNuevoEstadoAlquiler');
+  if (modalEl) {
+    document.getElementById('btnNuevoEstadoAlquiler').addEventListener('click', function() {
+      document.getElementById('nuevoEstadoNombre').value = '';
+      document.getElementById('modalEstadoError').style.display = 'none';
+      new bootstrap.Modal(modalEl).show();
+    });
+    document.getElementById('btnGuardarEstadoAlquiler').addEventListener('click', function() {
+      const nombre = document.getElementById('nuevoEstadoNombre').value.trim();
+      const color  = document.getElementById('nuevoEstadoColor').value;
+      const errEl  = document.getElementById('modalEstadoError');
+      if (!nombre) { errEl.textContent = 'El nombre es requerido.'; errEl.style.display = 'block'; return; }
+      fetch('{% url "crear_estado_alquiler" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'nombre=' + encodeURIComponent(nombre) + '&color=' + encodeURIComponent(color),
+      })
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) { errEl.textContent = data.error; errEl.style.display = 'block'; return; }
+        if (hiddenEstado) hiddenEstado.value = data.nombre;
+        if (textEstado)   textEstado.value   = data.display;
+        bootstrap.Modal.getInstance(modalEl).hide();
+      })
+      .catch(() => { errEl.textContent = 'Error al guardar.'; errEl.style.display = 'block'; });
+    });
+  }
+})();
 </script>
 {% endblock %}
