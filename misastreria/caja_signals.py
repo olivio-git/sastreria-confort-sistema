@@ -29,7 +29,8 @@ def _reversar_movimientos_activos(*, referencia_field, instance, usuario=None):
     from django.db import transaction as db_transaction
     filtro = {referencia_field: instance, 'movimiento_reverso__isnull': True}
     sesion = _sesion_activa()
-    for mov in CajaMovimiento.objects.filter(**filtro):
+    # Exclude 'anulacion_cobro' to prevent reversing reversals (cycle prevention)
+    for mov in CajaMovimiento.objects.filter(**filtro).exclude(concepto='anulacion_cobro'):
         if mov.fue_reversado:
             continue
         tipo_reverso = 'egreso' if mov.tipo == 'ingreso' else 'ingreso'
@@ -44,27 +45,31 @@ def _reversar_movimientos_activos(*, referencia_field, instance, usuario=None):
                 cliente=mov.cliente,
                 descripcion=f"Reverso automático por eliminación — {mov.codigo}",
                 usuario=usuario,
+                **{referencia_field: instance},
             )
             mov.movimiento_reverso = reverso
             mov.save(update_fields=['movimiento_reverso'])
 
 
-def _ajustar_total_en_caja(*, referencia_field, instance, concepto_cobro, nuevo_total, forma_pago, cliente=None):
+def _ajustar_total_en_caja(*, referencia_field, instance, concepto_cobro, nuevo_total, forma_pago, cliente=None, old_total=None):
     """
     Ajusta los movimientos de caja para reflejar el nuevo total de un servicio editado.
-    delta = nuevo_total - (ingresos_activos - egresos_activos) vinculados a la instancia.
+    Si old_total se provee, delta = nuevo_total - old_total (correcto para servicios con pagos parciales).
+    Sin old_total, delta = nuevo_total - total_cobrado (solo válido cuando el servicio se pagó completo).
     """
     from django.db.models import Sum
     if nuevo_total is None or Decimal(str(nuevo_total)) < 0:
         return
-    base = CajaMovimiento.objects.filter(
-        **{referencia_field: instance},
-        movimiento_reverso__isnull=True,
-    )
-    ingresos = base.filter(tipo='ingreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
-    egresos  = base.filter(tipo='egreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
-    total_cobrado = ingresos - egresos
-    delta = Decimal(str(nuevo_total)) - total_cobrado
+    if old_total is not None:
+        delta = Decimal(str(nuevo_total)) - Decimal(str(old_total))
+    else:
+        base = CajaMovimiento.objects.filter(
+            **{referencia_field: instance},
+            movimiento_reverso__isnull=True,
+        )
+        ingresos = base.filter(tipo='ingreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
+        egresos  = base.filter(tipo='egreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
+        delta = Decimal(str(nuevo_total)) - (ingresos - egresos)
     if delta == 0:
         return
     if delta > 0:

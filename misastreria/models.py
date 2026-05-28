@@ -1,10 +1,31 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from django.contrib.auth.models import User
 from django.db import models, transaction
 from django.core.validators import EmailValidator, RegexValidator, MinValueValidator, MaxValueValidator
 from django.utils import timezone
 from django.core.exceptions import ValidationError
+
+
+def calcular_precio_alquiler(base, min_pct, veces_alquilado, max_usos_efectivo):
+    """
+    Returns the suggested rental price for a PrendaItem given its wear.
+    - base: Decimal or None
+    - min_pct: int (1-100), default 20
+    - veces_alquilado: int >= 0
+    - max_usos_efectivo: int or None
+    Returns Decimal (quantized to 0.01) or base if max_usos not set, None if base is None/0.
+    """
+    if not base:
+        return None
+    base = Decimal(str(base))
+    floor = base * Decimal(str(min_pct)) / Decimal('100')
+    if not max_usos_efectivo:
+        return base.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    n = Decimal(str(veces_alquilado))
+    m = Decimal(str(max_usos_efectivo))
+    raw = base * (1 - n / m)
+    return max(raw, floor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
 
 class TipoContrato(models.Model):
@@ -88,6 +109,7 @@ class Cliente(models.Model):
     edad = models.PositiveIntegerField(null=True, blank=True, verbose_name="Edad")
     celular = models.CharField(max_length=15, validators=[RegexValidator(r'^\+?\d{9,15}$')], verbose_name="Celular")
     email = models.EmailField(null=True, blank=True, verbose_name="Correo Electrónico")
+    pais = models.CharField(max_length=100, blank=True, verbose_name="País")
     fecha_registro = models.DateField(default=timezone.now, verbose_name="Fecha de Registro")
     notas = models.TextField(blank=True, verbose_name="Notas")
     creado = models.DateTimeField(auto_now_add=True, verbose_name="Fecha de Creación")
@@ -298,6 +320,18 @@ class PrendaInventario(models.Model):
     codigo_referencia = models.CharField(max_length=100, blank=True, verbose_name="Código de Referencia")
     stock_minimo = models.PositiveIntegerField(null=True, blank=True, verbose_name="Stock Mínimo")
     max_usos_default = models.PositiveIntegerField(null=True, blank=True, verbose_name="Máx. usos por defecto")
+    precio_alquiler_base = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        null=True, blank=True,
+        verbose_name="Precio alquiler base",
+        help_text="Precio de alquiler cuando la prenda es nueva. Si no se define, no se sugiere precio.",
+    )
+    precio_alquiler_minimo_pct = models.PositiveSmallIntegerField(
+        default=20,
+        validators=[MinValueValidator(1), MaxValueValidator(100)],
+        verbose_name="Precio mínimo (%)",
+        help_text="Porcentaje mínimo del precio base al que puede llegar. Default: 20%",
+    )
     precio = models.DecimalField(
         max_digits=10, decimal_places=2,
         validators=[MinValueValidator(0.01)], verbose_name="Precio"
@@ -453,6 +487,16 @@ class PrendaItem(models.Model):
     @property
     def max_usos_efectivo(self):
         return self.max_usos or self.prenda.max_usos_default
+
+    @property
+    def precio_alquiler_sugerido(self):
+        """Suggested rental price applying linear depreciation with floor."""
+        return calcular_precio_alquiler(
+            base=self.prenda.precio_alquiler_base,
+            min_pct=self.prenda.precio_alquiler_minimo_pct,
+            veces_alquilado=self.veces_alquilado,
+            max_usos_efectivo=self.max_usos_efectivo,
+        )
 
     @property
     def porcentaje_vida_util(self):
@@ -1141,6 +1185,22 @@ class CajaSesion(models.Model):
         return (self.monto_apertura or Decimal('0')) + ingresos - egresos
 
     @property
+    def saldo_efectivo_sistema(self):
+        """Solo efectivo: apertura + ingresos efectivo - egresos efectivo. Excluye garantías."""
+        from django.db.models import Sum
+        movs = self.movimientos.filter(
+            movimiento_reverso__isnull=True,
+            forma_pago='efectivo',
+        ).exclude(concepto__in=self._CONCEPTOS_GARANTIA)
+        ingresos = (
+            movs.filter(tipo='ingreso')
+            .exclude(concepto='apertura_caja')
+            .aggregate(s=Sum('monto'))['s'] or Decimal('0')
+        )
+        egresos = movs.filter(tipo='egreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
+        return (self.monto_apertura or Decimal('0')) + ingresos - egresos
+
+    @property
     def total_ingresos(self):
         from django.db.models import Sum
         return (
@@ -1197,15 +1257,18 @@ class CajaMovimiento(models.Model):
     CONCEPTO_TIPO_MAP = {
         'alquiler_cobro': 'ingreso',
         'alquiler_pago': 'ingreso',
+        'alquiler_ajuste': 'ingreso',
         'garantia_alquiler': 'ingreso',
         'garantia_devolucion': 'egreso',
         'venta_cobro': 'ingreso',
+        'venta_ajuste': 'ingreso',
         'confeccion_adelanto': 'ingreso',
         'confeccion_saldo': 'ingreso',
         'confeccion_pago': 'ingreso',
         'reparacion_cobro': 'ingreso',
         'reparacion_pago': 'ingreso',
         'reparacion_saldo': 'ingreso',
+        'reparacion_ajuste': 'ingreso',
         'ingreso_manual': 'ingreso',
         'egreso_manual': 'egreso',
         'apertura_caja': 'ingreso',
@@ -1223,15 +1286,18 @@ class CajaMovimiento(models.Model):
     CONCEPTO_CHOICES = [
         ('alquiler_cobro', 'Cobro de alquiler'),
         ('alquiler_pago', 'Pago de alquiler'),
+        ('alquiler_ajuste', 'Ajuste de alquiler'),
         ('garantia_alquiler', 'Garantía de alquiler'),
         ('garantia_devolucion', 'Devolución de garantía'),
         ('venta_cobro', 'Cobro de venta'),
+        ('venta_ajuste', 'Ajuste de venta'),
         ('confeccion_adelanto', 'Adelanto de confección'),
         ('confeccion_saldo', 'Saldo de confección'),
         ('confeccion_pago', 'Pago de confección'),
         ('reparacion_cobro', 'Cobro de reparación'),
         ('reparacion_pago', 'Pago de reparación'),
         ('reparacion_saldo', 'Saldo de reparación'),
+        ('reparacion_ajuste', 'Ajuste de reparación'),
         ('ingreso_manual', 'Ingreso manual'),
         ('egreso_manual', 'Egreso manual'),
         ('apertura_caja', 'Apertura de caja'),
@@ -1354,22 +1420,22 @@ class CajaMovimiento(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=['referencia_alquiler', 'concepto'],
-                condition=models.Q(movimiento_reverso__isnull=True) & ~models.Q(concepto='alquiler_pago'),
+                condition=models.Q(movimiento_reverso__isnull=True) & ~models.Q(concepto__in=['alquiler_pago', 'alquiler_ajuste', 'anulacion_cobro']),
                 name='unique_mov_alquiler_activo',
             ),
             models.UniqueConstraint(
                 fields=['referencia_venta', 'concepto'],
-                condition=models.Q(movimiento_reverso__isnull=True),
+                condition=models.Q(movimiento_reverso__isnull=True) & ~models.Q(concepto__in=['venta_ajuste', 'anulacion_cobro']),
                 name='unique_mov_venta_activo',
             ),
             models.UniqueConstraint(
                 fields=['referencia_confeccion', 'concepto'],
-                condition=models.Q(movimiento_reverso__isnull=True) & ~models.Q(concepto='confeccion_pago'),
+                condition=models.Q(movimiento_reverso__isnull=True) & ~models.Q(concepto__in=['confeccion_pago', 'anulacion_cobro']),
                 name='unique_mov_confeccion_activo',
             ),
             models.UniqueConstraint(
                 fields=['referencia_reparacion', 'concepto'],
-                condition=models.Q(movimiento_reverso__isnull=True),
+                condition=models.Q(movimiento_reverso__isnull=True) & ~models.Q(concepto__in=['reparacion_pago', 'reparacion_ajuste', 'anulacion_cobro']),
                 name='unique_mov_reparacion_activo',
             ),
             models.UniqueConstraint(

@@ -100,7 +100,7 @@
             {% with items=v.items.all %}
               {% if items %}
                 {% for item in items %}
-                  <div class="small"><code>{{ item.prenda_item.codigo_item }}</code> — {{ item.prenda_item.prenda.nombre }}{% if item.grupo_conjunto %}<span class="badge-conjunto" title="Conjunto {{ item.grupo_conjunto }}"><i class="bi bi-layers"></i>{{ item.grupo_conjunto }}</span>{% endif %}</div>
+                  <div class="small"><code>{{ item.prenda_item.codigo_item }}</code> — {{ item.prenda_item.prenda.nombre }}{% if item.grupo_conjunto %}<span class="badge-conjunto" title="Conjunto {{ item.grupo_conjunto }}"><i data-lucide="layers"></i>{{ item.grupo_conjunto }}</span>{% endif %}</div>
                 {% endfor %}
               {% else %}
                 <span class="text-muted">—</span>
@@ -137,13 +137,13 @@
     <nav class="ms-auto">
       <ul class="pagination pagination-sm m-0">
         {% if page_obj.has_previous %}
-          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}">«</a></li>
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}">‹</a></li>
+          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}&cliente_id={{ cliente_id }}&empleado_id={{ empleado_id }}">«</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}&cliente_id={{ cliente_id }}&empleado_id={{ empleado_id }}">‹</a></li>
         {% endif %}
         <li class="page-item active"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
         {% if page_obj.has_next %}
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}">›</a></li>
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}">»</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}&cliente_id={{ cliente_id }}&empleado_id={{ empleado_id }}">›</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&desde={{ desde }}&hasta={{ hasta }}&cliente_id={{ cliente_id }}&empleado_id={{ empleado_id }}">»</a></li>
         {% endif %}
       </ul>
     </nav>

@@ -29,20 +29,60 @@
         <form method="post" id="clienteForm">
           {% csrf_token %}
           <div class="row g-3">
-            {% for field in form %}
-            <div class="col-md-6">
-              <label for="{{ field.id_for_label }}" class="form-label{% if field.field.required %} required{% endif %}">
-                {{ field.label }}{% if not field.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}
+
+            <!-- CI / Pasaporte -->
+            <div class="col-12">
+              <label for="{{ form.ci.id_for_label }}" class="form-label">
+                {{ form.ci.label }} <span class="text-muted small">(Opcional)</span>
               </label>
-              {{ field }}
-              {% if field.help_text %}
-                <small class="form-hint">{{ field.help_text }}</small>
-              {% endif %}
-              {% if field.errors %}
-                <div class="invalid-feedback d-block">{{ field.errors|join:", " }}</div>
-              {% endif %}
+              {{ form.ci }}
+              {% if form.ci.errors %}<div class="invalid-feedback d-block">{{ form.ci.errors|join:", " }}</div>{% endif %}
             </div>
-            {% endfor %}
+
+            <!-- Nombres -->
+            <div class="col-12">
+              <label for="{{ form.nombres.id_for_label }}" class="form-label required">{{ form.nombres.label }}</label>
+              {{ form.nombres }}
+              {% if form.nombres.errors %}<div class="invalid-feedback d-block">{{ form.nombres.errors|join:", " }}</div>{% endif %}
+            </div>
+
+            <!-- Apellidos -->
+            <div class="col-md-6">
+              <label for="{{ form.apellido_paterno.id_for_label }}" class="form-label required">{{ form.apellido_paterno.label }}</label>
+              {{ form.apellido_paterno }}
+              {% if form.apellido_paterno.errors %}<div class="invalid-feedback d-block">{{ form.apellido_paterno.errors|join:", " }}</div>{% endif %}
+            </div>
+            <div class="col-md-6">
+              <label for="{{ form.apellido_materno.id_for_label }}" class="form-label">
+                {{ form.apellido_materno.label }} <span class="text-muted small">(Opcional)</span>
+              </label>
+              {{ form.apellido_materno }}
+            </div>
+
+            <!-- Celular + País -->
+            <div class="col-md-6">
+              <label for="{{ form.celular.id_for_label }}" class="form-label required">{{ form.celular.label }}</label>
+              {{ form.celular }}
+              {% if form.celular.errors %}<div class="invalid-feedback d-block">{{ form.celular.errors|join:", " }}</div>{% endif %}
+            </div>
+            <div class="col-md-6">
+              <label for="{{ form.pais.id_for_label }}" class="form-label">
+                {{ form.pais.label }} <span class="text-muted small">(Opcional)</span>
+              </label>
+              <div style="position:relative">
+                {{ form.pais }}
+              </div>
+              {% if form.pais.errors %}<div class="invalid-feedback d-block">{{ form.pais.errors|join:", " }}</div>{% endif %}
+            </div>
+
+            <!-- Notas -->
+            <div class="col-12">
+              <label for="{{ form.notas.id_for_label }}" class="form-label">
+                {{ form.notas.label }} <span class="text-muted small">(Opcional)</span>
+              </label>
+              {{ form.notas }}
+            </div>
+
           </div>
         </form>
       </div>
@@ -55,4 +95,26 @@
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const PAISES = [
+  'Bolivia','Argentina','Brasil','Chile','Colombia','Ecuador','Paraguay','Perú','Uruguay','Venezuela',
+  'México','Guatemala','Honduras','El Salvador','Nicaragua','Costa Rica','Panamá','Cuba','República Dominicana','Haití',
+  'España','Estados Unidos','Canadá','Reino Unido','Francia','Alemania','Italia','Portugal','Países Bajos','Bélgica',
+  'Suiza','Austria','Suecia','Noruega','Dinamarca','Finlandia','Polonia','Rusia','Ucrania','Grecia',
+  'Japón','China','Corea del Sur','India','Australia','Nueva Zelanda','Israel','Turquía','Emiratos Árabes','Arabia Saudita',
+  'Sudáfrica','Marruecos','Nigeria','Egipto',
+].map(n => ({ id: n, nombre: n }));
+
+const paisInput  = document.getElementById('{{ form.pais.id_for_label }}');
+const paisHidden = document.createElement('input');
+paisHidden.type  = 'hidden';
+if (paisInput) {
+  // Inicializar hidden con el valor existente (modo edición) para que el botón limpiar aparezca
+  paisHidden.value = paisInput.value || '';
+  window.makeLocalCombobox(paisInput, paisHidden, PAISES);
+}
+</script>
 {% endblock %}

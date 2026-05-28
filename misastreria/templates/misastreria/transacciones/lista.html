@@ -111,9 +111,7 @@
               {{ t.get_tipo_transaccion_display }}
             </span>
           </td>
-          <td class="text-muted" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-            {{ t.descripcion|truncatechars:60 }}
-          </td>
+          <td class="text-muted text-truncate">{{ t.descripcion|truncatechars:60 }}</td>
           <td>{{ t.get_tipo_servicio_display }}</td>
           <td>{{ t.fecha|date:"d/m/Y" }}</td>
           <td>{{ t.cantidad }}</td>

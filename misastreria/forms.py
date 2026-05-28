@@ -13,28 +13,39 @@ from django.core.exceptions import ValidationError
 
 
 COUNTRY_CODE_CHOICES = [
-    ('+54',  'AR +54'),    # Argentina
-    ('+501', 'BZ +501'),   # Belice
-    ('+591', 'BO +591'),   # Bolivia
-    ('+55',  'BR +55'),    # Brasil
-    ('+56',  'CL +56'),    # Chile
-    ('+57',  'CO +57'),    # Colombia
-    ('+506', 'CR +506'),   # Costa Rica
-    ('+53',  'CU +53'),    # Cuba
-    ('+593', 'EC +593'),   # Ecuador
-    ('+503', 'SV +503'),   # El Salvador
-    ('+34',  'ES +34'),    # España
-    ('+502', 'GT +502'),   # Guatemala
-    ('+509', 'HT +509'),   # Haití
-    ('+504', 'HN +504'),   # Honduras
-    ('+52',  'MX +52'),    # México
-    ('+505', 'NI +505'),   # Nicaragua
-    ('+507', 'PA +507'),   # Panamá
-    ('+595', 'PY +595'),   # Paraguay
-    ('+51',  'PE +51'),    # Perú
-    ('+1',   'US +1'),     # Estados Unidos
-    ('+598', 'UY +598'),   # Uruguay
-    ('+58',  'VE +58'),    # Venezuela
+    ('+591', 'Bolivia +591'),
+    ('+54',  'Argentina +54'),
+    ('+55',  'Brasil +55'),
+    ('+56',  'Chile +56'),
+    ('+57',  'Colombia +57'),
+    ('+593', 'Ecuador +593'),
+    ('+52',  'México +52'),
+    ('+595', 'Paraguay +595'),
+    ('+51',  'Perú +51'),
+    ('+598', 'Uruguay +598'),
+    ('+58',  'Venezuela +58'),
+    ('+506', 'Costa Rica +506'),
+    ('+53',  'Cuba +53'),
+    ('+503', 'El Salvador +503'),
+    ('+502', 'Guatemala +502'),
+    ('+509', 'Haití +509'),
+    ('+504', 'Honduras +504'),
+    ('+505', 'Nicaragua +505'),
+    ('+507', 'Panamá +507'),
+    ('+501', 'Belice +501'),
+    ('+34',  'España +34'),
+    ('+1',   'Estados Unidos +1'),
+    ('+1',   'Canadá +1'),
+    ('+44',  'Reino Unido +44'),
+    ('+33',  'Francia +33'),
+    ('+49',  'Alemania +49'),
+    ('+39',  'Italia +39'),
+    ('+351', 'Portugal +351'),
+    ('+31',  'Países Bajos +31'),
+    ('+41',  'Suiza +41'),
+    ('+81',  'Japón +81'),
+    ('+86',  'China +86'),
+    ('+61',  'Australia +61'),
 ]
 
 
@@ -46,6 +57,12 @@ class PhoneWidget(forms.TextInput):
         for code, _ in sorted(COUNTRY_CODE_CHOICES, key=lambda x: -len(x[0])):
             if s.startswith(code):
                 return code, s[len(code):]
+        # Código personalizado: extraer el prefijo + hasta que empieza el número
+        if s.startswith('+'):
+            import re
+            m = re.match(r'(\+\d+)(.*)', s)
+            if m:
+                return m.group(1), m.group(2)
         return '+591', s
 
     def render(self, name, value, attrs=None, renderer=None):
@@ -56,16 +73,25 @@ class PhoneWidget(forms.TextInput):
         attrs.setdefault('inputmode', 'numeric')
         attrs.setdefault('pattern', '[0-9]+')
         input_html = super().render(name, number, attrs, renderer)
+        list_id = f'phone-codes-{name}'
         options = ''.join(
-            f'<option value="{code}"{" selected" if code == current_code else ""}>{label}</option>'
+            f'<option value="{code}">{label}</option>'
             for code, label in COUNTRY_CODE_CHOICES
         )
-        select_html = f'<select name="{name}_pais" class="form-select" style="max-width:130px">{options}</select>'
-        return mark_safe(f'<div class="input-group">{select_html}{input_html}</div>')
+        # datalist fuera del input-group para no interferir con Bootstrap
+        datalist_html = f'<datalist id="{list_id}">{options}</datalist>'
+        code_input = (
+            f'<input type="text" name="{name}_pais" value="{current_code}" '
+            f'list="{list_id}" class="form-control" style="max-width:120px;flex-shrink:0" '
+            f'placeholder="+591">'
+        )
+        return mark_safe(f'{datalist_html}<div class="input-group">{code_input}{input_html}</div>')
 
     def value_from_datadict(self, data, files, name):
         number = (data.get(name) or '').strip()
-        code = (data.get(f'{name}_pais') or '+591').strip()
+        code   = (data.get(f'{name}_pais') or '+591').strip()
+        if code and not code.startswith('+'):
+            code = '+' + code
         return code + number if number else ''
 
 
@@ -121,13 +147,14 @@ class FaltaForm(forms.ModelForm):
 class ClienteForm(forms.ModelForm):
     class Meta:
         model = Cliente
-        fields = ['ci', 'nombres', 'apellido_paterno', 'apellido_materno', 'celular', 'notas']
+        fields = ['ci', 'nombres', 'apellido_paterno', 'apellido_materno', 'celular', 'pais', 'notas']
         labels = {
-            'ci': 'CI (Cédula de Identidad)',
+            'ci': 'CI / Pasaporte',
             'nombres': 'Nombres',
             'apellido_paterno': 'Apellido Paterno',
             'apellido_materno': 'Apellido Materno',
             'celular': 'Celular',
+            'pais': 'País',
             'notas': 'Notas',
         }
         widgets = {
@@ -136,6 +163,7 @@ class ClienteForm(forms.ModelForm):
             'apellido_paterno': forms.TextInput(attrs={'class': 'form-control'}),
             'apellido_materno': forms.TextInput(attrs={'class': 'form-control'}),
             'celular': PhoneWidget(),
+            'pais': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Ej: Bolivia', 'autocomplete': 'off'}),
             'notas': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
         }
 
@@ -558,7 +586,9 @@ class PrendaInventarioForm(forms.ModelForm):
         model = PrendaInventario
         fields = [
             'nombre', 'modelo', 'talla', 'color', 'codigo_referencia',
-            'stock_minimo', 'max_usos_default', 'precio', 'estado', 'notas',
+            'stock_minimo', 'max_usos_default', 'precio',
+            'precio_alquiler_base', 'precio_alquiler_minimo_pct',
+            'estado', 'notas',
             'tipo_prenda',
         ]
         labels = {
@@ -570,6 +600,8 @@ class PrendaInventarioForm(forms.ModelForm):
             'stock_minimo': 'Stock Mínimo',
             'max_usos_default': 'Máx. usos por defecto',
             'precio': 'Precio',
+            'precio_alquiler_base': 'Precio alquiler base',
+            'precio_alquiler_minimo_pct': 'Mínimo (%)',
             'estado': 'Estado',
             'notas': 'Notas',
             'tipo_prenda': 'Tipo de Prenda',
@@ -579,6 +611,8 @@ class PrendaInventarioForm(forms.ModelForm):
         }
         widgets = {
             'notas': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
+            'precio_alquiler_base': forms.NumberInput(),
+            'precio_alquiler_minimo_pct': forms.NumberInput(attrs={'min': 1, 'max': 100}),
         }
 
     def __init__(self, *args, **kwargs):
@@ -951,7 +985,7 @@ class ConjuntoSlotInlineForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         qs = (
             PrendaItem.objects
-            .filter(estado='disponible', prenda__estado='ACT')
+            .filter(prenda__estado='ACT')
             .select_related('prenda')
             .order_by('codigo_item')
         )

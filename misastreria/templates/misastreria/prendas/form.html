@@ -74,6 +74,39 @@
               {% if form.max_usos_default.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.max_usos_default.errors }}</div>{% endif %}
             </div>
 
+            <div class="col-md-3">
+              <label class="form-label">{{ form.precio_alquiler_base.label }} <span class="text-muted small">(Opcional)</span></label>
+              {{ form.precio_alquiler_base }}
+              {% if form.precio_alquiler_base.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.precio_alquiler_base.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-2">
+              <label class="form-label">{{ form.precio_alquiler_minimo_pct.label }}</label>
+              <div class="input-group">
+                {{ form.precio_alquiler_minimo_pct }}
+                <span class="input-group-text">%</span>
+              </div>
+              {% if form.precio_alquiler_minimo_pct.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.precio_alquiler_minimo_pct.errors }}</div>{% endif %}
+            </div>
+
+            <div class="col-12" id="proyeccionWrap" style="display:none">
+              <div class="card mt-2 proyeccion-card">
+                <div class="card-body py-2 px-3">
+                  <div class="fw-semibold small mb-2 text-primary">
+                    <i class="bi bi-graph-down-arrow me-1"></i>Proyección de precio por alquiler
+                  </div>
+                  <table class="table table-sm mb-0" style="font-size:0.82rem">
+                    <thead>
+                      <tr>
+                        <th class="text-muted fw-normal"># Alquiler</th>
+                        <th class="text-muted fw-normal text-end">Precio sugerido</th>
+                      </tr>
+                    </thead>
+                    <tbody id="proyeccionBody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
             <div class="col-12">
               <label class="form-label">{{ form.notas.label }}{% if not form.notas.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
               {{ form.notas }}
@@ -90,4 +123,69 @@
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+  var baseInput   = document.getElementById('id_precio_alquiler_base');
+  var minPctInput = document.getElementById('id_precio_alquiler_minimo_pct');
+  var maxUsosInput= document.getElementById('id_max_usos_default');
+  var wrap        = document.getElementById('proyeccionWrap');
+  var tbody       = document.getElementById('proyeccionBody');
+  if (!baseInput || !minPctInput || !maxUsosInput || !wrap || !tbody) return;
+
+  function precioEnUso(base, minPct, n, maxUsos) {
+    if (!base) return null;
+    var floor = base * minPct / 100;
+    if (!maxUsos) return base;
+    var raw = base * (1 - n / maxUsos);
+    return Math.max(raw, floor);
+  }
+
+  function fmt(v) { return 'Bs ' + v.toFixed(2); }
+
+  function renderProyeccion() {
+    var base   = parseFloat(baseInput.value) || 0;
+    var minPct = parseFloat(minPctInput.value) || 20;
+    var maxU   = parseInt(maxUsosInput.value) || 0;
+    if (!base) { wrap.style.display = 'none'; return; }
+    wrap.style.display = 'block';
+    var milestones = [];
+    milestones.push({ label: 'Nuevo', n: 0 });
+    if (maxU > 0) {
+      if (maxU <= 8) {
+        for (var i = 1; i <= maxU; i++) milestones.push({ label: 'Uso ' + i, n: i });
+      } else {
+        var seen = new Set([0]);
+        [0.25, 0.5, 0.75, 1.0].forEach(function(pct) {
+          var n = Math.round(maxU * pct);
+          if (!seen.has(n)) { seen.add(n); milestones.push({ label: 'Uso ' + n, n: n }); }
+        });
+      }
+    }
+    tbody.innerHTML = '';
+    milestones.forEach(function(m) {
+      var precio = precioEnUso(base, minPct, m.n, maxU);
+      if (precio === null) return;
+      var tr = document.createElement('tr');
+      tr.innerHTML = '<td>' + m.label + '</td><td class="text-end fw-semibold">' + fmt(precio) + '</td>';
+      tbody.appendChild(tr);
+    });
+    // Floor row
+    var floorRow = document.createElement('tr');
+    floorRow.style.borderTop = '2px solid var(--border)';
+    var floorPrice = base * minPct / 100;
+    floorRow.innerHTML = '<td class="text-muted">Precio mínimo</td><td class="text-end text-muted">' + fmt(floorPrice) + '</td>';
+    tbody.appendChild(floorRow);
+  }
+
+  var _t;
+  function debounced() { clearTimeout(_t); _t = setTimeout(renderProyeccion, 300); }
+  baseInput.addEventListener('input', debounced);
+  minPctInput.addEventListener('input', debounced);
+  maxUsosInput.addEventListener('input', debounced);
+  renderProyeccion(); // render on load if values already set (edit mode)
+})();
+</script>
 {% endblock %}

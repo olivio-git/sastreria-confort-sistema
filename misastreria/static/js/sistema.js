@@ -588,20 +588,27 @@ window.addConjuntoToForm = function(conjunto, slotsIncluidos, ctx) {
       .filter(Boolean)
   );
 
-  var disponibles = new Set(
-    (ctx.PRENDAS || []).map(function(p) { return String(p.prenda_item_id); })
-  );
-
   var faltantes = [];
   slotsActivos.forEach(function(slot, idx) {
-    var precio = (idx === 0) ? (base + ajuste) : base;
+    var precioFallback = (idx === 0) ? (base + ajuste) : base;
     var idStr = slot.prenda_item_id ? String(slot.prenda_item_id) : null;
-    if (idStr && disponibles.has(idStr) && !usados.has(idStr)) {
+    // Precio: usar sugerido depreciado del slot; si no hay, buscar en PRENDAS; si no, proporcional del conjunto
+    var precio = precioFallback;
+    if (slot.precio_alquiler_sugerido != null) {
+      precio = slot.precio_alquiler_sugerido;
+    } else if (idStr && ctx.PRENDAS) {
+      var prendaData = ctx.PRENDAS.find(function(p) { return String(p.prenda_item_id) === idStr; });
+      if (prendaData && prendaData.precio_alquiler_sugerido != null) {
+        precio = prendaData.precio_alquiler_sugerido;
+      }
+    }
+    // Disponibilidad: usar slot.disponible (el backend ya sabe si está libre, incluso si es slot de conjunto)
+    if (idStr && slot.disponible && !usados.has(idStr)) {
       usados.add(idStr);
       ctx.addRow(slot.prenda_item_id, precio, grupoNum);
     } else {
       faltantes.push(slot.prenda_item_nombre || 'Sin asignar');
-      ctx.addRow(null, precio, grupoNum);
+      ctx.addRow(null, precioFallback, grupoNum);
     }
   });
 

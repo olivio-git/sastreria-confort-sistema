@@ -157,8 +157,9 @@
             <table class="table" id="tablaItems">
               <thead>
                 <tr>
-                  <th style="min-width:300px">Item</th>
+                  <th style="min-width:200px">Item</th>
                   <th style="width:130px">Precio unit.</th>
+                  <th style="width:300px">Arreglo / Modif.</th>
                   <th style="width:120px" class="text-end">Subtotal</th>
                   <th style="width:44px"></th>
                 </tr>
@@ -213,6 +214,15 @@
       </div>
     </td>
     <td><input type="number" name="item_precio" class="form-control item-precio" step="0.01" min="0" placeholder="0.00"></td>
+    <td>
+      <div class="d-flex gap-1">
+        <div style="position:relative;flex:1;min-width:0">
+          <input type="text" class="form-control item-rep-text" placeholder="Tipo arreglo…" autocomplete="off">
+          <input type="hidden" name="item_tipo_reparacion" class="item-rep-id">
+        </div>
+        <input type="number" name="item_precio_reparacion" class="form-control item-precio-rep" style="width:75px;flex-shrink:0" step="0.01" min="0" placeholder="0.00">
+      </div>
+    </td>
     <td class="text-end align-middle"><span class="item-subtotal fw-semibold">0.00</span></td>
     <td class="align-middle">
       <button type="button" class="btn btn-sm btn-icon btn-ghost-danger btn-remove-item" title="Quitar">
@@ -329,15 +339,18 @@ const ESTADO_ALQUILER_OPTS = {{ estado_alquiler_opts|default:"[]"|safe }};
 const PRENDAS = {{ prendas_json|safe }};
 const CONJUNTOS = {{ conjuntos_json|default:"[]"|safe }};
 const ITEMS_INICIALES = {{ items_existentes|default:"[]"|safe }};
+const TIPOS_REPARACION = {{ tipos_reparacion_json|default:"[]"|safe }};
 
 const tbody     = document.getElementById('itemsBody');
 const sinItems  = document.getElementById('sinItems');
 const descInput = document.querySelector('[name="descuento"]');
 
 function calcFila(row) {
-  const precio = parseFloat(row.querySelector('.item-precio').value) || 0;
-  row.querySelector('.item-subtotal').textContent = precio.toFixed(2);
-  return precio;
+  const precio    = parseFloat(row.querySelector('.item-precio').value) || 0;
+  const precioRep = parseFloat(row.querySelector('.item-precio-rep').value) || 0;
+  const subtotal  = precio + precioRep;
+  row.querySelector('.item-subtotal').textContent = subtotal.toFixed(2);
+  return subtotal;
 }
 
 function calcTotales() {
@@ -352,20 +365,24 @@ function calcTotales() {
   sinItems.style.display = tbody.querySelectorAll('.item-row').length ? 'none' : 'block';
 }
 
-function addRow(prendaItemId, precio) {
+function addRow(prendaItemId, precio, tipoRepId, tipoRepNombre, precioRep) {
   const tmpl        = document.getElementById('itemRowTemplate');
   const row         = tmpl.content.cloneNode(true).querySelector('tr');
   const textInput   = row.querySelector('.item-articulo-text');
   const hiddenInput = row.querySelector('.item-articulo');
+  const repText     = row.querySelector('.item-rep-text');
+  const repId       = row.querySelector('.item-rep-id');
 
   if (prendaItemId) hiddenInput.value = prendaItemId;
   if (precio)       row.querySelector('.item-precio').value = parseFloat(precio).toFixed(2);
+  if (tipoRepId)    { repId.value = tipoRepId; repText.value = tipoRepNombre || ''; }
+  if (precioRep)    row.querySelector('.item-precio-rep').value = parseFloat(precioRep).toFixed(2);
 
   window.makePrendaFlyoutCombobox(textInput, hiddenInput, PRENDAS);
+  window.makeLocalCombobox(repText, repId, TIPOS_REPARACION);
 
   hiddenInput.addEventListener('change', function() {
     if (this.value) {
-      // Validar duplicados
       const seleccionados = [...tbody.querySelectorAll('[name="item_prenda_item"]')].map(i => i.value);
       const ocurrencias = seleccionados.filter(v => v === this.value).length;
       if (ocurrencias > 1) {
@@ -375,11 +392,17 @@ function addRow(prendaItemId, precio) {
         return;
       }
       const prenda = PRENDAS.find(p => String(p.prenda_item_id) === String(this.value));
-      if (prenda) row.querySelector('.item-precio').value = parseFloat(prenda.precio).toFixed(2);
+      if (prenda) {
+        var precioSugerido = prenda.precio_alquiler_sugerido != null
+            ? prenda.precio_alquiler_sugerido
+            : (prenda.precio || '');
+        row.querySelector('.item-precio').value = precioSugerido ? parseFloat(precioSugerido).toFixed(2) : '';
+      }
     }
     calcTotales();
   });
   row.querySelector('.item-precio').addEventListener('input', calcTotales);
+  row.querySelector('.item-precio-rep').addEventListener('input', calcTotales);
   row.querySelector('.btn-remove-item').addEventListener('click', function() {
     row.remove(); calcTotales();
   });
@@ -390,7 +413,10 @@ function addRow(prendaItemId, precio) {
 }
 
 if (ITEMS_INICIALES.length > 0) {
-  ITEMS_INICIALES.forEach(item => addRow(item.prenda_item_id, item.precio_unitario));
+  ITEMS_INICIALES.forEach(function(item) {
+    const tr = TIPOS_REPARACION.find(t => t.id === item.tipo_reparacion_id);
+    addRow(item.prenda_item_id, item.precio_unitario, item.tipo_reparacion_id, tr ? tr.nombre : '', item.precio_reparacion);
+  });
 } else {
   addRow();
 }

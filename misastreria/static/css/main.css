@@ -467,8 +467,12 @@ svg.lucide { flex-shrink: 0; vertical-align: middle; }
   --border:    #334155;
 }
 
+/* Proyección de precio de alquiler */
+.proyeccion-card { background: var(--primary-light, #dbeafe); border: 1px solid var(--border) !important; }
+
 /* Custom components with hardcoded backgrounds */
 [data-bs-theme="dark"] .filter-bar         { background: var(--tblr-bg-surface); }
+[data-bs-theme="dark"] .proyeccion-card    { background: #1e3a5f; border-color: #2d4a7a !important; }
 [data-bs-theme="dark"] .table-wrapper      { background: var(--tblr-bg-surface); }
 [data-bs-theme="dark"] .pagination-bar     { background: var(--tblr-bg-surface-secondary); }
 [data-bs-theme="dark"] .tab-section > .tab-content { background: var(--tblr-bg-surface); }

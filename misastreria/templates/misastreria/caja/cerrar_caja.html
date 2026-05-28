@@ -23,9 +23,9 @@
       </div>
       <div class="card-body">
         <div class="text-center mb-3">
-          <div class="text-muted small mb-1">Saldo del sistema</div>
+          <div class="text-muted small mb-1">Efectivo en caja (sistema)</div>
           <div class="display-5 fw-bold text-success">Bs. {{ saldo_sistema|floatformat:2 }}</div>
-          <div class="text-muted small mt-1">Saldo operativo (no incluye garantías).</div>
+          <div class="text-muted small mt-1">Solo efectivo — QR y transferencias son controlados aparte.</div>
         </div>
         {% if sesion.saldo_garantias %}
         <div class="alert alert-info py-2 mb-3">

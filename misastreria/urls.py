@@ -144,6 +144,7 @@ urlpatterns = [
     path('caja/sesiones/', views.lista_sesiones_caja, name='lista_sesiones_caja'),
     path('caja/sesiones/abrir/', views.abrir_sesion_caja, name='abrir_sesion_caja'),
     path('caja/sesiones/<int:pk>/', views.detalle_sesion_caja, name='detalle_sesion_caja'),
+    path('caja/sesiones/<int:pk>/excel/', views.export_detalle_sesion_excel, name='export_detalle_sesion_excel'),
     path('caja/sesiones/<int:pk>/cerrar/', views.cerrar_sesion_caja, name='cerrar_sesion_caja'),
     # Caja — resumen y exports
     path('caja/resumen/', views.resumen_caja, name='resumen_caja'),

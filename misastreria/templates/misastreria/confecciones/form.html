@@ -89,7 +89,20 @@
             </div>
             <div class="col-md-4">
               <label class="form-label">{{ form.modelo.label }}{% if not form.modelo.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
-              {{ form.modelo }}
+              <div class="d-flex gap-1">
+                <div style="position:relative;flex:1;min-width:0">
+                  <input type="text"
+                         id="id_modelo"
+                         name="modelo"
+                         class="form-control"
+                         placeholder="Buscar o escribir modelo…"
+                         value="{{ form.modelo.value|default:'' }}"
+                         autocomplete="off">
+                </div>
+                <button type="button" class="btn btn-outline-secondary flex-shrink-0" id="btnNuevoModelo" title="Nuevo modelo">
+                  <i class="bi bi-plus-lg"></i>
+                </button>
+              </div>
               {% if form.modelo.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.modelo.errors }}</div>{% endif %}
             </div>
             <div class="col-md-4">
@@ -254,6 +267,29 @@
   </div>
 </div>
 
+<!-- Modal: Nuevo modelo de confección -->
+<div class="modal fade" id="modalNuevoModelo" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Nuevo modelo</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label">Nombre</label>
+          <input type="text" class="form-control" id="nuevoModeloNombre" placeholder="Ej: Traje Clásico">
+        </div>
+        <div id="modalModeloError" class="text-danger small" style="display:none"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btnGuardarModelo">Guardar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
@@ -365,6 +401,41 @@ var TIPOS_PRENDA = {{ tipos_prenda_json|safe }};
     })
     .catch(function() { errEl.textContent = 'Error al guardar.'; errEl.style.display = 'block'; });
   });
+
+  // Autocomplete + crear modelo de confección
+  var modeloInput = document.getElementById('id_modelo');
+  if (modeloInput && window.makeLocalCombobox) {
+    var modeloOpts = ({{ modelo_opts_json|default:"[]"|safe }}).map(function(n) {
+      return { id: n, nombre: n };
+    });
+    window.makeLocalCombobox(modeloInput, modeloInput, modeloOpts);
+  }
+  var modalModeloEl = document.getElementById('modalNuevoModelo');
+  if (modalModeloEl) {
+    document.getElementById('btnNuevoModelo').addEventListener('click', function() {
+      var typed = modeloInput ? modeloInput.value.trim() : '';
+      document.getElementById('nuevoModeloNombre').value = typed;
+      document.getElementById('modalModeloError').style.display = 'none';
+      new bootstrap.Modal(modalModeloEl).show();
+    });
+    document.getElementById('btnGuardarModelo').addEventListener('click', function() {
+      var nombre = document.getElementById('nuevoModeloNombre').value.trim();
+      var errEl  = document.getElementById('modalModeloError');
+      if (!nombre) { errEl.textContent = 'El nombre es requerido.'; errEl.style.display = 'block'; return; }
+      fetch('{% url "crear_modelo_confeccion" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'nombre=' + encodeURIComponent(nombre),
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error) { errEl.textContent = data.error; errEl.style.display = 'block'; return; }
+        if (modeloInput) modeloInput.value = data.nombre;
+        bootstrap.Modal.getInstance(modalModeloEl).hide();
+      })
+      .catch(function() { errEl.textContent = 'Error al guardar.'; errEl.style.display = 'block'; });
+    });
+  }
 
   // Saldo automático
   var precioInput   = document.getElementById('id_precio');

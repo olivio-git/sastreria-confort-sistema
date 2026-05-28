@@ -104,7 +104,7 @@
             {% with items=a.items.all %}
               {% if items %}
                 {% for item in items %}
-                  <div class="small"><code>{{ item.prenda_item.codigo_item }}</code> — {{ item.prenda_item.prenda.nombre }}{% if item.grupo_conjunto %}<span class="badge-conjunto" title="Conjunto {{ item.grupo_conjunto }}"><i class="bi bi-layers"></i>{{ item.grupo_conjunto }}</span>{% endif %}</div>
+                  <div class="small"><code>{{ item.prenda_item.codigo_item }}</code> — {{ item.prenda_item.prenda.nombre }}{% if item.grupo_conjunto %}<span class="badge-conjunto" title="Conjunto {{ item.grupo_conjunto }}"><i data-lucide="layers"></i>{{ item.grupo_conjunto }}</span>{% endif %}</div>
                 {% endfor %}
               {% else %}
                 <span class="text-muted">—</span>
@@ -118,7 +118,7 @@
                 {{ a.get_garantia_tipo_display }} Bs.{{ a.garantia_monto|floatformat:2 }}
               </span>
             {% elif a.garantia_tipo == 'descripcion' %}
-              <span class="text-muted small d-inline-block text-truncate" style="max-width:120px" title="{{ a.garantia }}">
+              <span class="text-muted small d-block text-truncate" title="{{ a.garantia }}">
                 {{ a.garantia|default:"—" }}
               </span>
             {% else %}
@@ -157,7 +157,7 @@
         </tr>
         {% empty %}
         <tr>
-          <td colspan="8">
+          <td colspan="9">
             <div class="empty-state">
               <i data-lucide="shopping-bag" class="d-block"></i>
               No hay alquileres en el período seleccionado.
@@ -173,13 +173,13 @@
     <nav class="ms-auto">
       <ul class="pagination pagination-sm m-0">
         {% if page_obj.has_previous %}
-          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}">«</a></li>
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}">‹</a></li>
+          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}&cliente_id={{ cliente_id }}&prenda={{ prenda }}">«</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}&cliente_id={{ cliente_id }}&prenda={{ prenda }}">‹</a></li>
         {% endif %}
         <li class="page-item active"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
         {% if page_obj.has_next %}
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}">›</a></li>
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}">»</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}&cliente_id={{ cliente_id }}&prenda={{ prenda }}">›</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&estado={{ estado }}&desde={{ desde }}&hasta={{ hasta }}&cliente_id={{ cliente_id }}&prenda={{ prenda }}">»</a></li>
         {% endif %}
       </ul>
     </nav>

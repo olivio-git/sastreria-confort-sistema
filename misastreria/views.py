@@ -25,13 +25,14 @@ from reportlab.lib.units import cm
 from django.db.models import Q, ProtectedError
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Flowable
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfbase import pdfmetrics # Para registrar fuentes en ReportLab
 from reportlab.pdfbase.ttfonts import TTFont # Para usar fuentes TrueType en ReportLab
 from django.forms import ValidationError
 from reportlab.lib.units import inch
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.lib.utils import ImageReader
 import csv
 import os
 import io
@@ -131,7 +132,7 @@ def lista_empleados(request):
     activo = request.GET.get('activo', '')
     orden = request.GET.get('orden', 'desc')
 
-    sort = '-creado' if orden == 'desc' else 'creado'
+    sort = '-codigo' if orden == 'desc' else 'codigo'
     empleados = Empleado.objects.order_by(sort)
     _p = request.GET.copy(); _p['orden'] = 'asc' if orden == 'desc' else 'desc'; _p.pop('page', None)
     orden_toggle_url = '?' + _p.urlencode()
@@ -439,7 +440,7 @@ def lista_clientes(request):
     hasta      = request.GET.get('hasta', '')
     orden      = request.GET.get('orden', 'desc')
 
-    sort = '-creado' if orden == 'desc' else 'creado'
+    sort = '-codigo' if orden == 'desc' else 'codigo'
     clientes = Cliente.objects.order_by(sort)
     _p = request.GET.copy(); _p['orden'] = 'asc' if orden == 'desc' else 'desc'; _p.pop('page', None)
     orden_toggle_url = '?' + _p.urlencode()
@@ -766,7 +767,7 @@ def lista_reparaciones(request):
         desde = (hoy - timedelta(days=90)).isoformat()
         hasta = hoy.isoformat()
 
-    sort = '-creado' if orden == 'desc' else 'creado'
+    sort = '-codigo' if orden == 'desc' else 'codigo'
     _dcf = DecimalField(max_digits=10, decimal_places=2)
     _rep_ingresos_q = (
         CajaMovimiento.objects
@@ -808,11 +809,17 @@ def lista_reparaciones(request):
     if tipo_prenda:
         reparaciones = reparaciones.filter(items__tipo_prenda_id=tipo_prenda).distinct()
     if desde:
-        desde_dt = django_tz.make_aware(datetime.combine(date.fromisoformat(desde), datetime.min.time()))
-        reparaciones = reparaciones.filter(creado__gte=desde_dt)
+        try:
+            desde_dt = django_tz.make_aware(datetime.combine(date.fromisoformat(desde), datetime.min.time()))
+            reparaciones = reparaciones.filter(creado__gte=desde_dt)
+        except (ValueError, TypeError):
+            desde = ''
     if hasta:
-        hasta_dt = django_tz.make_aware(datetime.combine(date.fromisoformat(hasta) + timedelta(days=1), datetime.min.time()))
-        reparaciones = reparaciones.filter(creado__lt=hasta_dt)
+        try:
+            hasta_dt = django_tz.make_aware(datetime.combine(date.fromisoformat(hasta) + timedelta(days=1), datetime.min.time()))
+            reparaciones = reparaciones.filter(creado__lt=hasta_dt)
+        except (ValueError, TypeError):
+            hasta = ''
 
     paginator = Paginator(reparaciones, 15)
     page_obj = paginator.get_page(request.GET.get('page'))
@@ -903,14 +910,16 @@ def editar_reparacion(request, id):
     if request.method == 'POST':
         form = ReparacionForm(request.POST, instance=reparacion)
         if form.is_valid():
+            old_total = reparacion.total
             reparacion = form.save()
             errores = _guardar_items_reparacion(reparacion, request.POST)
             from .caja_signals import _ajustar_total_en_caja
             _ajustar_total_en_caja(
                 referencia_field='referencia_reparacion',
                 instance=reparacion,
-                concepto_cobro='reparacion_cobro',
+                concepto_cobro='reparacion_ajuste',
                 nuevo_total=reparacion.total,
+                old_total=old_total,
                 forma_pago=getattr(reparacion, 'forma_pago', 'efectivo') or 'efectivo',
                 cliente=getattr(reparacion, 'cliente', None),
             )
@@ -1024,7 +1033,79 @@ def marcar_entregado(request, id):
 _PDF_NAVY  = colors.HexColor('#0d1b2a')
 _PDF_GOLD  = colors.HexColor('#c9a84c')
 _PDF_LGRAY = colors.HexColor('#f7f7f7')
-_LOGO_PDF  = os.path.join(os.path.dirname(__file__), 'static', 'images', 'fortium-tailor-logo.jpg')
+_LOGO_PDF    = os.path.join(os.path.dirname(__file__), 'static', 'images', 'fortium-tailor-logo.jpg')
+_QR_WA_PDF   = os.path.join(os.path.dirname(__file__), 'static', 'images', 'qr_whatsapp.png')
+_DEJAVU_PDF  = os.path.join(os.path.dirname(__file__), 'static', 'font', 'DejaVuSans.ttf')
+
+_DEJAVU_REGISTERED = False
+try:
+    pdfmetrics.getFont('DejaVuSans')
+    _DEJAVU_REGISTERED = True
+except Exception:
+    if os.path.exists(_DEJAVU_PDF):
+        try:
+            pdfmetrics.registerFont(TTFont('DejaVuSans', _DEJAVU_PDF))
+            _DEJAVU_REGISTERED = True
+        except Exception:
+            pass
+
+_QR_CONTACT_DATA = 'BEGIN:VCARD\nVERSION:3.0\nFN:Fortium Tailor\nTEL:+59174546175\nEMAIL:info@fortiumtailor.com\nEND:VCARD'
+
+
+def _make_contact_qr():
+    try:
+        import qrcode as _qrcode
+        qr = _qrcode.QRCode(version=2, error_correction=_qrcode.constants.ERROR_CORRECT_M,
+                             box_size=8, border=2)
+        qr.add_data(_QR_CONTACT_DATA)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color='#0d1b2a', back_color='white')
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        buf.seek(0)
+        return buf
+    except Exception:
+        return None
+
+
+class _RoundedTable(Flowable):
+    """Wraps a ReportLab Table with rounded-corner clipping and border."""
+    def __init__(self, tbl, radius=5, border_color=None):
+        Flowable.__init__(self)
+        self._tbl = tbl
+        self._r = radius
+        self._bc = border_color or colors.HexColor('#cbd5e1')
+        self._w = self._h = 0
+
+    def wrap(self, aW, aH):
+        self._w, self._h = self._tbl.wrap(aW, aH)
+        self.width = self._w
+        self.height = self._h
+        return self._w, self._h
+
+    def draw(self):
+        c = self.canv
+        w, h, r = self._w, self._h, self._r
+        k = 0.5523 * r
+        p = c.beginPath()
+        p.moveTo(r, 0);       p.lineTo(w - r, 0)
+        p.curveTo(w-r+k, 0,   w,     k,     w,     r)
+        p.lineTo(w, h - r)
+        p.curveTo(w,     h-r+k, w-r+k, h,     w-r,   h)
+        p.lineTo(r, h)
+        p.curveTo(r-k,   h,     0,     h-r+k, 0,     h-r)
+        p.lineTo(0, r)
+        p.curveTo(0,     r-k,   r-k,   0,     r,     0)
+        p.close()
+        c.saveState()
+        c.clipPath(p, fill=0, stroke=0)
+        self._tbl.drawOn(c, 0, 0)
+        c.restoreState()
+        c.saveState()
+        c.setStrokeColor(self._bc)
+        c.setLineWidth(0.6)
+        c.roundRect(0, 0, w, h, r, fill=0, stroke=1)
+        c.restoreState()
 
 
 def _pdf_page(c, doc, tipo_doc, codigo, fecha_str, hora_str, estado_str):
@@ -1062,9 +1143,97 @@ def _pdf_page(c, doc, tipo_doc, codigo, fecha_str, hora_str, estado_str):
     c.rect(0, 0, W, 1.3*cm, fill=1, stroke=0)
     c.setFillColor(colors.white)
     c.setFont('Helvetica', 7.5)
-    c.drawString(0.8*cm, 0.47*cm, 'Calle España #123 · Santa Cruz - Bolivia')
-    c.drawCentredString(W / 2, 0.47*cm, '+591 770 12345')
-    c.drawRightString(W - 0.8*cm, 0.47*cm, '@fortium.tailor')
+    c.drawString(0.8*cm, 0.47*cm, 'Calle Méndez #549 · Comercial MÉNDEZ, piso 1 loc. 1-2, Tarija')
+    c.drawCentredString(W / 2, 0.47*cm, '+591 74546175')
+    c.drawRightString(W - 0.8*cm, 0.47*cm, 'info@fortiumtailor.com')
+    c.restoreState()
+
+
+def _pdf_page_reparacion(c, doc, tipo_doc, codigo, fecha_str, hora_str, estado_str):
+    """Header blanco: logo izq, COMPROBANTE centro, QR esquina sup-der. Footer navy con dirección."""
+    c.saveState()
+    W, H = A4
+    HEADER_H = 4.0 * cm
+    STRIP_H  = 0.48 * cm   # franja inferior del header para metadata
+    MAIN_H   = HEADER_H - STRIP_H
+    FOOTER_H = 2.0 * cm
+
+    # ── Header: fondo blanco ───────────────────────────────────────────────────
+    c.setFillColor(colors.white)
+    c.rect(0, H - HEADER_H, W, HEADER_H, fill=1, stroke=0)
+
+    # Franja de metadata (parte inferior del header)
+    c.setFillColor(colors.HexColor('#eef2ff'))
+    c.rect(0, H - HEADER_H, W, STRIP_H, fill=1, stroke=0)
+
+    # Borde inferior del header
+    c.setStrokeColor(colors.HexColor('#dde3f0'))
+    c.setLineWidth(0.6)
+    c.line(0, H - HEADER_H, W, H - HEADER_H)
+
+    # Logo (izquierda, en zona principal)
+    logo_y = H - HEADER_H + STRIP_H + 0.1 * cm
+    if os.path.exists(_LOGO_PDF):
+        c.drawImage(_LOGO_PDF, 0.4*cm, logo_y,
+                    width=3.9*cm, height=MAIN_H - 0.2*cm,
+                    preserveAspectRatio=True, mask='auto')
+
+    # QR (esquina superior derecha, dentro de la zona principal)
+    QR_SIZE = MAIN_H - 0.3 * cm
+    qr_x = W - QR_SIZE - 0.25*cm
+    qr_y = H - HEADER_H + STRIP_H + 0.15*cm
+    if os.path.exists(_QR_WA_PDF):
+        c.drawImage(_QR_WA_PDF, qr_x, qr_y, width=QR_SIZE, height=QR_SIZE)
+    else:
+        qr_buf = _make_contact_qr()
+        if qr_buf:
+            c.drawImage(ImageReader(qr_buf), qr_x, qr_y, width=QR_SIZE, height=QR_SIZE)
+
+    # COMPROBANTE + tipo centrado entre logo y QR
+    text_cx = (4.5*cm + qr_x) / 2
+    c.setFillColor(_PDF_NAVY)
+    c.setFont('Helvetica-Bold', 15)
+    c.drawCentredString(text_cx, H - 1.4*cm, 'COMPROBANTE')
+    c.setFont('Helvetica', 10)
+    c.drawCentredString(text_cx, H - 2.05*cm, tipo_doc)
+    c.setStrokeColor(_PDF_GOLD)
+    c.setLineWidth(1.5)
+    c.line(text_cx - 3.0*cm, H - 2.4*cm, text_cx + 3.0*cm, H - 2.4*cm)
+
+    # Metadata en la franja inferior: Código | Fecha | [Hora |] Estado
+    meta = [('Código', codigo), ('Fecha', fecha_str)]
+    if hora_str:
+        meta.append(('Hora', hora_str))
+    meta.append(('Estado', estado_str))
+    strip_cy = H - HEADER_H + STRIP_H / 2 - 0.05*cm
+    col_w = W / len(meta)
+    for i, (lbl, val) in enumerate(meta):
+        cx = col_w * i + col_w / 2
+        c.setFillColor(colors.HexColor('#4a5568'))
+        c.setFont('Helvetica-Bold', 6.5)
+        c.drawString(cx - 0.4*cm, strip_cy, f'{lbl}:')
+        c.setFont('Helvetica', 6.5)
+        c.drawString(cx + 0.7*cm, strip_cy, str(val))
+
+    # ── Footer navy ────────────────────────────────────────────────────────────
+    c.setFillColor(_PDF_NAVY)
+    c.rect(0, 0, W, FOOTER_H, fill=1, stroke=0)
+
+    icon_font = 'DejaVuSans' if _DEJAVU_REGISTERED else 'Helvetica'
+    c.setFillColor(colors.white)
+    c.setFont(icon_font, 7)
+    line1_y = FOOTER_H * 0.67
+    line2_y = FOOTER_H * 0.27
+    if _DEJAVU_REGISTERED:
+        c.drawString(0.8*cm, line1_y,
+                     '◆  Calle Méndez #549 entre 15 de Abril y Madrid · Comercial MÉNDEZ, primer piso locales 1 y 2, Tarija')
+        c.drawString(0.8*cm, line2_y,
+                     '☎  +591 74546175        ✉  info@fortiumtailor.com')
+    else:
+        c.drawString(0.8*cm, line1_y,
+                     'Calle Méndez #549 entre 15 de Abril y Madrid · Comercial MÉNDEZ, primer piso locales 1 y 2, Tarija')
+        c.drawString(0.8*cm, line2_y, '+591 74546175   info@fortiumtailor.com')
+
     c.restoreState()
 
 
@@ -1226,13 +1395,37 @@ def exportar_recibo_reparacion_pdf(request, id):
             Paragraph(item.detalles or '—', det_st),
         ])
     items_rows.append(['', '', '', 'TOTAL:', f"Bs {reparacion.total:.2f}"])
-    right_tbl = _pdf_items_tbl(items_rows, [0.5*cm, 2.5*cm, 3.4*cm, 1.9*cm, 3.2*cm], 2)
+
+    col_widths = [0.5*cm, 2.5*cm, 3.4*cm, 1.9*cm, 3.2*cm]
+    n_right = 2
+    right_inner = Table(items_rows, colWidths=col_widths)
+    right_inner.setStyle(TableStyle([
+        ('SPAN',          (0, 0), (-1, 0)),
+        ('BACKGROUND',    (0, 0), (-1, 0), _PDF_NAVY),
+        ('TEXTCOLOR',     (0, 0), (-1, 0), colors.white),
+        ('BACKGROUND',    (0, 1), (-1, 1), colors.HexColor('#f0f0f0')),
+        ('TEXTCOLOR',     (0, 1), (-1, 1), _PDF_NAVY),
+        ('FONTNAME',      (0, 0), (-1, 1), 'Helvetica-Bold'),
+        ('FONTNAME',      (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('FONTSIZE',      (0, 0), (-1, -1), 8),
+        ('ALIGN',         (-n_right, 2), (-1, -1), 'RIGHT'),
+        ('ROWBACKGROUNDS', (0, 2), (-1, -2), [colors.white, _PDF_LGRAY]),
+        ('GRID',          (0, 1), (-1, -2), 0.25, colors.HexColor('#e0e0e0')),
+        ('LINEABOVE',     (0, -1), (-1, -1), 0.5, _PDF_NAVY),
+        ('TOPPADDING',    (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 4),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
+    ]))
+
+    left_tbl  = _RoundedTable(_pdf_left_tbl(left_data, L_W))
+    right_tbl = _RoundedTable(right_inner)
 
     def on_page(c, doc):
-        _pdf_page(c, doc, 'DE REPARACIÓN', cod_str, fec_str, '', est_str)
+        _pdf_page_reparacion(c, doc, 'DE REPARACIÓN', cod_str, fec_str, '', est_str)
 
     doc = SimpleDocTemplate(response, pagesize=A4,
-                            topMargin=5.2*cm, bottomMargin=2.0*cm,
+                            topMargin=4.4*cm, bottomMargin=2.4*cm,
                             leftMargin=1.5*cm, rightMargin=1.5*cm)
     doc.build(
         [
@@ -1267,7 +1460,7 @@ def lista_ventas(request):
         periodo = periodo or '3meses'
         desde = (hoy - timedelta(days=90)).isoformat()
 
-    sort = '-fecha_venta' if orden == 'desc' else 'fecha_venta'
+    sort = '-codigo' if orden == 'desc' else 'codigo'
     ventas = Venta.objects.all().order_by(sort)
     _p = request.GET.copy(); _p['orden'] = 'asc' if orden == 'desc' else 'desc'; _p.pop('page', None)
     orden_toggle_url = '?' + _p.urlencode()
@@ -1284,9 +1477,17 @@ def lista_ventas(request):
     if empleado_id:
         ventas = ventas.filter(empleado_id=empleado_id)
     if desde:
-        ventas = ventas.filter(fecha_venta__gte=desde)
+        try:
+            date.fromisoformat(desde)
+            ventas = ventas.filter(fecha_venta__gte=desde)
+        except (ValueError, TypeError):
+            desde = ''
     if hasta:
-        ventas = ventas.filter(fecha_venta__lte=hasta)
+        try:
+            date.fromisoformat(hasta)
+            ventas = ventas.filter(fecha_venta__lte=hasta)
+        except (ValueError, TypeError):
+            hasta = ''
 
     total = ventas.count()
     paginator = Paginator(ventas, 15)
@@ -1394,7 +1595,7 @@ def crear_venta(request):
     item_id = request.GET.get('item')
     if item_id:
         try:
-            pi = PrendaItem.objects.select_related('prenda').get(id=item_id, tipo='venta', estado='disponible')
+            pi = PrendaItem.objects.select_related('prenda').get(id=item_id, tipo='venta', estado='disponible', conjunto_slots__isnull=True)
             items_preload = [{'prenda_item_id': pi.id, 'precio_unitario': float(pi.prenda.precio), 'grupo_conjunto': None}]
         except PrendaItem.DoesNotExist:
             pass
@@ -1414,14 +1615,16 @@ def editar_venta(request, id):
     if request.method == 'POST':
         form = VentaForm(request.POST, instance=venta)
         if form.is_valid():
+            old_total = venta.total
             venta = form.save()
             errores = _guardar_items_venta(venta, request.POST)
             from .caja_signals import _ajustar_total_en_caja
             _ajustar_total_en_caja(
                 referencia_field='referencia_venta',
                 instance=venta,
-                concepto_cobro='venta_cobro',
+                concepto_cobro='venta_ajuste',
                 nuevo_total=venta.total,
+                old_total=old_total,
                 forma_pago=getattr(venta, 'forma_pago', 'efectivo') or 'efectivo',
                 cliente=getattr(venta, 'cliente', None),
             )
@@ -1524,8 +1727,6 @@ def exportar_recibo_pdf(request, id):
         [Paragraph('<b>Empleado:</b>',   st['kl']), Paragraph(emp_str, st['kv'])],
         [Paragraph('<b>Fecha venta:</b>',st['kl']), Paragraph(fec_str, st['kv'])],
     ]
-    left_tbl = _pdf_left_tbl(left_data, L_W)
-
     venta_items = list(venta.items.select_related('prenda_item__prenda').all())
     items_rows = [
         [Paragraph('DETALLE DE VENTA', st['sec']), '', '', '', '', ''],
@@ -1546,13 +1747,35 @@ def exportar_recibo_pdf(request, id):
         items_rows.append(['', '', '', '', f'Desc. {venta.descuento}%:',
                            f"-Bs {(venta.subtotal - venta.total):.2f}"])
     items_rows.append(['', '', '', '', 'TOTAL:', f"Bs {venta.total:.2f}"])
-    right_tbl = _pdf_items_tbl(items_rows, [0.5*cm, 3.6*cm, 1.8*cm, 1.2*cm, 2.2*cm, 2.2*cm], 2)
+
+    _vcw = [0.5*cm, 3.6*cm, 1.8*cm, 1.2*cm, 2.2*cm, 2.2*cm]
+    right_inner = Table(items_rows, colWidths=_vcw)
+    right_inner.setStyle(TableStyle([
+        ('SPAN',          (0, 0), (-1, 0)),
+        ('BACKGROUND',    (0, 0), (-1, 0), _PDF_NAVY),
+        ('TEXTCOLOR',     (0, 0), (-1, 0), colors.white),
+        ('BACKGROUND',    (0, 1), (-1, 1), colors.HexColor('#f0f0f0')),
+        ('TEXTCOLOR',     (0, 1), (-1, 1), _PDF_NAVY),
+        ('FONTNAME',      (0, 0), (-1, 1), 'Helvetica-Bold'),
+        ('FONTNAME',      (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('FONTSIZE',      (0, 0), (-1, -1), 8),
+        ('ALIGN',         (-2, 2), (-1, -1), 'RIGHT'),
+        ('ROWBACKGROUNDS', (0, 2), (-1, -2), [colors.white, _PDF_LGRAY]),
+        ('GRID',          (0, 1), (-1, -2), 0.25, colors.HexColor('#e0e0e0')),
+        ('LINEABOVE',     (0, -1), (-1, -1), 0.5, _PDF_NAVY),
+        ('TOPPADDING',    (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 4),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
+    ]))
+    left_tbl  = _RoundedTable(_pdf_left_tbl(left_data, L_W))
+    right_tbl = _RoundedTable(right_inner)
 
     def on_page(c, doc):
-        _pdf_page(c, doc, 'DE VENTA', cod_str, fec_str, '', 'Completado')
+        _pdf_page_reparacion(c, doc, 'DE VENTA', cod_str, fec_str, '', 'Completado')
 
     doc = SimpleDocTemplate(response, pagesize=A4,
-                            topMargin=5.2*cm, bottomMargin=2.0*cm,
+                            topMargin=4.4*cm, bottomMargin=2.4*cm,
                             leftMargin=1.5*cm, rightMargin=1.5*cm)
     doc.build(
         [
@@ -1598,7 +1821,7 @@ def lista_confecciones(request):
         periodo = periodo or '3meses'
         desde = (hoy - timedelta(days=90)).isoformat()
 
-    sort = '-creado' if orden == 'desc' else 'creado'
+    sort = '-codigo' if orden == 'desc' else 'codigo'
     _dcf = DecimalField(max_digits=10, decimal_places=2)
     _ingresos_q = (
         CajaMovimiento.objects
@@ -1647,9 +1870,17 @@ def lista_confecciones(request):
     if estado:
         confecciones = confecciones.filter(estado=estado)
     if desde:
-        confecciones = confecciones.filter(fecha_inicio__gte=desde)
+        try:
+            date.fromisoformat(desde)
+            confecciones = confecciones.filter(fecha_inicio__gte=desde)
+        except (ValueError, TypeError):
+            desde = ''
     if hasta:
-        confecciones = confecciones.filter(fecha_inicio__lte=hasta)
+        try:
+            date.fromisoformat(hasta)
+            confecciones = confecciones.filter(fecha_inicio__lte=hasta)
+        except (ValueError, TypeError):
+            hasta = ''
 
     total = confecciones.count()
     paginator = Paginator(confecciones, 15)
@@ -1889,8 +2120,6 @@ def exportar_recibo_confeccion_pdf(request, id):
             [Paragraph('<b>Observaciones:</b>', st['kl']),
              Paragraph(confeccion.observaciones[:80], st['kv'])]
         )
-    left_tbl = _pdf_left_tbl(left_data, L_W)
-
     conf_items = list(confeccion.items.select_related('tipo_prenda').all())
     items_rows = [
         [Paragraph('PRENDAS A CONFECCIONAR', st['sec']), '', ''],
@@ -1904,7 +2133,27 @@ def exportar_recibo_confeccion_pdf(request, id):
         ])
     if not conf_items:
         items_rows.append(['—', '—', '—'])
-    right_tbl = _pdf_items_tbl(items_rows, [0.7*cm, 7.8*cm, 3.0*cm], 1)
+
+    _ccw = [0.7*cm, 7.8*cm, 3.0*cm]
+    right_inner = Table(items_rows, colWidths=_ccw)
+    right_inner.setStyle(TableStyle([
+        ('SPAN',          (0, 0), (-1, 0)),
+        ('BACKGROUND',    (0, 0), (-1, 0), _PDF_NAVY),
+        ('TEXTCOLOR',     (0, 0), (-1, 0), colors.white),
+        ('BACKGROUND',    (0, 1), (-1, 1), colors.HexColor('#f0f0f0')),
+        ('TEXTCOLOR',     (0, 1), (-1, 1), _PDF_NAVY),
+        ('FONTNAME',      (0, 0), (-1, 1), 'Helvetica-Bold'),
+        ('FONTSIZE',      (0, 0), (-1, -1), 8),
+        ('ALIGN',         (-1, 2), (-1, -1), 'RIGHT'),
+        ('ROWBACKGROUNDS', (0, 2), (-1, -1), [colors.white, _PDF_LGRAY]),
+        ('GRID',          (0, 1), (-1, -1), 0.25, colors.HexColor('#e0e0e0')),
+        ('TOPPADDING',    (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 4),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
+    ]))
+    left_tbl  = _RoundedTable(_pdf_left_tbl(left_data, L_W))
+    right_tbl = _RoundedTable(right_inner)
 
     # Financial summary table (replaces single total)
     fin_data = [
@@ -1933,10 +2182,10 @@ def exportar_recibo_confeccion_pdf(request, id):
     ]))
 
     def on_page(c, doc):
-        _pdf_page(c, doc, 'DE CONFECCIÓN', cod_str, fec_str, '', est_str)
+        _pdf_page_reparacion(c, doc, 'DE CONFECCIÓN', cod_str, fec_str, '', est_str)
 
     doc = SimpleDocTemplate(response, pagesize=A4,
-                            topMargin=5.2*cm, bottomMargin=2.0*cm,
+                            topMargin=4.4*cm, bottomMargin=2.4*cm,
                             leftMargin=1.5*cm, rightMargin=1.5*cm)
     doc.build(
         [
@@ -1970,7 +2219,7 @@ def lista_alquileres(request):
         periodo = periodo or '3meses'
         desde = (hoy - timedelta(days=90)).isoformat()
 
-    sort = '-fecha_alquiler' if orden == 'desc' else 'fecha_alquiler'
+    sort = '-codigo' if orden == 'desc' else 'codigo'
     alquileres = Alquiler.objects.all().order_by(sort)
     _p = request.GET.copy(); _p['orden'] = 'asc' if orden == 'desc' else 'desc'; _p.pop('page', None)
     orden_toggle_url = '?' + _p.urlencode()
@@ -2131,7 +2380,7 @@ def crear_alquiler(request):
     item_id = request.GET.get('item')
     if item_id:
         try:
-            pi = PrendaItem.objects.select_related('prenda').get(id=item_id, tipo='alquiler', estado='disponible')
+            pi = PrendaItem.objects.select_related('prenda').get(id=item_id, tipo='alquiler', estado='disponible', conjunto_slots__isnull=True)
             items_preload = [{'prenda_item_id': pi.id, 'precio_unitario': float(pi.prenda.precio), 'grupo_conjunto': None}]
         except PrendaItem.DoesNotExist:
             pass
@@ -2153,14 +2402,16 @@ def editar_alquiler(request, id):
         estado_anterior = alquiler.estado
         form = AlquilerForm(request.POST, instance=alquiler)
         if form.is_valid():
+            old_total = alquiler.total
             alquiler = form.save()
             errores = _guardar_items_alquiler(alquiler, request.POST, estado_anterior=estado_anterior)
             from .caja_signals import _ajustar_total_en_caja, _ajustar_garantia_alquiler_en_caja
             _ajustar_total_en_caja(
                 referencia_field='referencia_alquiler',
                 instance=alquiler,
-                concepto_cobro='alquiler_cobro',
+                concepto_cobro='alquiler_ajuste',
                 nuevo_total=alquiler.total,
+                old_total=old_total,
                 forma_pago=getattr(alquiler, 'forma_pago', 'efectivo') or 'efectivo',
                 cliente=getattr(alquiler, 'cliente', None),
             )
@@ -2236,6 +2487,7 @@ def _build_prenda_item_opts(tipo=None):
     qs = (
         PrendaItem.objects
         .filter(estado='disponible', prenda__estado='ACT')
+        .exclude(conjunto_slots__isnull=False)
         .select_related('prenda')
         .order_by('codigo_item')
     )
@@ -2281,6 +2533,9 @@ def _conjuntos_json(tipo=None):
                 requeridos_total += 1
                 if disponible:
                     requeridos_disponible += 1
+            precio_sug = None
+            if pi and pi.precio_alquiler_sugerido is not None:
+                precio_sug = float(pi.precio_alquiler_sugerido)
             slots_out.append({
                 'id': s.id,
                 'prenda_item_id': s.prenda_item_id,
@@ -2289,6 +2544,7 @@ def _conjuntos_json(tipo=None):
                 'disponible': disponible,
                 'opcional': s.opcional,
                 'orden': s.orden,
+                'precio_alquiler_sugerido': precio_sug,
             })
 
         if requeridos_total == 0:
@@ -2320,6 +2576,7 @@ def _prenda_items_json(tipo):
             prenda__estado='ACT',
             estado='disponible',
         )
+        .exclude(conjunto_slots__isnull=False)
         .order_by('prenda__codigo', 'codigo_item')
     )
     data = []
@@ -2343,6 +2600,7 @@ def _prenda_items_json(tipo):
             'condicion_label': pi.get_condicion_display(),
             'ubicacion':      str(pi.ubicacion) if pi.ubicacion else '',
             'precio':         float(p.precio),
+            'precio_alquiler_sugerido': float(pi.precio_alquiler_sugerido) if pi.precio_alquiler_sugerido is not None else None,
             'label':          label,
             'tipo_prenda_id': p.tipo_prenda_id,
             'prenda_inventario_id': pi.prenda_id,
@@ -2470,8 +2728,6 @@ def exportar_comprobante_alquiler_pdf(request, id):
          Paragraph('En caso de no devolver en la fecha acordada, se aplicará un recargo por día de retraso.',
                    st['kv'])],
     ]
-    left_tbl = _pdf_left_tbl(left_data, L_W)
-
     alq_items = list(alquiler.items.select_related('prenda_item__prenda'))
     items_rows = [
         [Paragraph('DETALLE DE PRENDAS', st['sec']), '', '', '', '', '', ''],
@@ -2493,11 +2749,29 @@ def exportar_comprobante_alquiler_pdf(request, id):
         items_rows.append(['', '', '', '', '', f'Desc. {alquiler.descuento}%:',
                            f"-Bs {(alquiler.subtotal - alquiler.total):.2f}"])
     items_rows.append(['', '', '', '', '', 'TOTAL:', f"Bs {alquiler.total:.2f}"])
-    right_tbl = _pdf_items_tbl(
-        items_rows,
-        [0.5*cm, 3.0*cm, 1.5*cm, 1.2*cm, 0.8*cm, 2.0*cm, 2.5*cm],
-        2,
-    )
+
+    _acw = [0.5*cm, 3.0*cm, 1.5*cm, 1.2*cm, 0.8*cm, 2.0*cm, 2.5*cm]
+    right_inner = Table(items_rows, colWidths=_acw)
+    right_inner.setStyle(TableStyle([
+        ('SPAN',          (0, 0), (-1, 0)),
+        ('BACKGROUND',    (0, 0), (-1, 0), _PDF_NAVY),
+        ('TEXTCOLOR',     (0, 0), (-1, 0), colors.white),
+        ('BACKGROUND',    (0, 1), (-1, 1), colors.HexColor('#f0f0f0')),
+        ('TEXTCOLOR',     (0, 1), (-1, 1), _PDF_NAVY),
+        ('FONTNAME',      (0, 0), (-1, 1), 'Helvetica-Bold'),
+        ('FONTNAME',      (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('FONTSIZE',      (0, 0), (-1, -1), 8),
+        ('ALIGN',         (-2, 2), (-1, -1), 'RIGHT'),
+        ('ROWBACKGROUNDS', (0, 2), (-1, -2), [colors.white, _PDF_LGRAY]),
+        ('GRID',          (0, 1), (-1, -2), 0.25, colors.HexColor('#e0e0e0')),
+        ('LINEABOVE',     (0, -1), (-1, -1), 0.5, _PDF_NAVY),
+        ('TOPPADDING',    (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 4),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
+    ]))
+    left_tbl  = _RoundedTable(_pdf_left_tbl(left_data, L_W))
+    right_tbl = _RoundedTable(right_inner)
 
     # Condiciones
     cond_rows = [
@@ -2517,10 +2791,10 @@ def exportar_comprobante_alquiler_pdf(request, id):
     ]))
 
     def on_page(c, doc):
-        _pdf_page(c, doc, 'DE ALQUILER DE PRENDAS', cod_str, fec_str, hora_hdr, est_str)
+        _pdf_page_reparacion(c, doc, 'DE ALQUILER DE PRENDAS', cod_str, fec_str, hora_hdr, est_str)
 
     doc = SimpleDocTemplate(response, pagesize=A4,
-                            topMargin=5.2*cm, bottomMargin=2.0*cm,
+                            topMargin=4.4*cm, bottomMargin=2.4*cm,
                             leftMargin=1.5*cm, rightMargin=1.5*cm)
     doc.build(
         [
@@ -2622,7 +2896,7 @@ def lista_transacciones(request):
         periodo = periodo or '3meses'
         desde = (hoy - timedelta(days=90)).isoformat()
 
-    sort = '-creado' if orden == 'desc' else 'creado'
+    sort = '-codigo' if orden == 'desc' else 'codigo'
     transacciones = Transaccion.objects.all().order_by(sort)
     _p = request.GET.copy(); _p['orden'] = 'asc' if orden == 'desc' else 'desc'; _p.pop('page', None)
     orden_toggle_url = '?' + _p.urlencode()
@@ -5810,14 +6084,17 @@ def _dashboard_donut_chart(hoy):
 
 def _kpis_ventas(qs):
     """Compute KPI summary for a filtered Venta queryset."""
+    # NOTE: Do NOT use 'total' as an aggregate alias — Venta has a field also
+    # named 'total', causing FieldError("Cannot compute Sum('total'): 'total'
+    # is an aggregate"). Use 'count_ventas' instead.
     agg = qs.aggregate(
-        total=Count('id'),
+        count_ventas=Count('id'),
         ingreso_total=Sum('total'),
         ticket_promedio=Avg('total'),
     )
-    items_vendidos = VentaItem.objects.filter(venta__in=qs).aggregate(total=Count('id'))['total'] or 0
+    items_vendidos = VentaItem.objects.filter(venta__in=qs).aggregate(n=Count('id'))['n'] or 0
     return {
-        'total': agg['total'] or 0,
+        'total': agg['count_ventas'] or 0,
         'ingreso_total': agg['ingreso_total'] or 0,
         'ticket_promedio': agg['ticket_promedio'] or 0,
         'items_vendidos': items_vendidos,
@@ -5826,17 +6103,22 @@ def _kpis_ventas(qs):
 
 def _kpis_alquileres(qs):
     """Compute KPI summary for a filtered Alquiler queryset."""
+    # NOTE: Do NOT use 'total' as an aggregate alias — Alquiler has a field also
+    # named 'total', causing FieldError("Cannot compute Sum('total'): 'total'
+    # is an aggregate"). Use 'count_alquileres' instead.
+    # NOTE: fecha_devolucion is a required field (never null), so we use estado
+    # to distinguish devueltos from pendientes/activos.
     agg = qs.aggregate(
-        total=Count('id'),
+        count_alquileres=Count('id'),
         ingreso_total=Sum('total'),
         ticket_promedio=Avg('total'),
     )
     return {
-        'total': agg['total'] or 0,
+        'total': agg['count_alquileres'] or 0,
         'ingreso_total': agg['ingreso_total'] or 0,
         'ticket_promedio': agg['ticket_promedio'] or 0,
-        'devueltos': qs.filter(fecha_devolucion__isnull=False).count(),
-        'pendientes': qs.filter(fecha_devolucion__isnull=True).count(),
+        'devueltos': qs.filter(estado='devuelto').count(),
+        'pendientes': qs.exclude(estado='devuelto').count(),
     }
 
 
@@ -5857,17 +6139,20 @@ def _kpis_confecciones(qs):
 
 
 def _kpis_reparaciones(qs):
+    # NOTE: Do NOT use 'total' as an aggregate alias here — Reparacion has a
+    # field also named 'total', causing FieldError("Cannot compute Sum('total'):
+    # 'total' is an aggregate"). Use 'count_reparaciones' instead.
     agg = qs.aggregate(
-        total=Count('id'),
+        count_reparaciones=Count('id'),
         ingreso_total=Sum('total'),
         ticket_promedio=Avg('total'),
     )
     return {
-        'total': agg['total'] or 0,
+        'total': agg['count_reparaciones'] or 0,
         'ingreso_total': agg['ingreso_total'] or 0,
         'ticket_promedio': agg['ticket_promedio'] or 0,
-        'entregadas': qs.filter(fecha_entrega__isnull=False).count(),
-        'pendientes': qs.filter(fecha_entrega__isnull=True).count(),
+        'entregadas': qs.filter(estado='entregado').count(),
+        'pendientes': qs.filter(estado='pendiente').count(),
     }
 
 
@@ -6095,11 +6380,12 @@ def _kpis_operativas(fecha_inicio, fecha_fin):
     Computes operational KPIs at Python level (no DurationField per D1).
     Returns scalar dict with avg/min/max durations (days) and inventory occupation.
     """
-    # Alquiler durations
+    # Alquiler durations — only devueltos (fecha_devolucion is required/always set,
+    # so isnull=False was always True and selected everything; use estado instead)
     pares = list(Alquiler.objects.filter(
         fecha_alquiler__gte=fecha_inicio,
         fecha_alquiler__lte=fecha_fin,
-        fecha_devolucion__isnull=False,
+        estado='devuelto',
     ).values_list('fecha_alquiler', 'fecha_devolucion'))
     dur_alq = [(b - a).days for a, b in pares if b is not None]
 
@@ -6112,17 +6398,18 @@ def _kpis_operativas(fecha_inicio, fecha_fin):
     dur_conf = [(b - a).days for a, b in pares_conf if a and b]
 
     # Reparacion turnaround (creado is DateTimeField, fecha_entrega is DateField)
+    # fecha_entrega is required/never null — filter by estado='entregado' for actual turnarounds
     pares_rep = list(Reparacion.objects.filter(
         creado__date__gte=fecha_inicio,
         creado__date__lte=fecha_fin,
-        fecha_entrega__isnull=False,
+        estado='entregado',
     ).values_list('creado', 'fecha_entrega'))
     dur_rep = [(b - a.date()).days for a, b in pares_rep if a and b]
 
-    # Inventario occupation
+    # Inventario occupation — fecha_devolucion is required (never null), use estado instead
     total_items = PrendaItem.objects.count()
     ocupados = PrendaItem.objects.filter(
-        alquiler_items__alquiler__fecha_devolucion__isnull=True
+        alquiler_items__alquiler__estado='alquilado'
     ).distinct().count()
     tasa = (ocupados / total_items) if total_items else 0
 
@@ -7488,6 +7775,354 @@ def detalle_sesion_caja(request, pk):
 
 
 @login_required
+def export_detalle_sesion_excel(request, pk):
+    from decimal import Decimal
+    sesion = get_object_or_404(CajaSesion.objects.select_related('usuario_apertura', 'usuario_cierre'), pk=pk)
+    movimientos = CajaMovimiento.objects.filter(sesion=sesion).select_related(
+        'cliente', 'tipo_gasto', 'usuario',
+        'referencia_alquiler', 'referencia_venta',
+        'referencia_reparacion', 'referencia_confeccion',
+    ).order_by('fecha', 'id')
+    arqueo = _calcular_arqueo(sesion)
+
+    # ── Paleta ──────────────────────────────────────────────────────────────
+    C_BLUE       = '2563EB'   # encabezados principales
+    C_BLUE_MID   = '3B82F6'   # encabezados secundarios / arqueo
+    C_BLUE_LIGHT = 'DBEAFE'   # fila alterna clara
+    C_GREEN      = '10B981'   # ingreso
+    C_RED        = 'EF4444'   # egreso / negativo
+    C_GOLD       = 'F59E0B'   # totales
+    C_DARK       = '1E293B'   # texto oscuro
+    C_MUTED      = '64748B'   # texto secundario
+    C_WHITE      = 'FFFFFF'
+
+    # ── Estilos reutilizables ────────────────────────────────────────────────
+    def _fill(hex_color):
+        return PatternFill(start_color=hex_color, end_color=hex_color, fill_type='solid')
+
+    def _border(style='thin'):
+        s = Side(style=style, color='D1D5DB')
+        return Border(left=s, right=s, top=s, bottom=s)
+
+    def _border_medium():
+        sm = Side(style='medium', color='9CA3AF')
+        st = Side(style='thin', color='D1D5DB')
+        return Border(left=sm, right=sm, top=st, bottom=st)
+
+    FONT_TITLE   = Font(name='Calibri', bold=True, size=14, color=C_DARK)
+    FONT_SUBTITLE= Font(name='Calibri', size=10, color=C_MUTED)
+    FONT_HEADER  = Font(name='Calibri', bold=True, size=10, color=C_WHITE)
+    FONT_HEADER2 = Font(name='Calibri', bold=True, size=10, color=C_WHITE)
+    FONT_BODY    = Font(name='Calibri', size=10, color=C_DARK)
+    FONT_BODY_M  = Font(name='Calibri', size=10, color=C_MUTED)
+    FONT_TOTAL   = Font(name='Calibri', bold=True, size=10, color=C_DARK)
+    FONT_LABEL   = Font(name='Calibri', bold=True, size=10, color=C_DARK)
+
+    ALIGN_LEFT   = Alignment(horizontal='left',   vertical='center', wrap_text=False)
+    ALIGN_RIGHT  = Alignment(horizontal='right',  vertical='center')
+    ALIGN_CENTER = Alignment(horizontal='center', vertical='center')
+    ALIGN_WRAP   = Alignment(horizontal='left',   vertical='center', wrap_text=True)
+
+    NUM_BS   = '#,##0.00'
+    NUM_DATE = '@'
+
+    def _style_header_cells(cells):
+        for cell in cells:
+            cell.font  = FONT_HEADER
+            cell.fill  = _fill(C_BLUE)
+            cell.border = _border()
+            cell.alignment = ALIGN_CENTER
+
+    def _style_header2_cells(cells):
+        for cell in cells:
+            cell.font  = FONT_HEADER2
+            cell.fill  = _fill(C_BLUE_MID)
+            cell.border = _border()
+            cell.alignment = ALIGN_CENTER
+
+    def _apply_body_row(ws, row_num, alt=False):
+        fill = _fill(C_BLUE_LIGHT) if alt else _fill(C_WHITE)
+        for cell in ws[row_num]:
+            if cell.fill.fgColor.rgb in (C_BLUE, C_BLUE_MID, C_GOLD, '00000000', '000000'):
+                continue
+            cell.fill   = fill
+            cell.border = _border()
+            cell.alignment = ALIGN_LEFT
+            if cell.font.bold:
+                continue
+            cell.font = FONT_BODY
+
+    def _set_col_width(ws, col_letter, width):
+        ws.column_dimensions[col_letter].width = width
+
+    # ════════════════════════════════════════════════════════════════════════
+    # Hoja 1 — Resumen
+    # ════════════════════════════════════════════════════════════════════════
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Resumen'
+    ws.sheet_view.showGridLines = False
+
+    # Fila 1: título grande (merge A1:D1)
+    ws.append(['Fortium Tailor  —  Detalle de Sesión de Caja', '', '', ''])
+    ws.merge_cells('A1:D1')
+    c = ws['A1']
+    c.font      = FONT_TITLE
+    c.fill      = _fill(C_BLUE)
+    c.alignment = Alignment(horizontal='left', vertical='center')
+    c.font      = Font(name='Calibri', bold=True, size=14, color=C_WHITE)
+    ws.row_dimensions[1].height = 28
+
+    # Fila 2: subtítulo
+    ws.append([f'Sesión #{sesion.pk}  ·  generado {date.today().strftime("%d/%m/%Y")}', '', '', ''])
+    ws.merge_cells('A2:D2')
+    c = ws['A2']
+    c.font      = FONT_SUBTITLE
+    c.fill      = _fill('EFF6FF')
+    c.alignment = Alignment(horizontal='left', vertical='center')
+    ws.row_dimensions[2].height = 18
+
+    ws.append([])  # fila 3 vacía
+
+    # Encabezado sección info
+    ws.append(['Campo', 'Valor', '', ''])
+    _style_header_cells([ws['A4'], ws['B4']])
+    ws.row_dimensions[4].height = 20
+
+    info_rows = [
+        ('Estado',              sesion.get_estado_display()),
+        ('Fecha apertura',      sesion.fecha_apertura.strftime('%d/%m/%Y %H:%M') if sesion.fecha_apertura else ''),
+        ('Fecha cierre',        sesion.fecha_cierre.strftime('%d/%m/%Y %H:%M') if sesion.fecha_cierre else '—'),
+        ('Monto apertura (Bs)', float(sesion.monto_apertura or 0)),
+        ('Total ingresos (Bs)', float(sesion.total_ingresos or 0)),
+        ('Total egresos (Bs)',  float(sesion.total_egresos or 0)),
+        ('Saldo sistema (Bs)',  float(sesion.saldo_sistema or 0)),
+    ]
+    if sesion.diferencia is not None:
+        info_rows.append(('Diferencia (Bs)', float(sesion.diferencia)))
+    if sesion.saldo_garantias:
+        info_rows.append(('Garantías (Bs)', float(sesion.saldo_garantias)))
+    info_rows.append(('Abrió', str(sesion.usuario_apertura)))
+    if sesion.usuario_cierre:
+        info_rows.append(('Cerró', str(sesion.usuario_cierre)))
+    if sesion.observaciones:
+        info_rows.append(('Observaciones', sesion.observaciones))
+
+    for i, (label, val) in enumerate(info_rows):
+        ws.append([label, val, '', ''])
+        rn = ws.max_row
+        alt = (i % 2 == 0)
+        row_fill = _fill(C_BLUE_LIGHT if alt else C_WHITE)
+        la = ws.cell(rn, 1); lb = ws.cell(rn, 2)
+        la.font = FONT_LABEL; la.fill = row_fill; la.border = _border(); la.alignment = ALIGN_LEFT
+        lb.font = FONT_BODY;  lb.fill = row_fill; lb.border = _border(); lb.alignment = ALIGN_LEFT
+        if isinstance(val, float):
+            lb.number_format = NUM_BS
+            lb.alignment = ALIGN_RIGHT
+        ws.row_dimensions[rn].height = 18
+
+    ws.append([])  # separador
+
+    # Sección arqueo
+    ws.append(['Arqueo por forma de pago', '', '', ''])
+    rn = ws.max_row
+    ws.merge_cells(f'A{rn}:D{rn}')
+    c = ws.cell(rn, 1)
+    c.font      = Font(name='Calibri', bold=True, size=11, color=C_WHITE)
+    c.fill      = _fill(C_BLUE_MID)
+    c.alignment = ALIGN_LEFT
+    ws.row_dimensions[rn].height = 22
+
+    ws.append(['Forma de pago', 'Ingresos (Bs)', 'Egresos (Bs)', 'Neto (Bs)'])
+    _style_header2_cells(list(ws[ws.max_row]))
+    ws.row_dimensions[ws.max_row].height = 20
+
+    for i, (fp, vals) in enumerate(arqueo.items()):
+        ingresos = float(vals['ingresos']); egresos = float(vals['egresos']); neto = float(vals['neto'])
+        ws.append([fp, ingresos, egresos, neto])
+        rn = ws.max_row
+        alt = (i % 2 == 0)
+        row_fill = _fill(C_BLUE_LIGHT if alt else C_WHITE)
+        neto_color = C_GREEN if neto >= 0 else C_RED
+        for col in range(1, 5):
+            c = ws.cell(rn, col)
+            c.fill   = row_fill
+            c.border = _border()
+            c.font   = Font(name='Calibri', size=10, color=C_DARK if col == 1 else (C_GREEN if col == 2 else (C_RED if col == 3 else neto_color)), bold=(col == 4))
+            c.alignment = ALIGN_RIGHT if col > 1 else ALIGN_LEFT
+            if col > 1:
+                c.number_format = NUM_BS
+        ws.row_dimensions[rn].height = 18
+
+    # Anchos columna A=30, B=20, C=20, D=20
+    for ltr, w in [('A', 32), ('B', 20), ('C', 20), ('D', 20)]:
+        _set_col_width(ws, ltr, w)
+
+    ws.freeze_panes = 'A4'
+
+    # ════════════════════════════════════════════════════════════════════════
+    # Hoja 2 — Movimientos
+    # ════════════════════════════════════════════════════════════════════════
+    ws2 = wb.create_sheet('Movimientos')
+    ws2.sheet_view.showGridLines = False
+
+    # Título
+    COLS_MOV = 12
+    ws2.append(['Movimientos de caja'] + [''] * (COLS_MOV - 1))
+    ws2.merge_cells(f'A1:{get_column_letter(COLS_MOV)}1')
+    c = ws2['A1']
+    c.font      = Font(name='Calibri', bold=True, size=13, color=C_WHITE)
+    c.fill      = _fill(C_BLUE)
+    c.alignment = Alignment(horizontal='left', vertical='center')
+    ws2.row_dimensions[1].height = 26
+
+    HDR = ['Código', 'Fecha', 'Tipo', 'Concepto', 'Monto (Bs)', 'Forma Pago',
+           'Cliente', 'Tipo Gasto', 'Referencia', 'Origen', 'Usuario', 'Descripción']
+    ws2.append(HDR)
+    _style_header_cells(list(ws2[2]))
+    ws2.row_dimensions[2].height = 22
+
+    mov_list = list(movimientos.exclude(concepto__in=('garantia_alquiler', 'garantia_devolucion')))
+    total_ingresos_mov = Decimal(0)
+    total_egresos_mov  = Decimal(0)
+
+    for i, m in enumerate(mov_list):
+        ref = (
+            (m.referencia_alquiler.codigo if m.referencia_alquiler_id else None) or
+            (m.referencia_venta.codigo if m.referencia_venta_id else None) or
+            (m.referencia_reparacion.codigo if m.referencia_reparacion_id else None) or
+            (m.referencia_confeccion.codigo if m.referencia_confeccion_id else None) or ''
+        )
+        monto = float(m.monto)
+        ws2.append([
+            m.codigo,
+            m.fecha.strftime('%d/%m/%Y %H:%M') if m.fecha else '',
+            m.get_tipo_display(),
+            m.get_concepto_display(),
+            monto,
+            m.get_forma_pago_display(),
+            str(m.cliente) if m.cliente_id else '',
+            str(m.tipo_gasto) if m.tipo_gasto_id else '',
+            ref,
+            m.get_origen_display(),
+            str(m.usuario) if m.usuario_id else '',
+            m.descripcion or '',
+        ])
+        rn = ws2.max_row
+        alt = (i % 2 == 0)
+        row_fill = _fill(C_BLUE_LIGHT if alt else C_WHITE)
+        is_ing = (m.tipo == 'ingreso')
+        if is_ing:
+            total_ingresos_mov += m.monto
+        else:
+            total_egresos_mov += m.monto
+
+        for col in range(1, COLS_MOV + 1):
+            c = ws2.cell(rn, col)
+            c.fill   = row_fill
+            c.border = _border()
+            if col == 5:  # monto
+                c.font          = Font(name='Calibri', bold=True, size=10,
+                                       color=C_GREEN if is_ing else C_RED)
+                c.number_format = NUM_BS
+                c.alignment     = ALIGN_RIGHT
+            elif col == 12:  # descripción
+                c.font      = FONT_BODY_M
+                c.alignment = ALIGN_WRAP
+            else:
+                c.font      = FONT_BODY
+                c.alignment = ALIGN_LEFT
+        ws2.row_dimensions[rn].height = 18
+
+    # Fila de totales
+    ws2.append(['TOTALES', '', '', '',
+                float(total_ingresos_mov), '',
+                '', '', '', '', '', ''])
+    rn_total = ws2.max_row
+    ws2.merge_cells(f'A{rn_total}:D{rn_total}')
+    for col in range(1, COLS_MOV + 1):
+        c = ws2.cell(rn_total, col)
+        c.fill      = _fill('FEF3C7')  # amarillo suave
+        c.border    = _border_medium()
+        c.font      = FONT_TOTAL
+        c.alignment = ALIGN_RIGHT if col >= 4 else ALIGN_LEFT
+    ws2.cell(rn_total, 1).alignment = ALIGN_CENTER
+    ws2.cell(rn_total, 5).number_format = NUM_BS
+    ws2.cell(rn_total, 5).font = Font(name='Calibri', bold=True, size=10, color=C_GREEN)
+    ws2.row_dimensions[rn_total].height = 22
+
+    # Anchos movimientos
+    MOV_WIDTHS = [14, 17, 11, 22, 14, 16, 24, 18, 14, 12, 16, 32]
+    for idx, w in enumerate(MOV_WIDTHS, 1):
+        _set_col_width(ws2, get_column_letter(idx), w)
+
+    ws2.freeze_panes = 'A3'
+
+    # ════════════════════════════════════════════════════════════════════════
+    # Hoja 3 — Garantías (si hay)
+    # ════════════════════════════════════════════════════════════════════════
+    garantias = movimientos.filter(concepto__in=('garantia_alquiler', 'garantia_devolucion'))
+    if garantias.exists():
+        ws3 = wb.create_sheet('Garantías')
+        ws3.sheet_view.showGridLines = False
+
+        COLS_GAR = 5
+        ws3.append(['Garantías'] + [''] * (COLS_GAR - 1))
+        ws3.merge_cells(f'A1:{get_column_letter(COLS_GAR)}1')
+        c = ws3['A1']
+        c.font      = Font(name='Calibri', bold=True, size=13, color=C_WHITE)
+        c.fill      = _fill(C_BLUE)
+        c.alignment = Alignment(horizontal='left', vertical='center')
+        ws3.row_dimensions[1].height = 26
+
+        ws3.append(['Código', 'Fecha', 'Concepto', 'Monto (Bs)', 'Forma Pago'])
+        _style_header_cells(list(ws3[2]))
+        ws3.row_dimensions[2].height = 22
+
+        for i, m in enumerate(garantias):
+            monto = float(m.monto)
+            is_ing = (m.tipo == 'ingreso')
+            ws3.append([
+                m.codigo,
+                m.fecha.strftime('%d/%m/%Y %H:%M') if m.fecha else '',
+                m.get_concepto_display(),
+                monto,
+                m.get_forma_pago_display(),
+            ])
+            rn = ws3.max_row
+            alt = (i % 2 == 0)
+            row_fill = _fill(C_BLUE_LIGHT if alt else C_WHITE)
+            for col in range(1, COLS_GAR + 1):
+                c = ws3.cell(rn, col)
+                c.fill   = row_fill
+                c.border = _border()
+                if col == 4:
+                    c.font          = Font(name='Calibri', bold=True, size=10,
+                                           color=C_GREEN if is_ing else C_RED)
+                    c.number_format = NUM_BS
+                    c.alignment     = ALIGN_RIGHT
+                else:
+                    c.font      = FONT_BODY
+                    c.alignment = ALIGN_LEFT
+            ws3.row_dimensions[rn].height = 18
+
+        for ltr, w in [('A', 14), ('B', 17), ('C', 24), ('D', 14), ('E', 16)]:
+            _set_col_width(ws3, ltr, w)
+        ws3.freeze_panes = 'A3'
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    filename = f"sesion_caja_{sesion.pk}_{sesion.fecha_apertura.strftime('%Y%m%d') if sesion.fecha_apertura else 'sin_fecha'}.xlsx"
+    response = HttpResponse(
+        output.read(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+@login_required
 def cerrar_sesion_caja(request, pk):
     sesion = get_object_or_404(CajaSesion, pk=pk, estado='abierta')
 
@@ -7496,7 +8131,7 @@ def cerrar_sesion_caja(request, pk):
         if form.is_valid():
             monto_declarado = form.cleaned_data['monto_cierre_declarado']
             observaciones = form.cleaned_data.get('observaciones', '')
-            saldo_sistema = sesion.saldo_sistema
+            saldo_sistema = sesion.saldo_efectivo_sistema
             diferencia = monto_declarado - saldo_sistema
 
             # Require observaciones when there is a difference
@@ -7543,7 +8178,7 @@ def cerrar_sesion_caja(request, pk):
     else:
         form = CajaSesionCierreForm()
 
-    saldo_sistema = sesion.saldo_sistema
+    saldo_sistema = sesion.saldo_efectivo_sistema
     arqueo = _calcular_arqueo(sesion)
 
     return render(request, 'misastreria/caja/cerrar_caja.html', {

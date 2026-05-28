@@ -106,7 +106,7 @@
               </a>
             {% endif %}
           </td>
-          <td class="text-end">{{ prenda.precio }}</td>
+          <td class="text-end">{{ prenda.precio|floatformat:2 }}</td>
           <td><span class="badge-estado {% if prenda.estado == 'ACT' %}badge-entregado{% else %}badge-inactivo{% endif %}">{{ prenda.get_estado_display }}</span></td>
           <td style="white-space:nowrap">
             <div class="btn-actions">

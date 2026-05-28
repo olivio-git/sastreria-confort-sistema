@@ -1,20 +1,11 @@
 {% extends 'misastreria/base.html' %}
 {% block titulo %}Eliminar Artículo de Inventario{% endblock %}
 {% block contenido %}
-<div class="container py-4">
-    <h2 class="mb-4">Eliminar Artículo de Inventario</h2>
-    {% if messages %}
-        <div class="alert alert-info">
-            {% for message in messages %}
-                {{ message }}
-            {% endfor %}
-        </div>
-    {% endif %}
-    <p>¿Estás seguro de que deseas eliminar el artículo <strong>{{ inventario.articulo }}</strong> (Código: <strong>{{ inventario.codigo }}</strong>)?</p>
-    <form method="post">
-        {% csrf_token %}
-        <button type="submit" class="btn btn-danger">Eliminar</button>
-        <a href="{% url 'lista_inventario' %}" class="btn btn-secondary">Cancelar</a>
-    </form>
-</div>
+<h2 class="mb-4">Eliminar Artículo de Inventario</h2>
+<p>¿Estás seguro de que deseas eliminar el artículo <strong>{{ inventario.articulo }}</strong> (Código: <strong>{{ inventario.codigo }}</strong>)?</p>
+<form method="post">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-danger">Eliminar</button>
+    <a href="{% url 'lista_inventario' %}" class="btn btn-secondary">Cancelar</a>
+</form>
 {% endblock %}

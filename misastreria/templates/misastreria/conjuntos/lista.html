@@ -5,11 +5,11 @@
 <div class="container-xl">
   <div class="row g-2 align-items-center">
     <div class="col">
-      <h2 class="page-title"><i class="bi bi-layers me-2"></i>Conjuntos</h2>
+      <h2 class="page-title"><i data-lucide="layers" class="me-2 text-muted"></i>Conjuntos</h2>
     </div>
     <div class="col-auto ms-auto">
       <a href="{% url 'crear_conjunto' %}" class="btn btn-success">
-        <i class="bi bi-plus-lg me-1"></i>Nuevo Conjunto
+        <i data-lucide="plus"></i>Nuevo Conjunto
       </a>
     </div>
   </div>
@@ -71,12 +71,12 @@
         </td>
         <td>
           <div class="btn-actions">
-            <a href="{% url 'editar_conjunto' conjunto.pk %}" class="btn btn-sm btn-outline-primary" title="Editar">
-              <i class="bi bi-pencil"></i>
+            <a href="{% url 'editar_conjunto' conjunto.pk %}" class="btn btn-sm btn-icon btn-ghost-primary" title="Editar">
+              <i data-lucide="pencil"></i>
             </a>
             {% if conjunto.activo %}
-            <a href="{% url 'eliminar_conjunto' conjunto.pk %}" class="btn btn-sm btn-outline-danger" title="Desactivar">
-              <i class="bi bi-x-circle"></i>
+            <a href="{% url 'eliminar_conjunto' conjunto.pk %}" class="btn btn-sm btn-icon btn-ghost-danger" title="Desactivar">
+              <i data-lucide="x-circle"></i>
             </a>
             {% endif %}
           </div>
@@ -86,7 +86,7 @@
       <tr>
         <td colspan="6">
           <div class="empty-state">
-            <i class="bi bi-layers d-block"></i>
+            <i data-lucide="layers" style="width:2.5rem;height:2.5rem;opacity:.3;display:block;margin:0 auto .75rem"></i>
             No hay conjuntos registrados.
           </div>
         </td>
