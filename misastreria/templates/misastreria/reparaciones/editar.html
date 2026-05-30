@@ -141,6 +141,13 @@
   </div>
 </div>
 
+<!-- Card de empleados asignados -->
+<div class="row justify-content-center mt-3">
+  <div class="col-12 col-lg-9 col-xl-7">
+    {% include 'misastreria/_asignaciones_empleado.html' with asig_form_id='mainForm' %}
+  </div>
+</div>
+
 {% include 'misastreria/reparaciones/_tipos_modals.html' %}
 {% endblock %}
 

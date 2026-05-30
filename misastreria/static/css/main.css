@@ -59,6 +59,7 @@ svg.lucide { flex-shrink: 0; vertical-align: middle; }
 .badge-entregado  { background: #dcfce7; color: #166534; }
 .badge-alquilado  { background: #dbeafe; color: #1e40af; }
 .badge-reservado  { background: #fef3c7; color: #92400e; }
+.badge-efectuada  { background: #dcfce7; color: #166534; }
 .badge-devuelto   { background: #dcfce7; color: #166534; }
 .badge-activo     { background: #dcfce7; color: #166534; }
 .badge-inactivo   { background: #fee2e2; color: #991b1b; }
@@ -485,6 +486,7 @@ svg.lucide { flex-shrink: 0; vertical-align: middle; }
 [data-bs-theme="dark"] .badge-entregado  { background: #14532d; color: #86efac; }
 [data-bs-theme="dark"] .badge-alquilado  { background: #1e3a5f; color: #93c5fd; }
 [data-bs-theme="dark"] .badge-reservado  { background: #451a03; color: #fef3c7; }
+[data-bs-theme="dark"] .badge-efectuada  { background: #14532d; color: #86efac; }
 [data-bs-theme="dark"] .badge-devuelto   { background: #14532d; color: #86efac; }
 [data-bs-theme="dark"] .badge-activo     { background: #14532d; color: #86efac; }
 [data-bs-theme="dark"] .badge-inactivo   { background: #450a0a; color: #fca5a5; }

@@ -138,7 +138,7 @@
           <td>{% if r.total %}Bs {{ r.total|floatformat:2 }}{% else %}—{% endif %}</td>
           <td>{% if r.saldo_caja > 0 %}Bs {{ r.saldo_caja|floatformat:2 }}{% else %}<span class="text-success">0.00</span>{% endif %}</td>
           <td>{{ r.fecha_entrega|date:"d/m/Y" }}</td>
-          <td>{{ r.empleado|default:"—" }}</td>
+          <td>{{ r.empleado|default:"—" }}{% if r.empleados_extra %} <span class="badge bg-secondary-lt text-secondary" title="Otros empleados asignados">+{{ r.empleados_extra }}</span>{% endif %}</td>
           <td><span class="badge-estado badge-{{ r.estado }}">{{ r.get_estado_display }}</span></td>
           <td style="white-space:nowrap">
             <div class="btn-actions">

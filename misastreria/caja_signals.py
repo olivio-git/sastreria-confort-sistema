@@ -5,7 +5,7 @@ Registradas en MisastreriaConfig.ready() via apps.py.
 """
 from decimal import Decimal
 
-from django.db.models.signals import pre_save, post_save
+from django.db.models.signals import pre_save, post_save, pre_delete
 from django.dispatch import receiver
 from django.utils import timezone
 
@@ -42,6 +42,7 @@ def _reversar_movimientos_activos(*, referencia_field, instance, usuario=None):
                 origen='automatico',
                 forma_pago=mov.forma_pago,
                 monto=mov.monto,
+                via_caja=mov.via_caja,
                 cliente=mov.cliente,
                 descripcion=f"Reverso automático por eliminación — {mov.codigo}",
                 usuario=usuario,
@@ -51,48 +52,73 @@ def _reversar_movimientos_activos(*, referencia_field, instance, usuario=None):
             mov.save(update_fields=['movimiento_reverso'])
 
 
+# Red de seguridad: reversar movimientos de caja ANTES de borrar un servicio,
+# pase lo que pase (vista, admin de Django, shell, borrado en lote). Las vistas
+# eliminar_* ya llaman a _reversar_movimientos_activos explícitamente; este signal
+# es idempotente con ellas (salta los ya reversados y excluye anulacion_cobro),
+# así que no duplica. Su valor es cubrir los caminos de borrado que NO pasan por
+# la vista, que es como nacieron phantoms históricos (ej. venta_cobro huérfano).
+_SERVICIO_REFERENCIA_FIELD = {
+    Alquiler:   'referencia_alquiler',
+    Venta:      'referencia_venta',
+    Confeccion: 'referencia_confeccion',
+    Reparacion: 'referencia_reparacion',
+}
+
+
+@receiver(pre_delete, sender=Alquiler)
+@receiver(pre_delete, sender=Venta)
+@receiver(pre_delete, sender=Confeccion)
+@receiver(pre_delete, sender=Reparacion)
+def servicio_pre_delete_reversar_caja(sender, instance, **kwargs):
+    """Reversa los movimientos de caja activos del servicio antes de eliminarlo."""
+    referencia_field = _SERVICIO_REFERENCIA_FIELD.get(sender)
+    if not referencia_field:
+        return
+    _reversar_movimientos_activos(referencia_field=referencia_field, instance=instance)
+
+
 def _ajustar_total_en_caja(*, referencia_field, instance, concepto_cobro, nuevo_total, forma_pago, cliente=None, old_total=None):
     """
-    Ajusta los movimientos de caja para reflejar el nuevo total de un servicio editado.
-    Si old_total se provee, delta = nuevo_total - old_total (correcto para servicios con pagos parciales).
-    Sin old_total, delta = nuevo_total - total_cobrado (solo válido cuando el servicio se pagó completo).
+    Reconcilia la caja con el nuevo total de un servicio editado.
+
+    Editar el total NO es un evento de cobro: no entra ni sale dinero porque sí.
+    Lo único legítimo al editar es DEVOLVER el exceso cuando el nuevo total queda
+    por debajo de lo realmente pagado (sobrepago). Nunca se crea un ingreso
+    automático — eso registraría dinero que el cliente no entregó — ni un egreso
+    cuando todavía hay saldo pendiente.
+
+    - nuevo_total >= pagado  → no toca caja (el saldo pendiente se recalcula solo)
+    - nuevo_total <  pagado  → devuelve el exceso (anulacion_cobro)
+
+    `pagado` se calcula sobre los movimientos activos del servicio, excluyendo
+    garantías de alquiler (que tienen su propio flujo). `concepto_cobro` y
+    `old_total` se conservan por compatibilidad de firma pero ya no se usan.
     """
     from django.db.models import Sum
     if nuevo_total is None or Decimal(str(nuevo_total)) < 0:
         return
-    if old_total is not None:
-        delta = Decimal(str(nuevo_total)) - Decimal(str(old_total))
-    else:
-        base = CajaMovimiento.objects.filter(
-            **{referencia_field: instance},
-            movimiento_reverso__isnull=True,
-        )
-        ingresos = base.filter(tipo='ingreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
-        egresos  = base.filter(tipo='egreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
-        delta = Decimal(str(nuevo_total)) - (ingresos - egresos)
-    if delta == 0:
+    base = CajaMovimiento.objects.filter(
+        **{referencia_field: instance},
+        movimiento_reverso__isnull=True,
+    ).exclude(concepto__in=['garantia_alquiler', 'garantia_devolucion'])
+    ingresos = base.filter(tipo='ingreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
+    egresos  = base.filter(tipo='egreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
+    pagado = ingresos - egresos
+    exceso = pagado - Decimal(str(nuevo_total))
+    if exceso <= 0:
         return
-    if delta > 0:
-        _crear_mov_auto(
-            concepto=concepto_cobro,
-            monto=delta,
-            forma_pago=forma_pago or 'efectivo',
-            descripcion=f"Ajuste por edición — {instance} (+Bs {delta})",
-            **{referencia_field: instance},
-            cliente=cliente,
-        )
-    else:
-        _crear_mov_auto(
-            concepto='anulacion_cobro',
-            monto=-delta,
-            forma_pago=forma_pago or 'efectivo',
-            descripcion=f"Ajuste por edición — {instance} (-Bs {-delta})",
-            **{referencia_field: instance},
-            cliente=cliente,
-        )
+    _crear_mov_auto(
+        concepto='anulacion_cobro',
+        monto=exceso,
+        forma_pago=forma_pago or 'efectivo',
+        descripcion=f"Devolución por edición — {instance} (-Bs {exceso})",
+        **{referencia_field: instance},
+        cliente=cliente,
+    )
 
 
-def _crear_mov_auto(*, concepto, monto, forma_pago, descripcion, **fks):
+def _crear_mov_auto(*, concepto, monto, forma_pago, descripcion, via_caja=True, **fks):
     """
     Helper centralizado para crear movimientos automáticos.
     Checks idempotency via the referencia_* + concepto + movimiento_reverso__isnull=True query.
@@ -108,10 +134,20 @@ def _crear_mov_auto(*, concepto, monto, forma_pago, descripcion, **fks):
         origen='automatico',
         forma_pago=forma_pago or 'efectivo',
         monto=Decimal(str(monto)),
+        via_caja=via_caja,
         fecha=timezone.now(),
         descripcion=descripcion,
         **fks,
     )
+
+
+def _liberar_pagos_reservados(referencia_field, instance):
+    """Convierte todos los pagos via_caja=False de un servicio a via_caja=True."""
+    CajaMovimiento.objects.filter(
+        **{referencia_field: instance},
+        via_caja=False,
+        movimiento_reverso__isnull=True,
+    ).update(via_caja=True)
 
 
 # ============================================================
@@ -164,7 +200,7 @@ def _calcular_pagado_alquiler(alquiler):
     return ingresos - egresos
 
 
-def registrar_pago_alquiler(alquiler, monto, forma_pago, descripcion, usuario):
+def registrar_pago_alquiler(alquiler, monto, forma_pago, descripcion, usuario, via_caja=True):
     """
     Registra un pago parcial de alquiler en caja.
     Sin guarda de idempotencia — múltiples pagos son intencionales.
@@ -176,10 +212,15 @@ def registrar_pago_alquiler(alquiler, monto, forma_pago, descripcion, usuario):
         descripcion=descripcion or f"Pago de alquiler {alquiler.codigo}",
         referencia_alquiler=alquiler,
         cliente=getattr(alquiler, 'cliente', None),
+        via_caja=via_caja,
     )
     if mov and usuario:
         mov.usuario = usuario
         mov.save(update_fields=['usuario'])
+    if via_caja:
+        alquiler.refresh_from_db()
+        if alquiler.saldo_pendiente <= Decimal('0'):
+            _liberar_pagos_reservados('referencia_alquiler', alquiler)
 
 
 def registrar_reparacion_en_caja(instance):
@@ -339,29 +380,96 @@ def registrar_devolucion_garantia_alquiler(instance, monto_devuelto, usuario=Non
 # VENTA
 # ============================================================
 
-def registrar_venta_en_caja(instance):
+def _calcular_pagado_venta(venta):
     """
-    Registra el cobro de una Venta en caja.
-    Llamar explícitamente desde la vista DESPUÉS de recalcular_totales(),
-    ya que .update() no dispara post_save signals.
+    Suma todos los movimientos activos de caja asociados a la venta.
+    Retorna ingresos - egresos activos.
+    """
+    from django.db.models import Sum
+    base = CajaMovimiento.objects.filter(
+        referencia_venta=venta,
+        movimiento_reverso__isnull=True,
+    )
+    ingresos = base.filter(tipo='ingreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
+    egresos  = base.filter(tipo='egreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
+    return ingresos - egresos
+
+
+def registrar_venta_en_caja(instance, adelanto=None):
+    """
+    Registra el movimiento de caja al crear una Venta.
+    - Si adelanto is None o adelanto >= total → cobro completo (venta_cobro), estado efectuada
+    - Si 0 < adelanto < total → adelanto (venta_adelanto), estado en_proceso
+    - Si adelanto == 0 → no crea movimiento, estado en_proceso
     """
     instance.refresh_from_db()
     if not instance.total or instance.total <= 0:
         return
-    if CajaMovimiento.objects.filter(
-        referencia_venta=instance,
-        concepto='venta_cobro',
-        movimiento_reverso__isnull=True,
-    ).exists():
-        return
-    _crear_mov_auto(
-        concepto='venta_cobro',
-        monto=instance.total,
-        forma_pago=getattr(instance, 'forma_pago', 'efectivo') or 'efectivo',
-        descripcion=f"Cobro automático de venta #{instance.pk}",
-        referencia_venta=instance,
-        cliente=getattr(instance, 'cliente', None),
+
+    adelanto = Decimal(str(adelanto)) if adelanto is not None else None
+
+    if adelanto is None or adelanto >= instance.total:
+        # pago completo
+        if CajaMovimiento.objects.filter(
+            referencia_venta=instance,
+            concepto='venta_cobro',
+            movimiento_reverso__isnull=True,
+        ).exists():
+            return
+        _crear_mov_auto(
+            concepto='venta_cobro',
+            monto=instance.total,
+            forma_pago=getattr(instance, 'forma_pago', 'efectivo') or 'efectivo',
+            descripcion=f"Cobro de venta {instance.codigo}",
+            referencia_venta=instance,
+            cliente=getattr(instance, 'cliente', None),
+        )
+    elif adelanto > Decimal('0'):
+        # adelanto parcial
+        _crear_mov_auto(
+            concepto='venta_adelanto',
+            monto=adelanto,
+            forma_pago=getattr(instance, 'forma_pago', 'efectivo') or 'efectivo',
+            descripcion=f"Adelanto de venta {instance.codigo}",
+            referencia_venta=instance,
+            cliente=getattr(instance, 'cliente', None),
+        )
+    # si adelanto == 0 → no crear movimiento
+
+
+def registrar_pago_venta(venta, monto, forma_pago, descripcion, usuario, via_caja=True):
+    """
+    Registra un pago parcial de venta en caja.
+    Sin guarda de idempotencia — múltiples pagos son intencionales.
+    Cuando el saldo llega a 0 → marca la venta como efectuada e items pasan a baja.
+    Cuando via_caja=True y saldo=0 → libera también los pagos en reserva a caja.
+    """
+    saldo = venta.saldo_pendiente
+    concepto = 'venta_saldo' if monto >= saldo else 'venta_pago'
+    mov = _crear_mov_auto(
+        concepto=concepto,
+        monto=monto,
+        forma_pago=forma_pago or 'efectivo',
+        descripcion=descripcion or f"Pago de venta {venta.codigo}",
+        referencia_venta=venta,
+        cliente=getattr(venta, 'cliente', None),
+        via_caja=via_caja,
     )
+    if mov and usuario:
+        mov.usuario = usuario
+        mov.save(update_fields=['usuario'])
+    venta.refresh_from_db()
+    nuevo_saldo = venta.saldo_pendiente
+    if nuevo_saldo <= Decimal('0') and venta.estado != 'efectuada':
+        venta.estado = 'efectuada'
+        venta.save(update_fields=['estado'])
+        for item in venta.items.select_related('prenda_item').all():
+            pi = item.prenda_item
+            if pi and pi.estado == 'reservado':
+                pi.estado = 'baja'
+                pi.save(update_fields=['estado'])
+    if via_caja and nuevo_saldo <= Decimal('0'):
+        _liberar_pagos_reservados('referencia_venta', venta)
 
 
 @receiver(post_save, sender=Venta)
@@ -422,7 +530,7 @@ def _calcular_pagado_confeccion(confeccion):
     return ingresos - egresos
 
 
-def registrar_pago_confeccion(confeccion, monto, forma_pago, descripcion, usuario):
+def registrar_pago_confeccion(confeccion, monto, forma_pago, descripcion, usuario, via_caja=True):
     """Registra un pago parcial de confección en caja.
     Sin guarda de idempotencia — múltiples pagos son intencionales.
     """
@@ -433,10 +541,15 @@ def registrar_pago_confeccion(confeccion, monto, forma_pago, descripcion, usuari
         descripcion=descripcion or f"Pago de confección {confeccion.codigo}",
         referencia_confeccion=confeccion,
         cliente=getattr(confeccion, 'cliente', None),
+        via_caja=via_caja,
     )
     if mov and usuario:
         mov.usuario = usuario
         mov.save(update_fields=['usuario'])
+    if via_caja:
+        confeccion.refresh_from_db()
+        if confeccion.saldo_pendiente <= Decimal('0'):
+            _liberar_pagos_reservados('referencia_confeccion', confeccion)
 
 
 @receiver(post_save, sender=Confeccion)
@@ -546,7 +659,7 @@ def _calcular_saldo_reparacion(reparacion):
     return max(Decimal('0'), Decimal(str(precio)) - _calcular_pagado_reparacion(reparacion))
 
 
-def registrar_pago_reparacion(reparacion, monto, forma_pago, descripcion, usuario):
+def registrar_pago_reparacion(reparacion, monto, forma_pago, descripcion, usuario, via_caja=True):
     mov = _crear_mov_auto(
         concepto='reparacion_pago',
         monto=monto,
@@ -554,10 +667,15 @@ def registrar_pago_reparacion(reparacion, monto, forma_pago, descripcion, usuari
         descripcion=descripcion or f"Pago de reparación {reparacion.codigo}",
         referencia_reparacion=reparacion,
         cliente=getattr(reparacion, 'cliente', None),
+        via_caja=via_caja,
     )
     if mov and usuario:
         mov.usuario = usuario
         mov.save(update_fields=['usuario'])
+    if via_caja:
+        reparacion.refresh_from_db()
+        if reparacion.saldo_pendiente <= Decimal('0'):
+            _liberar_pagos_reservados('referencia_reparacion', reparacion)
 
 
 def registrar_pago_comision_empleado(empleado, monto, forma_pago, via_caja, descripcion, usuario):

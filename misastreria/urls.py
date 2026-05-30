@@ -66,6 +66,8 @@ urlpatterns = [
     path('ventas/crear/', views.crear_venta, name='crear_venta'),
     path('ventas/editar/<int:id>/', views.editar_venta, name='editar_venta'),
     path('ventas/eliminar/<int:id>/', views.eliminar_venta, name='eliminar_venta'),
+    path('ventas/detalle/<int:id>/', views.detalle_venta, name='detalle_venta'),
+    path('ventas/<int:id>/pago/', views.agregar_pago_venta, name='agregar_pago_venta'),
     path('ventas/recibo/<int:id>/', views.exportar_recibo_pdf, name='exportar_recibo_pdf'),
     path('ventas/get_precio_articulo/', views.get_precio_articulo, name='get_precio_articulo'),
     # Confecciones

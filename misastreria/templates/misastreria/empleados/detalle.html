@@ -231,10 +231,10 @@
           {% for r in reparaciones_comision %}
           <tr>
             <td><span class="badge-estado badge-en_proceso">Reparación</span></td>
-            <td>{{ r.codigo }}</td>
-            <td>{{ r.fecha_entrega|default:"—" }}</td>
-            <td>{{ r.cliente|default:"—" }}</td>
-            <td class="text-end">Bs. {{ r.total|floatformat:2 }}</td>
+            <td>{{ r.reparacion.codigo }}</td>
+            <td>{{ r.reparacion.fecha_entrega|default:"—" }}</td>
+            <td>{{ r.reparacion.cliente|default:"—" }}</td>
+            <td class="text-end">Bs. {{ r.reparacion.total|floatformat:2 }}</td>
             <td class="text-end">{{ r.porcentaje_comision|floatformat:2 }}%</td>
             <td class="text-end fw-semibold">Bs. {{ r.monto_comision|floatformat:2 }}</td>
           </tr>
@@ -242,15 +242,37 @@
           {% for c in confecciones_comision %}
           <tr>
             <td><span class="badge-estado badge-alquilado">Confección</span></td>
-            <td>{{ c.codigo }}</td>
-            <td>{{ c.fecha_entrega|default:"—" }}</td>
-            <td>{{ c.cliente|default:"—" }}</td>
-            <td class="text-end">Bs. {{ c.precio|floatformat:2 }}</td>
+            <td>{{ c.confeccion.codigo }}</td>
+            <td>{{ c.confeccion.fecha_entrega|default:"—" }}</td>
+            <td>{{ c.confeccion.cliente|default:"—" }}</td>
+            <td class="text-end">Bs. {{ c.confeccion.precio|floatformat:2 }}</td>
             <td class="text-end">{{ c.porcentaje_comision|floatformat:2 }}%</td>
             <td class="text-end fw-semibold">Bs. {{ c.monto_comision|floatformat:2 }}</td>
           </tr>
           {% endfor %}
-          {% if not reparaciones_comision and not confecciones_comision %}
+          {% for v in arreglos_venta_comision %}
+          <tr>
+            <td><span class="badge-estado badge-entregado">Arreglo venta</span></td>
+            <td>{{ v.venta.codigo }}</td>
+            <td>{{ v.tipo_reparacion|default:"Arreglo" }}</td>
+            <td>{{ v.venta.cliente|default:"—" }}</td>
+            <td class="text-end">Bs. {{ v.precio_reparacion|floatformat:2 }}</td>
+            <td class="text-end">{{ v.porcentaje_comision|floatformat:2 }}%</td>
+            <td class="text-end fw-semibold">Bs. {{ v.monto_comision|floatformat:2 }}</td>
+          </tr>
+          {% endfor %}
+          {% for a in arreglos_alquiler_comision %}
+          <tr>
+            <td><span class="badge-estado badge-devuelto">Arreglo alquiler</span></td>
+            <td>{{ a.alquiler.codigo }}</td>
+            <td>{{ a.tipo_reparacion|default:"Arreglo" }}</td>
+            <td>{{ a.alquiler.cliente|default:"—" }}</td>
+            <td class="text-end">Bs. {{ a.precio_reparacion|floatformat:2 }}</td>
+            <td class="text-end">{{ a.porcentaje_comision|floatformat:2 }}%</td>
+            <td class="text-end fw-semibold">Bs. {{ a.monto_comision|floatformat:2 }}</td>
+          </tr>
+          {% endfor %}
+          {% if not reparaciones_comision and not confecciones_comision and not arreglos_venta_comision and not arreglos_alquiler_comision %}
           <tr>
             <td colspan="7" class="text-center text-muted py-3">
               <i data-lucide="percent" style="width:1.5rem;height:1.5rem;opacity:.4" class="d-block mx-auto mb-1"></i>

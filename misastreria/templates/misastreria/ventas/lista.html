@@ -48,6 +48,14 @@
           <input type="hidden" name="empleado_id" id="filter_empleado_id" value="{{ empleado_id }}">
         </div>
       </div>
+      <div class="col-12 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Estado</label>
+        <select name="estado" class="form-select" data-debounce="0">
+          <option value="">Todos</option>
+          <option value="en_proceso" {% if estado == 'en_proceso' %}selected{% endif %}>En Proceso</option>
+          <option value="efectuada" {% if estado == 'efectuada' %}selected{% endif %}>Efectuada</option>
+        </select>
+      </div>
       <div class="col-6 col-md-auto">
         <label class="form-label small mb-1 fw-semibold text-muted">Desde</label>
         <input type="date" name="desde" class="form-control" value="{{ desde }}">
@@ -78,6 +86,7 @@
       <thead>
         <tr>
           <th>Código</th>
+          <th>Estado</th>
           <th>Cliente</th>
           <th>Empleado</th>
           <th>Prendas</th>
@@ -90,6 +99,9 @@
         {% for v in page_obj %}
         <tr>
           <td class="fw-semibold">{{ v.codigo }}</td>
+          <td>
+            <span class="badge-estado badge-{{ v.estado }}">{{ v.get_estado_display }}</span>
+          </td>
           <td>
             {% if v.cliente %}
               <a href="{% url 'historial_cliente' v.cliente.id %}" class="text-decoration-none">{{ v.cliente }}</a>
@@ -111,6 +123,7 @@
           <td>{{ v.fecha_venta|date:"d/m/Y" }}</td>
           <td style="white-space:nowrap">
             <div class="btn-actions">
+              <a href="{% url 'detalle_venta' v.id %}" class="btn btn-sm btn-icon btn-ghost-info" title="Detalle / Pagos"><i data-lucide="eye"></i></a>
               <a href="{% url 'editar_venta' v.id %}" class="btn btn-sm btn-icon btn-ghost-primary" title="Editar"><i data-lucide="pencil"></i></a>
               <a href="{% url 'exportar_recibo_pdf' v.id %}" class="btn btn-sm btn-icon btn-ghost-secondary" title="PDF"><i data-lucide="file-text"></i></a>
               <button type="button" class="btn btn-sm btn-icon btn-ghost-danger" title="Eliminar"
@@ -121,7 +134,7 @@
         </tr>
         {% empty %}
         <tr>
-          <td colspan="7">
+          <td colspan="8">
             <div class="empty-state">
               <i data-lucide="shopping-cart" style="width:2.5rem;height:2.5rem;opacity:.3;display:block;margin:0 auto .75rem"></i>
               No hay ventas en el período seleccionado.

@@ -592,14 +592,14 @@ window.addConjuntoToForm = function(conjunto, slotsIncluidos, ctx) {
   slotsActivos.forEach(function(slot, idx) {
     var precioFallback = (idx === 0) ? (base + ajuste) : base;
     var idStr = slot.prenda_item_id ? String(slot.prenda_item_id) : null;
-    // Precio: usar sugerido depreciado del slot; si no hay, buscar en PRENDAS; si no, proporcional del conjunto
+    // Precio: usar precio base del slot (sin depreciación); si no hay, buscar en PRENDAS; si no, proporcional del conjunto
     var precio = precioFallback;
-    if (slot.precio_alquiler_sugerido != null) {
-      precio = slot.precio_alquiler_sugerido;
+    if (slot.precio_alquiler_base != null) {
+      precio = slot.precio_alquiler_base;
     } else if (idStr && ctx.PRENDAS) {
       var prendaData = ctx.PRENDAS.find(function(p) { return String(p.prenda_item_id) === idStr; });
-      if (prendaData && prendaData.precio_alquiler_sugerido != null) {
-        precio = prendaData.precio_alquiler_sugerido;
+      if (prendaData && prendaData.precio_alquiler_base != null) {
+        precio = prendaData.precio_alquiler_base;
       }
     }
     // Disponibilidad: usar slot.disponible (el backend ya sabe si está libre, incluso si es slot de conjunto)

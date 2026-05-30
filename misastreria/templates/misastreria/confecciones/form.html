@@ -120,20 +120,6 @@
               {% if form.cliente.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.cliente.errors }}</div>{% endif %}
             </div>
             <div class="col-md-4">
-              <label class="form-label">{{ form.empleado.label }}{% if not form.empleado.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
-              <div style="position:relative">
-                <input type="text"
-                       data-empleado-search="id_empleado"
-                       data-endpoint="{% url 'buscar_empleados' %}"
-                       class="form-control"
-                       placeholder="Seleccionar empleado…"
-                       value="{% if form.instance.pk and form.instance.empleado %}{{ form.instance.empleado }}{% endif %}"
-                       autocomplete="off">
-                <input type="hidden" name="empleado" id="id_empleado" value="{{ form.empleado.value|default:'' }}">
-              </div>
-              {% if form.empleado.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.empleado.errors }}</div>{% endif %}
-            </div>
-            <div class="col-md-2">
               <label class="form-label">{{ form.garantia_meses.label }}{% if not form.garantia_meses.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
               <div class="input-group">
                 {{ form.garantia_meses }}
@@ -174,6 +160,9 @@
         </div>
       </div>
 
+      <!-- Empleados asignados -->
+      {% include 'misastreria/_asignaciones_empleado.html' with asig_form_id='confeccion-form' %}
+
       <!-- Pagos y Fechas -->
       <div class="card mb-3">
         <div class="card-header"><h3 class="card-title">Pagos y Fechas</h3></div>
@@ -185,14 +174,15 @@
               {% if form.precio.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.precio.errors }}</div>{% endif %}
             </div>
             <div class="col-md-4">
-              <label class="form-label">{{ form.porcentaje_comision.label }}{% if not form.porcentaje_comision.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
-              {{ form.porcentaje_comision }}
-              {% if form.porcentaje_comision.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.porcentaje_comision.errors }}</div>{% endif %}
-            </div>
-            <div class="col-md-4">
               <label class="form-label">{{ form.adelanto.label }}{% if not form.adelanto.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
               {{ form.adelanto }}
               {% if form.adelanto.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.adelanto.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">{{ form.forma_pago.label }}</label>
+              {{ form.forma_pago }}
+              {% if form.forma_pago.errors %}<div class="alert alert-danger mt-1 py-1">{{ form.forma_pago.errors }}</div>{% endif %}
+              <div class="form-text">Cómo se paga el adelanto.</div>
             </div>
             <div class="col-md-4">
               <label class="form-label">{{ form.saldo.label }}</label>

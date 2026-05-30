@@ -1,45 +1,32 @@
 {% extends 'misastreria/base.html' %}
-{% block titulo %}Alquiler {{ alquiler.codigo }}{% endblock %}
+{% block titulo %}Venta {{ venta.codigo }}{% endblock %}
 
 {% block page_header %}
 <div class="container-xl">
   <div class="row g-2 align-items-center">
     <div class="col-auto">
-      <a href="{% url 'lista_alquileres' %}" class="btn btn-outline-secondary">
+      <a href="{% url 'lista_ventas' %}" class="btn btn-outline-secondary">
         <i data-lucide="arrow-left"></i>Volver
       </a>
     </div>
     <div class="col">
-      <div class="page-pretitle">Alquileres</div>
+      <div class="page-pretitle">Ventas</div>
       <h2 class="page-title">
-        <i data-lucide="shopping-bag" class="me-2 text-muted"></i>
-        {{ alquiler.codigo }}
-        {% if alquiler.estado == 'alquilado' or alquiler.estado == 'devuelto' or alquiler.estado == 'reservado' %}
-          <span class="badge-estado badge-{{ alquiler.estado }} ms-2">{{ alquiler.estado_display }}</span>
-        {% else %}
-          <span class="badge bg-{{ alquiler.estado_color }} {% if alquiler.estado_color == 'warning' %}text-dark{% else %}text-white{% endif %} ms-2">{{ alquiler.estado_display }}</span>
-        {% endif %}
+        <i data-lucide="shopping-cart" class="me-2 text-muted"></i>
+        {{ venta.codigo }}
+        <span class="badge-estado badge-{{ venta.estado }} ms-2">{{ venta.get_estado_display }}</span>
       </h2>
     </div>
     <div class="col-auto ms-auto d-flex gap-2">
-      {% if saldo > 0 %}
-      <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modalCompletarAlquiler">
-        <i data-lucide="check-circle" class="me-1"></i>Completar pago
+      {% if venta.estado == 'en_proceso' and saldo > 0 %}
+      <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modalCompletarVenta">
+        <i data-lucide="check-circle" class="me-1"></i>Completar venta
       </button>
       {% endif %}
-      {% if alquiler.estado == 'reservado' %}
-      <a href="{% url 'confirmar_reserva' alquiler.id %}" class="btn btn-success">
-        <i data-lucide="check-circle" class="me-1"></i>Confirmar Reserva
-      </a>
-      {% elif alquiler.estado != 'devuelto' %}
-      <a href="{% url 'devolver_alquiler' alquiler.id %}" class="btn btn-warning">
-        <i data-lucide="rotate-cw" class="me-1"></i>Devolver
-      </a>
-      {% endif %}
-      <a href="{% url 'editar_alquiler' alquiler.id %}" class="btn btn-outline-primary">
+      <a href="{% url 'editar_venta' venta.id %}" class="btn btn-outline-primary">
         <i data-lucide="pencil" class="me-1"></i>Editar
       </a>
-      <a href="{% url 'exportar_comprobante_alquiler_pdf' alquiler.id %}" class="btn btn-outline-secondary">
+      <a href="{% url 'exportar_recibo_pdf' venta.id %}" class="btn btn-outline-secondary">
         <i data-lucide="file-text" class="me-1"></i>PDF
       </a>
     </div>
@@ -53,109 +40,95 @@
   <!-- Columna izquierda: Datos + Ítems -->
   <div class="col-12 col-lg-7">
 
-    <!-- Datos del alquiler -->
     <div class="card mb-3">
       <div class="card-header">
-        <h3 class="card-title">Datos del alquiler</h3>
+        <h3 class="card-title">Datos de la venta</h3>
       </div>
       <div class="card-body">
         <div class="datagrid">
           <div class="datagrid-item">
             <div class="datagrid-title text-muted">Cliente</div>
             <div class="datagrid-content">
-              {% if alquiler.cliente %}
-                <a href="{% url 'historial_cliente' alquiler.cliente.id %}" class="text-decoration-none">{{ alquiler.cliente }}</a>
+              {% if venta.cliente %}
+                <a href="{% url 'historial_cliente' venta.cliente.id %}" class="text-decoration-none">{{ venta.cliente }}</a>
               {% else %}—{% endif %}
             </div>
           </div>
           <div class="datagrid-item">
             <div class="datagrid-title text-muted">Empleado</div>
-            <div class="datagrid-content">{{ alquiler.empleado|default:"—" }}</div>
+            <div class="datagrid-content">{{ venta.empleado|default:"—" }}</div>
           </div>
           <div class="datagrid-item">
-            <div class="datagrid-title text-muted">Fecha alquiler</div>
-            <div class="datagrid-content">{{ alquiler.fecha_alquiler|date:"d/m/Y" }}</div>
+            <div class="datagrid-title text-muted">Fecha de venta</div>
+            <div class="datagrid-content">{{ venta.fecha_venta|date:"d/m/Y" }}</div>
           </div>
           <div class="datagrid-item">
-            <div class="datagrid-title text-muted">Fecha devolución</div>
-            <div class="datagrid-content">
-              {{ alquiler.fecha_devolucion|date:"d/m/Y" }}
-              {% if alquiler.hora_devolucion %}<small class="text-muted d-block">{{ alquiler.hora_devolucion|time:"H:i" }}</small>{% endif %}
-              {% if alquiler.con_recargo %}<span class="badge bg-danger text-white ms-1">Recargo</span>{% endif %}
-            </div>
+            <div class="datagrid-title text-muted">Forma de pago</div>
+            <div class="datagrid-content">{{ venta.get_forma_pago_display }}</div>
           </div>
-          {% if alquiler.garantia_tipo %}
-          <div class="datagrid-item">
-            <div class="datagrid-title text-muted">Garantía</div>
-            <div class="datagrid-content">
-              {% if alquiler.garantia_tipo == 'efectivo' or alquiler.garantia_tipo == 'qr' or alquiler.garantia_tipo == 'transferencia' %}
-                <span class="badge bg-green-lt">{{ alquiler.get_garantia_tipo_display }} Bs.{{ alquiler.garantia_monto|floatformat:2 }}</span>
-              {% elif alquiler.garantia_tipo == 'descripcion' %}
-                <span class="text-muted small">{{ alquiler.garantia|default:"—" }}</span>
-              {% endif %}
-            </div>
-          </div>
-          {% endif %}
-          {% if alquiler.notas %}
-          <div class="datagrid-item">
+          {% if venta.notas %}
+          <div class="datagrid-item" style="grid-column: 1 / -1">
             <div class="datagrid-title text-muted">Notas</div>
-            <div class="datagrid-content">{{ alquiler.notas }}</div>
+            <div class="datagrid-content">{{ venta.notas }}</div>
           </div>
           {% endif %}
         </div>
       </div>
     </div>
 
-    <!-- Ítems alquilados -->
-    <div class="card">
+    {% if items %}
+    <div class="card mb-3">
       <div class="card-header">
-        <h3 class="card-title">Ítems alquilados</h3>
+        <h3 class="card-title">Ítems</h3>
       </div>
       <div class="table-responsive">
         <table class="table table-vcenter card-table">
           <thead>
             <tr>
-              <th>Código</th>
+              <th>Item</th>
               <th>Prenda</th>
-              <th class="text-end">Precio</th>
+              <th>Arreglo</th>
+              <th class="text-end">P. Unit.</th>
+              <th class="text-end">Arreglo</th>
+              <th class="text-end">Subtotal</th>
             </tr>
           </thead>
           <tbody>
             {% for item in items %}
             <tr>
-              <td><code>{{ item.prenda_item.codigo_item }}</code></td>
+              <td><code class="small">{{ item.prenda_item.codigo_item }}</code></td>
               <td>
                 {{ item.prenda_item.prenda.nombre }}
-                {% if item.grupo_conjunto %}
-                  <span class="badge-conjunto" title="Conjunto {{ item.grupo_conjunto }}">
-                    <i class="bi bi-layers"></i>{{ item.grupo_conjunto }}
-                  </span>
-                {% endif %}
+                {% if item.prenda_item.prenda.color %}<span class="text-muted small">{{ item.prenda_item.prenda.color }}</span>{% endif %}
+                {% if item.prenda_item.prenda.talla %}<span class="text-muted small">T{{ item.prenda_item.prenda.talla }}</span>{% endif %}
               </td>
-              <td class="text-end fw-semibold">Bs. {{ item.precio_unitario|floatformat:2 }}</td>
-            </tr>
-            {% empty %}
-            <tr>
-              <td colspan="3">
-                <div class="empty-state">
-                  <i data-lucide="package" class="d-block"></i>
-                  Sin ítems registrados.
-                </div>
-              </td>
+              <td class="text-muted small">{{ item.tipo_reparacion|default:"—" }}</td>
+              <td class="text-end">Bs {{ item.precio_unitario|floatformat:2 }}</td>
+              <td class="text-end">{% if item.precio_reparacion %}Bs {{ item.precio_reparacion|floatformat:2 }}{% else %}—{% endif %}</td>
+              <td class="text-end fw-semibold">Bs {{ item.subtotal|floatformat:2 }}</td>
             </tr>
             {% endfor %}
           </tbody>
-          {% if items %}
           <tfoot>
             <tr>
-              <td colspan="2" class="text-end text-muted fw-semibold">Total</td>
-              <td class="text-end fw-bold">Bs. {{ total|floatformat:2 }}</td>
+              <td colspan="5" class="text-end text-muted">Subtotal</td>
+              <td class="text-end">Bs {{ venta.subtotal|floatformat:2 }}</td>
+            </tr>
+            {% if venta.descuento %}
+            <tr>
+              <td colspan="5" class="text-end text-muted">Descuento ({{ venta.descuento }}%)</td>
+              <td class="text-end text-danger">- Bs {{ venta.subtotal|floatformat:2 }}</td>
+            </tr>
+            {% endif %}
+            <tr class="fw-bold">
+              <td colspan="5" class="text-end">Total</td>
+              <td class="text-end">Bs {{ total|floatformat:2 }}</td>
             </tr>
           </tfoot>
-          {% endif %}
         </table>
       </div>
     </div>
+    {% endif %}
 
   </div>
 
@@ -184,14 +157,14 @@
       </div>
     </div>
 
-    <!-- Formulario de pago -->
-    {% if saldo > 0 %}
+    <!-- Formulario de pago (solo si en_proceso) -->
+    {% if venta.estado == 'en_proceso' and saldo > 0 %}
     <div class="card mb-3">
       <div class="card-header">
         <h3 class="card-title">Registrar pago</h3>
       </div>
       <div class="card-body">
-        <form method="post" action="{% url 'agregar_pago_alquiler' alquiler.id %}">
+        <form method="post" action="{% url 'agregar_pago_venta' venta.id %}">
           {% csrf_token %}
           <div class="mb-3">
             <label class="form-label fw-semibold">{{ form.monto.label }}</label>
@@ -204,16 +177,10 @@
           <div class="mb-3">
             <label class="form-label fw-semibold">{{ form.forma_pago.label }}</label>
             {{ form.forma_pago }}
-            {% if form.forma_pago.errors %}
-              <div class="invalid-feedback d-block">{{ form.forma_pago.errors.0 }}</div>
-            {% endif %}
           </div>
           <div class="mb-3">
             <label class="form-label fw-semibold">{{ form.descripcion.label }}</label>
             {{ form.descripcion }}
-            {% if form.descripcion.errors %}
-              <div class="invalid-feedback d-block">{{ form.descripcion.errors.0 }}</div>
-            {% endif %}
           </div>
           <div class="mb-3">
             <div class="form-check form-switch">
@@ -228,10 +195,10 @@
         </form>
       </div>
     </div>
-    {% else %}
+    {% elif venta.estado == 'efectuada' %}
     <div class="alert alert-success mb-3">
       <i data-lucide="check-circle" class="me-2"></i>
-      Completamente pagado.
+      Venta efectuada — completamente pagada.
     </div>
     {% endif %}
 
@@ -245,6 +212,7 @@
           <thead>
             <tr>
               <th>Fecha</th>
+              <th>Concepto</th>
               <th>Forma</th>
               <th>Estado</th>
               <th class="text-end">Monto</th>
@@ -255,8 +223,9 @@
             <tr>
               <td>
                 <div>{{ pago.fecha|date:"d/m/Y" }}</div>
-                <small class="text-muted">{{ pago.get_concepto_display }}</small>
+                <small class="text-muted">{{ pago.fecha|date:"H:i" }}</small>
               </td>
+              <td class="small">{{ pago.get_concepto_display }}</td>
               <td>{{ pago.get_forma_pago_display }}</td>
               <td>
                 {% if pago.via_caja %}
@@ -269,7 +238,7 @@
             </tr>
             {% empty %}
             <tr>
-              <td colspan="4">
+              <td colspan="5">
                 <div class="empty-state">
                   <i data-lucide="credit-card" class="d-block"></i>
                   Sin pagos registrados.
@@ -285,14 +254,14 @@
   </div>
 </div>
 
-{% if saldo > 0 %}
-<div class="modal modal-blur fade" id="modalCompletarAlquiler" tabindex="-1" role="dialog" aria-hidden="true">
+{% if venta.estado == 'en_proceso' and saldo > 0 %}
+<div class="modal modal-blur fade" id="modalCompletarVenta" tabindex="-1" role="dialog" aria-hidden="true">
   <div class="modal-dialog modal-sm modal-dialog-centered" role="document">
     <div class="modal-content">
-      <form method="post" action="{% url 'agregar_pago_alquiler' alquiler.id %}">
+      <form method="post" action="{% url 'agregar_pago_venta' venta.id %}">
         {% csrf_token %}
         <div class="modal-header">
-          <h5 class="modal-title">Completar pago {{ alquiler.codigo }}</h5>
+          <h5 class="modal-title">Completar venta {{ venta.codigo }}</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
         </div>
         <div class="modal-body">
@@ -313,8 +282,8 @@
           </div>
           <div class="mb-2">
             <div class="form-check form-switch">
-              <input type="checkbox" name="via_caja" id="via_caja_completar_alquiler" class="form-check-input" role="switch" checked>
-              <label class="form-check-label fw-semibold" for="via_caja_completar_alquiler">Registrar en caja</label>
+              <input type="checkbox" name="via_caja" id="via_caja_completar" class="form-check-input" role="switch" checked>
+              <label class="form-check-label fw-semibold" for="via_caja_completar">Registrar en caja</label>
             </div>
             <div class="form-text text-muted">Si no está marcado, el pago queda en reserva.</div>
           </div>
@@ -322,7 +291,7 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
           <button type="submit" class="btn btn-success">
-            <i data-lucide="check-circle" class="me-1"></i>Completar pago
+            <i data-lucide="check-circle" class="me-1"></i>Completar venta
           </button>
         </div>
       </form>

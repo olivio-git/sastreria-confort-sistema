@@ -29,9 +29,12 @@ from misastreria.caja_signals import (
     registrar_pago_reparacion,
     registrar_pago_confeccion,
     registrar_venta_en_caja,
+    registrar_pago_venta,
     _calcular_pagado_alquiler,
     _calcular_pagado_reparacion,
     _calcular_pagado_confeccion,
+    _calcular_pagado_venta,
+    _ajustar_total_en_caja,
     _reversar_movimientos_activos,
 )
 from misastreria.models import CajaMovimiento, Alquiler, Reparacion, Confeccion, Venta
@@ -506,3 +509,166 @@ class UniqueConstraintsCajaTests(TestCase):
                 origen='automatico',
                 referencia_alquiler=alquiler,
             )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _ajustar_total_en_caja — reconcilia caja al editar el total de un servicio
+# ─────────────────────────────────────────────────────────────────────────────
+
+class AjustarTotalEnCajaTests(TestCase):
+    """Editar el total NO mueve dinero; sólo devuelve el exceso si el nuevo
+    total queda por debajo de lo realmente pagado."""
+
+    def setUp(self):
+        self.sesion = make_sesion_caja()
+
+    def _venta_en_proceso(self, total):
+        """Venta sin cobro automático: se crea con total 0 (el signal no cobra)
+        y luego se le fija el total, replicando una venta en proceso sin pagos."""
+        venta = make_venta(total=Decimal('0'))
+        venta.total = Decimal(str(total))
+        venta.save(update_fields=['total'])
+        return venta
+
+    def _ajustar(self, venta, nuevo_total):
+        _ajustar_total_en_caja(
+            referencia_field='referencia_venta',
+            instance=venta,
+            concepto_cobro='venta_ajuste',
+            nuevo_total=Decimal(str(nuevo_total)),
+            old_total=venta.total,
+            forma_pago='efectivo',
+            cliente=getattr(venta, 'cliente', None),
+        )
+
+    def test_bajar_total_sin_pagos_no_crea_egreso(self):
+        """Bug reportado: venta en proceso sin pagos, bajar el precio NO debe
+        generar un egreso de anulación fantasma."""
+        venta = self._venta_en_proceso('230.00')
+        self._ajustar(venta, Decimal('220.00'))
+        self.assertEqual(_movs_activos(venta=venta).count(), 0)
+        self.assertEqual(_calcular_pagado_venta(venta), Decimal('0'))
+
+    def test_subir_total_sin_pagos_no_crea_ingreso(self):
+        """Subir el total tampoco inventa un ingreso: el cliente no pagó nada."""
+        venta = self._venta_en_proceso('200.00')
+        self._ajustar(venta, Decimal('300.00'))
+        self.assertEqual(_movs_activos(venta=venta).count(), 0)
+
+    def test_bajar_total_con_pago_parcial_sobre_saldo_no_devuelve(self):
+        """Pago parcial 100, total 230→180: sigue habiendo saldo (80), no se
+        devuelve nada."""
+        venta = self._venta_en_proceso('230.00')
+        registrar_pago_venta(venta, Decimal('100.00'), 'efectivo', None, None)
+        self._ajustar(venta, Decimal('180.00'))
+        self.assertEqual(
+            _movs_activos(venta=venta, concepto='anulacion_cobro').count(), 0
+        )
+        self.assertEqual(_calcular_pagado_venta(venta), Decimal('100.00'))
+
+    def test_bajar_total_por_debajo_de_lo_pagado_devuelve_exceso(self):
+        """Pago parcial 100, total 230→80: el cliente sobrepagó 20, se devuelve."""
+        venta = self._venta_en_proceso('230.00')
+        registrar_pago_venta(venta, Decimal('100.00'), 'efectivo', None, None)
+        self._ajustar(venta, Decimal('80.00'))
+        anul = _movs_activos(venta=venta, concepto='anulacion_cobro')
+        self.assertEqual(anul.count(), 1)
+        self.assertEqual(anul.first().monto, Decimal('20.00'))
+        self.assertEqual(anul.first().tipo, 'egreso')
+        self.assertEqual(_calcular_pagado_venta(venta), Decimal('80.00'))
+
+    def test_ajustar_dos_veces_es_idempotente(self):
+        """Reejecutar el ajuste con el mismo total no acumula devoluciones."""
+        venta = self._venta_en_proceso('230.00')
+        registrar_pago_venta(venta, Decimal('100.00'), 'efectivo', None, None)
+        self._ajustar(venta, Decimal('80.00'))
+        self._ajustar(venta, Decimal('80.00'))
+        self.assertEqual(
+            _movs_activos(venta=venta, concepto='anulacion_cobro').count(), 1
+        )
+
+    def test_reparacion_bajar_total_sin_pagos_no_crea_egreso(self):
+        """La misma protección aplica a Reparación (comparte _ajustar_total_en_caja)."""
+        rep = make_reparacion(total=Decimal('230.00'))
+        _ajustar_total_en_caja(
+            referencia_field='referencia_reparacion', instance=rep,
+            concepto_cobro='reparacion_ajuste', nuevo_total=Decimal('220.00'),
+            old_total=Decimal('230.00'), forma_pago='efectivo',
+        )
+        self.assertEqual(_movs_activos(reparacion=rep).count(), 0)
+
+    def test_alquiler_bajar_total_sin_pagos_no_crea_egreso(self):
+        """La misma protección aplica a Alquiler (comparte _ajustar_total_en_caja)."""
+        alq = make_alquiler(total=Decimal('200.00'))
+        _ajustar_total_en_caja(
+            referencia_field='referencia_alquiler', instance=alq,
+            concepto_cobro='alquiler_ajuste', nuevo_total=Decimal('150.00'),
+            old_total=Decimal('200.00'), forma_pago='efectivo',
+        )
+        self.assertEqual(_movs_activos(alquiler=alq).count(), 0)
+
+    def test_alquiler_garantia_no_cuenta_como_pago_al_ajustar(self):
+        """La garantía NO debe contarse como pago: bajar el total de un alquiler
+        con garantía registrada (pero sin cobro del alquiler) no debe devolver
+        nada."""
+        alq = make_alquiler(
+            total=Decimal('200.00'),
+            garantia_tipo='efectivo', garantia_monto=Decimal('300.00'),
+        )
+        registrar_garantia_alquiler_en_caja(alq)  # ingreso garantia 300
+        _ajustar_total_en_caja(
+            referencia_field='referencia_alquiler', instance=alq,
+            concepto_cobro='alquiler_ajuste', nuevo_total=Decimal('150.00'),
+            old_total=Decimal('200.00'), forma_pago='efectivo',
+        )
+        # No se devuelve nada: el alquiler no se pagó; la garantía es aparte.
+        self.assertEqual(
+            _movs_activos(alquiler=alq, concepto='anulacion_cobro').count(), 0
+        )
+        # La garantía sigue intacta.
+        self.assertEqual(
+            _movs_activos(alquiler=alq, concepto='garantia_alquiler').count(), 1
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# pre_delete: borrar un servicio por cualquier vía reversa su caja (red de seguridad)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ServicioPreDeleteReversaTests(TestCase):
+    """El signal pre_delete reversa los movimientos activos al borrar un servicio
+    directamente (admin/shell/.delete()), sin pasar por la vista eliminar_*."""
+
+    def setUp(self):
+        self.sesion = make_sesion_caja()
+
+    def test_delete_directo_venta_reversa_cobro(self):
+        venta = make_venta(total=Decimal('300.00'))  # signal crea venta_cobro 300
+        self.assertEqual(
+            CajaMovimiento.objects.filter(
+                concepto='venta_cobro', movimiento_reverso__isnull=True).count(), 1)
+        venta.delete()  # pre_delete debe reversar
+        # el cobro ya no está activo
+        self.assertEqual(
+            CajaMovimiento.objects.filter(
+                concepto='venta_cobro', movimiento_reverso__isnull=True).count(), 0)
+        # existe el reverso anulacion_cobro (egreso) activo
+        self.assertEqual(
+            CajaMovimiento.objects.filter(
+                concepto='anulacion_cobro', tipo='egreso',
+                movimiento_reverso__isnull=True).count(), 1)
+
+    def test_delete_directo_alquiler_reversa_pago(self):
+        alq = make_alquiler(total=Decimal('200.00'))
+        registrar_pago_alquiler(alq, Decimal('100.00'), 'efectivo', 'cuota', None)
+        self.assertEqual(
+            CajaMovimiento.objects.filter(
+                concepto='alquiler_pago', movimiento_reverso__isnull=True).count(), 1)
+        alq.delete()
+        self.assertEqual(
+            CajaMovimiento.objects.filter(
+                concepto='alquiler_pago', movimiento_reverso__isnull=True).count(), 0)
+        self.assertEqual(
+            CajaMovimiento.objects.filter(
+                concepto='anulacion_cobro', tipo='egreso',
+                movimiento_reverso__isnull=True).count(), 1)

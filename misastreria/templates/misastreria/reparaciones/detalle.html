@@ -66,8 +66,12 @@
             </div>
           </div>
           <div class="datagrid-item">
-            <div class="datagrid-title text-muted">Empleado</div>
-            <div class="datagrid-content">{{ reparacion.empleado|default:"—" }}</div>
+            <div class="datagrid-title text-muted">Empleados asignados</div>
+            <div class="datagrid-content">
+              {% for a in reparacion.asignaciones.all %}
+                <div>{{ a.empleado }} <span class="text-muted small">({{ a.porcentaje_comision|floatformat:2 }}% · Bs. {{ a.monto_comision|floatformat:2 }})</span></div>
+              {% empty %}—{% endfor %}
+            </div>
           </div>
           <div class="datagrid-item">
             <div class="datagrid-title text-muted">Fecha de entrega</div>
@@ -159,6 +163,13 @@
             <label class="form-label fw-semibold">{{ form.descripcion.label }}</label>
             {{ form.descripcion }}
           </div>
+          <div class="mb-3">
+            <div class="form-check form-switch">
+              {{ form.via_caja }}
+              <label class="form-check-label fw-semibold" for="{{ form.via_caja.id_for_label }}">{{ form.via_caja.label }}</label>
+            </div>
+            <div class="form-text text-muted">{{ form.via_caja.help_text }}</div>
+          </div>
           <button type="submit" class="btn btn-success w-100">
             <i data-lucide="plus-circle" class="me-1"></i>Registrar pago
           </button>
@@ -183,6 +194,7 @@
             <tr>
               <th>Fecha</th>
               <th>Forma</th>
+              <th>Estado</th>
               <th class="text-end">Monto</th>
             </tr>
           </thead>
@@ -194,11 +206,18 @@
                 <small class="text-muted">{{ pago.get_concepto_display }}</small>
               </td>
               <td>{{ pago.get_forma_pago_display }}</td>
+              <td>
+                {% if pago.via_caja %}
+                  <span class="badge-estado badge-entregado">En caja</span>
+                {% else %}
+                  <span class="badge-estado badge-pendiente">Reservado</span>
+                {% endif %}
+              </td>
               <td class="text-end fw-semibold text-success">Bs. {{ pago.monto|floatformat:2 }}</td>
             </tr>
             {% empty %}
             <tr>
-              <td colspan="3">
+              <td colspan="4">
                 <div class="empty-state">
                   <i data-lucide="credit-card" class="d-block"></i>
                   Sin pagos registrados.

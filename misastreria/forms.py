@@ -176,22 +176,14 @@ class ClienteForm(forms.ModelForm):
 class ReparacionForm(forms.ModelForm):
     class Meta:
         model = Reparacion
-        fields = ['fecha_entrega', 'empleado', 'cliente', 'estado', 'porcentaje_comision']
-        labels = {
-            'porcentaje_comision': 'Comisión empleado (%)',
-        }
+        # empleado/porcentaje_comision ya no se editan aquí: se manejan como
+        # asignaciones (varios empleados con % distinto). La vista setea el
+        # empleado "lead" desde la primera asignación.
+        fields = ['fecha_entrega', 'cliente', 'estado']
         widgets = {
             'fecha_entrega': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
             'estado':        forms.Select(attrs={'class': 'form-select'}),
-            'empleado':      forms.HiddenInput(),
             'cliente':       forms.HiddenInput(),
-            'porcentaje_comision': forms.NumberInput(attrs={
-                'class': 'form-control',
-                'step': '0.01',
-                'min': '0',
-                'max': '100',
-                'placeholder': '0–100, ej: 15.50',
-            }),
         }
 
     def clean(self):
@@ -216,12 +208,12 @@ class ReparacionItemForm(forms.ModelForm):
 class VentaForm(forms.ModelForm):
     class Meta:
         model = Venta
-        fields = ['fecha_venta', 'cliente', 'empleado', 'descuento', 'notas', 'forma_pago']
+        fields = ['fecha_venta', 'cliente', 'empleado', 'descuento', 'notas', 'estado']
         widgets = {
             'fecha_venta': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
             'descuento': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'min': '0', 'max': '100'}),
             'notas': forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
-            'forma_pago': forms.Select(attrs={'class': 'form-select'}),
+            'estado': forms.Select(attrs={'class': 'form-select'}),
         }
 
     def __init__(self, *args, **kwargs):
@@ -252,13 +244,13 @@ class VentaItemForm(forms.ModelForm):
 class ConfeccionForm(forms.ModelForm):
     class Meta:
         model = Confeccion
+        # empleado/porcentaje_comision ya no se editan aquí: se manejan como
+        # asignaciones (varios empleados con % distinto). La vista setea el
+        # empleado "lead" desde la primera asignación.
         fields = [
-            'fecha_inicio', 'color', 'modelo', 'cliente', 'empleado', 'garantia_meses', 'observaciones',
-            'precio', 'porcentaje_comision', 'adelanto', 'saldo', 'fecha_prueba', 'fecha_entrega', 'estado', 'forma_pago',
+            'fecha_inicio', 'color', 'modelo', 'cliente', 'garantia_meses', 'observaciones',
+            'precio', 'adelanto', 'saldo', 'fecha_prueba', 'fecha_entrega', 'estado', 'forma_pago',
         ]
-        labels = {
-            'porcentaje_comision': 'Comisión empleado (%)',
-        }
         widgets = {
             'fecha_inicio':    forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
             'fecha_prueba':    forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
@@ -267,13 +259,6 @@ class ConfeccionForm(forms.ModelForm):
             'garantia_meses':  forms.NumberInput(attrs={'class': 'form-control', 'min': 1, 'max': 60, 'placeholder': 'Ej: 6'}),
             'saldo':           forms.NumberInput(attrs={'class': 'form-control', 'readonly': 'readonly'}),
             'forma_pago':      forms.Select(attrs={'class': 'form-select'}),
-            'porcentaje_comision': forms.NumberInput(attrs={
-                'class': 'form-control',
-                'step': '0.01',
-                'min': '0',
-                'max': '100',
-                'placeholder': '0–100, ej: 15.50',
-            }),
         }
 
     def __init__(self, *args, **kwargs):
@@ -461,6 +446,13 @@ class PagoAlquilerForm(forms.Form):
         }),
         label='Nota',
     )
+    via_caja = forms.BooleanField(
+        required=False,
+        initial=True,
+        label='Registrar en caja',
+        help_text='Si no está marcado, el pago queda en reserva y no entra a caja hasta el pago final.',
+        widget=forms.CheckboxInput(attrs={'class': 'form-check-input', 'role': 'switch'}),
+    )
 
 
 class PagoConfeccionForm(forms.Form):
@@ -491,6 +483,13 @@ class PagoConfeccionForm(forms.Form):
         }),
         label='Nota',
     )
+    via_caja = forms.BooleanField(
+        required=False,
+        initial=True,
+        label='Registrar en caja',
+        help_text='Si no está marcado, el pago queda en reserva y no entra a caja hasta el pago final.',
+        widget=forms.CheckboxInput(attrs={'class': 'form-check-input', 'role': 'switch'}),
+    )
 
 
 class PagoReparacionForm(forms.Form):
@@ -520,6 +519,50 @@ class PagoReparacionForm(forms.Form):
             'placeholder': 'Nota (opcional)',
         }),
         label='Nota',
+    )
+    via_caja = forms.BooleanField(
+        required=False,
+        initial=True,
+        label='Registrar en caja',
+        help_text='Si no está marcado, el pago queda en reserva y no entra a caja hasta el pago final.',
+        widget=forms.CheckboxInput(attrs={'class': 'form-check-input', 'role': 'switch'}),
+    )
+
+
+class PagoVentaForm(forms.Form):
+    from decimal import Decimal as _Decimal
+    monto = forms.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        min_value=_Decimal('0.01'),
+        widget=forms.NumberInput(attrs={
+            'class': 'form-control',
+            'step': '0.01',
+            'min': '0.01',
+            'placeholder': '0.00',
+        }),
+        label='Monto',
+    )
+    forma_pago = forms.ChoiceField(
+        choices=FORMA_PAGO_CHOICES,
+        widget=forms.Select(attrs={'class': 'form-select'}),
+        label='Forma de pago',
+    )
+    descripcion = forms.CharField(
+        max_length=200,
+        required=False,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control',
+            'placeholder': 'Nota (opcional)',
+        }),
+        label='Nota',
+    )
+    via_caja = forms.BooleanField(
+        required=False,
+        initial=True,
+        label='Registrar en caja',
+        help_text='Si no está marcado, el pago queda en reserva y no entra a caja hasta el pago final.',
+        widget=forms.CheckboxInput(attrs={'class': 'form-check-input', 'role': 'switch'}),
     )
 
 

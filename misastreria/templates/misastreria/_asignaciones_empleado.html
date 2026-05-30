@@ -1,0 +1,81 @@
+{% comment %}
+  Sección reutilizable de "Empleados asignados" (varios empleados, cada uno con su %).
+  Contexto requerido:
+    - asig_form_id   : id del <form> al que pertenecen los inputs (se pasa con `with`)
+    - asignaciones_json : JSON [{empleado_id, empleado_nombre, porcentaje}] (de la vista)
+{% endcomment %}
+<div class="card mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <h3 class="card-title mb-0">Empleados asignados</h3>
+    <button type="button" class="btn btn-sm btn-outline-primary" id="btn-add-asig">
+      <i data-lucide="plus"></i> Agregar empleado
+    </button>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table mb-0">
+        <thead>
+          <tr>
+            <th>Empleado</th>
+            <th style="width:10rem">Comisión (%)</th>
+            <th style="width:3rem"></th>
+          </tr>
+        </thead>
+        <tbody id="asig-body"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card-footer text-muted small">
+    Podés asignar más de un empleado; la comisión de cada uno se calcula sobre el total del trabajo.
+  </div>
+  <input type="hidden" name="asignaciones_count" id="asignaciones_count" value="0" form="{{ asig_form_id }}">
+</div>
+
+<script id="asig-data" type="application/json">{{ asignaciones_json|default:"[]"|safe }}</script>
+<script>
+// Se difiere a DOMContentLoaded para garantizar que sistema.js (makeCombobox) ya cargó.
+document.addEventListener('DOMContentLoaded', function () {
+  var body       = document.getElementById('asig-body');
+  var countInput = document.getElementById('asignaciones_count');
+  var addBtn     = document.getElementById('btn-add-asig');
+  var FORM_ID    = '{{ asig_form_id }}';
+  var ENDPOINT   = '{% url "buscar_empleados" %}';
+  var idx = 0;
+
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function addRow(data) {
+    data = data || {};
+    var i = idx++;
+    var hidId = 'asig-emp-' + i;
+    var tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td><div style="position:relative">' +
+        '<input type="text" class="form-control" autocomplete="off" placeholder="Buscar empleado…" value="' + esc(data.empleado_nombre || '') + '">' +
+        '<input type="hidden" id="' + hidId + '" name="asignacion[' + i + '][empleado]" form="' + FORM_ID + '" value="' + esc(data.empleado_id || '') + '">' +
+      '</div></td>' +
+      '<td><input type="number" step="0.01" min="0" max="100" class="form-control" ' +
+        'name="asignacion[' + i + '][pct]" form="' + FORM_ID + '" value="' + esc(data.porcentaje || '') + '" placeholder="0–100"></td>' +
+      '<td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger btn-del-asig" title="Quitar"><i data-lucide="x"></i></button></td>';
+    body.appendChild(tr);
+    var txt = tr.querySelector('input[type=text]');
+    if (window.makeCombobox) window.makeCombobox(txt, hidId, ENDPOINT);
+    if (window.lucide) lucide.createIcons();
+    // count = high-water de índices; la vista salta filas vacías/huecos
+    countInput.value = idx;
+  }
+
+  body.addEventListener('click', function (e) {
+    var del = e.target.closest('.btn-del-asig');
+    if (del) { del.closest('tr').remove(); }
+  });
+  addBtn.addEventListener('click', function () { addRow(); });
+
+  var existing = [];
+  try { existing = JSON.parse(document.getElementById('asig-data').textContent || '[]'); } catch (e) {}
+  if (existing.length) { existing.forEach(addRow); }
+  else { addRow(); }  // una fila vacía por defecto (caso común: 1 empleado)
+});
+</script>

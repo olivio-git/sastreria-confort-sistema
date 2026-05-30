@@ -287,8 +287,47 @@ class Reparacion(models.Model):
         self.total = total
         self.save(update_fields=['total'])
 
+    @property
+    def empleados_extra(self):
+        """Cantidad de empleados asignados además del principal (para mostrar '+N')."""
+        return max(0, len(self.asignaciones.all()) - 1)
+
     def __str__(self):
         return f"Reparación {self.codigo}"
+
+
+class ReparacionEmpleado(models.Model):
+    """Empleado asignado a una reparación con su porcentaje de comisión.
+    Permite varios empleados por trabajo, cada uno con un % distinto."""
+    reparacion = models.ForeignKey(
+        Reparacion, on_delete=models.CASCADE, related_name='asignaciones',
+        verbose_name="Reparación",
+    )
+    empleado = models.ForeignKey(
+        Empleado, on_delete=models.CASCADE, related_name='asignaciones_reparacion',
+        verbose_name="Empleado",
+    )
+    porcentaje_comision = models.DecimalField(
+        max_digits=5, decimal_places=2,
+        validators=[MinValueValidator(Decimal('0.00')), MaxValueValidator(Decimal('100.00'))],
+        verbose_name="Porcentaje Comisión (%)",
+    )
+
+    class Meta:
+        verbose_name = "Asignación de reparación"
+        verbose_name_plural = "Asignaciones de reparación"
+        constraints = [
+            models.UniqueConstraint(fields=['reparacion', 'empleado'], name='unique_empleado_reparacion'),
+        ]
+        ordering = ['id']
+
+    @property
+    def monto_comision(self):
+        total = self.reparacion.total or Decimal('0')
+        return (total * (self.porcentaje_comision or Decimal('0')) / Decimal('100'))
+
+    def __str__(self):
+        return f"{self.empleado} — {self.porcentaje_comision}% de {self.reparacion.codigo}"
 
 
 class ReparacionItem(models.Model):
@@ -585,6 +624,11 @@ class Insumo(models.Model):
 
 
 class Venta(Servicio):
+    ESTADO_CHOICES = [
+        ('en_proceso', 'En Proceso'),
+        ('efectuada', 'Efectuada'),
+    ]
+
     codigo = models.CharField(max_length=10, unique=True, blank=True, verbose_name="Código")
     fecha_venta = models.DateField(default=timezone.now, verbose_name="Fecha de Venta")
     cliente = models.ForeignKey(Cliente, on_delete=models.SET_NULL, null=True, blank=True, related_name='ventas', verbose_name="Cliente")
@@ -594,6 +638,12 @@ class Venta(Servicio):
     total = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="Total")
     notas = models.TextField(blank=True, verbose_name="Notas")
     forma_pago = models.CharField(max_length=15, choices=FORMA_PAGO_CHOICES, default='efectivo', blank=True, verbose_name="Forma de Pago")
+    estado = models.CharField(
+        max_length=20,
+        choices=ESTADO_CHOICES,
+        default='efectuada',
+        verbose_name="Estado",
+    )
 
     class Meta:
         verbose_name = "Venta"
@@ -613,6 +663,16 @@ class Venta(Servicio):
         self.subtotal = sum(item.subtotal for item in self.items.all())
         self.total = self.subtotal * (1 - self.descuento / Decimal('100'))
         Venta.objects.filter(pk=self.pk).update(subtotal=self.subtotal, total=self.total)
+
+    @property
+    def total_pagado(self):
+        from .caja_signals import _calcular_pagado_venta
+        return _calcular_pagado_venta(self)
+
+    @property
+    def saldo_pendiente(self):
+        from decimal import Decimal
+        return max(Decimal('0'), (self.total or Decimal('0')) - self.total_pagado)
 
     def __str__(self):
         return f"Venta {self.codigo}"
@@ -635,6 +695,18 @@ class VentaItem(models.Model):
     precio_reparacion = models.DecimalField(
         max_digits=10, decimal_places=2, default=Decimal('0'), verbose_name="Precio Arreglo",
     )
+    empleado = models.ForeignKey(
+        'Empleado', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='arreglos_venta',
+        verbose_name="Empleado del arreglo",
+    )
+    porcentaje_comision = models.DecimalField(
+        max_digits=5, decimal_places=2,
+        null=True, blank=True,
+        validators=[MinValueValidator(Decimal('0.00')), MaxValueValidator(Decimal('100.00'))],
+        verbose_name="Porcentaje Comisión (%)",
+        help_text="Comisión del empleado sobre el precio del arreglo. Se devenga cuando la venta está efectuada.",
+    )
     subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="Subtotal")
     grupo_conjunto = models.PositiveSmallIntegerField(null=True, blank=True, db_index=True)
 
@@ -645,6 +717,13 @@ class VentaItem(models.Model):
     def save(self, *args, **kwargs):
         self.subtotal = self.precio_unitario + (self.precio_reparacion or Decimal('0'))
         super().save(*args, **kwargs)
+
+    @property
+    def monto_comision(self):
+        """Comisión devengada por el arreglo (sobre el precio del arreglo)."""
+        if not self.porcentaje_comision:
+            return Decimal('0')
+        return (self.precio_reparacion or Decimal('0')) * self.porcentaje_comision / Decimal('100')
 
     def __str__(self):
         return f"{self.prenda_item.codigo_item}"
@@ -728,8 +807,47 @@ class Confeccion(models.Model):
         self.saldo = self.precio - self.adelanto
         super().save(*args, **kwargs)
 
+    @property
+    def empleados_extra(self):
+        """Cantidad de empleados asignados además del principal (para mostrar '+N')."""
+        return max(0, len(self.asignaciones.all()) - 1)
+
     def __str__(self):
         return f"{self.codigo} - {self.cliente or 'Sin cliente'}"
+
+
+class ConfeccionEmpleado(models.Model):
+    """Empleado asignado a una confección con su porcentaje de comisión.
+    Permite varios empleados por trabajo, cada uno con un % distinto."""
+    confeccion = models.ForeignKey(
+        Confeccion, on_delete=models.CASCADE, related_name='asignaciones',
+        verbose_name="Confección",
+    )
+    empleado = models.ForeignKey(
+        Empleado, on_delete=models.CASCADE, related_name='asignaciones_confeccion',
+        verbose_name="Empleado",
+    )
+    porcentaje_comision = models.DecimalField(
+        max_digits=5, decimal_places=2,
+        validators=[MinValueValidator(Decimal('0.00')), MaxValueValidator(Decimal('100.00'))],
+        verbose_name="Porcentaje Comisión (%)",
+    )
+
+    class Meta:
+        verbose_name = "Asignación de confección"
+        verbose_name_plural = "Asignaciones de confección"
+        constraints = [
+            models.UniqueConstraint(fields=['confeccion', 'empleado'], name='unique_empleado_confeccion'),
+        ]
+        ordering = ['id']
+
+    @property
+    def monto_comision(self):
+        precio = self.confeccion.precio or Decimal('0')
+        return (precio * (self.porcentaje_comision or Decimal('0')) / Decimal('100'))
+
+    def __str__(self):
+        return f"{self.empleado} — {self.porcentaje_comision}% de {self.confeccion.codigo}"
 
 
 class ConfeccionItem(models.Model):
@@ -916,6 +1034,18 @@ class AlquilerItem(models.Model):
     precio_reparacion = models.DecimalField(
         max_digits=10, decimal_places=2, default=Decimal('0'), verbose_name="Precio Arreglo",
     )
+    empleado = models.ForeignKey(
+        'Empleado', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='arreglos_alquiler',
+        verbose_name="Empleado del arreglo",
+    )
+    porcentaje_comision = models.DecimalField(
+        max_digits=5, decimal_places=2,
+        null=True, blank=True,
+        validators=[MinValueValidator(Decimal('0.00')), MaxValueValidator(Decimal('100.00'))],
+        verbose_name="Porcentaje Comisión (%)",
+        help_text="Comisión del empleado sobre el precio del arreglo. Se devenga cuando el alquiler está devuelto.",
+    )
     subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="Subtotal")
     grupo_conjunto = models.PositiveSmallIntegerField(null=True, blank=True, db_index=True)
 
@@ -926,6 +1056,13 @@ class AlquilerItem(models.Model):
     def save(self, *args, **kwargs):
         self.subtotal = self.precio_unitario + (self.precio_reparacion or Decimal('0'))
         super().save(*args, **kwargs)
+
+    @property
+    def monto_comision(self):
+        """Comisión devengada por el arreglo (sobre el precio del arreglo)."""
+        if not self.porcentaje_comision:
+            return Decimal('0')
+        return (self.precio_reparacion or Decimal('0')) * self.porcentaje_comision / Decimal('100')
 
     def __str__(self):
         return f"{self.prenda_item.codigo_item}"
@@ -1171,10 +1308,11 @@ class CajaSesion(models.Model):
 
     @property
     def saldo_sistema(self):
-        """Apertura + ingresos operativos - egresos operativos. Excluye garantías."""
+        """Apertura + ingresos operativos - egresos operativos. Excluye garantías y pagos en reserva."""
         from django.db.models import Sum
         movs = self.movimientos.filter(
-            movimiento_reverso__isnull=True
+            movimiento_reverso__isnull=True,
+            via_caja=True,
         ).exclude(concepto__in=self._CONCEPTOS_GARANTIA)
         ingresos = (
             movs.filter(tipo='ingreso')
@@ -1186,10 +1324,11 @@ class CajaSesion(models.Model):
 
     @property
     def saldo_efectivo_sistema(self):
-        """Solo efectivo: apertura + ingresos efectivo - egresos efectivo. Excluye garantías."""
+        """Solo efectivo: apertura + ingresos efectivo - egresos efectivo. Excluye garantías y pagos en reserva."""
         from django.db.models import Sum
         movs = self.movimientos.filter(
             movimiento_reverso__isnull=True,
+            via_caja=True,
             forma_pago='efectivo',
         ).exclude(concepto__in=self._CONCEPTOS_GARANTIA)
         ingresos = (
@@ -1205,7 +1344,7 @@ class CajaSesion(models.Model):
         from django.db.models import Sum
         return (
             self.movimientos
-            .filter(tipo='ingreso', movimiento_reverso__isnull=True)
+            .filter(tipo='ingreso', movimiento_reverso__isnull=True, via_caja=True)
             .exclude(concepto__in=('apertura_caja', 'garantia_alquiler'))
             .aggregate(s=Sum('monto'))['s'] or Decimal('0')
         )
@@ -1215,7 +1354,7 @@ class CajaSesion(models.Model):
         from django.db.models import Sum
         return (
             self.movimientos
-            .filter(tipo='egreso', movimiento_reverso__isnull=True)
+            .filter(tipo='egreso', movimiento_reverso__isnull=True, via_caja=True)
             .exclude(concepto='garantia_devolucion')
             .aggregate(s=Sum('monto'))['s'] or Decimal('0')
         )
@@ -1262,6 +1401,9 @@ class CajaMovimiento(models.Model):
         'garantia_devolucion': 'egreso',
         'venta_cobro': 'ingreso',
         'venta_ajuste': 'ingreso',
+        'venta_adelanto': 'ingreso',
+        'venta_pago': 'ingreso',
+        'venta_saldo': 'ingreso',
         'confeccion_adelanto': 'ingreso',
         'confeccion_saldo': 'ingreso',
         'confeccion_pago': 'ingreso',
@@ -1291,6 +1433,9 @@ class CajaMovimiento(models.Model):
         ('garantia_devolucion', 'Devolución de garantía'),
         ('venta_cobro', 'Cobro de venta'),
         ('venta_ajuste', 'Ajuste de venta'),
+        ('venta_adelanto', 'Adelanto de venta'),
+        ('venta_pago', 'Pago de venta'),
+        ('venta_saldo', 'Saldo de venta'),
         ('confeccion_adelanto', 'Adelanto de confección'),
         ('confeccion_saldo', 'Saldo de confección'),
         ('confeccion_pago', 'Pago de confección'),
@@ -1345,6 +1490,11 @@ class CajaMovimiento(models.Model):
         max_digits=10, decimal_places=2,
         validators=[MinValueValidator(Decimal('0.01'))],
         verbose_name="Monto",
+    )
+    via_caja = models.BooleanField(
+        default=True,
+        verbose_name="Registrar en caja",
+        help_text="Si está desactivado, el pago queda en reserva y no afecta el saldo de caja.",
     )
     fecha = models.DateTimeField(default=timezone.now, verbose_name="Fecha")
 
@@ -1425,7 +1575,7 @@ class CajaMovimiento(models.Model):
             ),
             models.UniqueConstraint(
                 fields=['referencia_venta', 'concepto'],
-                condition=models.Q(movimiento_reverso__isnull=True) & ~models.Q(concepto__in=['venta_ajuste', 'anulacion_cobro']),
+                condition=models.Q(movimiento_reverso__isnull=True) & ~models.Q(concepto__in=['venta_ajuste', 'venta_pago', 'venta_adelanto', 'anulacion_cobro']),
                 name='unique_mov_venta_activo',
             ),
             models.UniqueConstraint(

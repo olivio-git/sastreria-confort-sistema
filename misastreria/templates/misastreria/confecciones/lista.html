@@ -131,7 +131,7 @@
           <td>{{ c.precio|floatformat:2 }}</td>
           <td>{{ c.saldo_caja|floatformat:2 }}</td>
           <td>{{ c.fecha_entrega|date:"d/m/Y"|default:"—" }}</td>
-          <td>{{ c.empleado|default:"—" }}</td>
+          <td>{{ c.empleado|default:"—" }}{% if c.empleados_extra %} <span class="badge bg-secondary-lt text-secondary" title="Otros empleados asignados">+{{ c.empleados_extra }}</span>{% endif %}</td>
           <td>
             <span class="badge-estado badge-{{ c.estado }}">{{ c.get_estado_display }}</span>
             {% if c.garantia_estado == 'vigente' %}

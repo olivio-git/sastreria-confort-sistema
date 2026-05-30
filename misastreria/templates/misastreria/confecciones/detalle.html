@@ -18,6 +18,11 @@
       </h2>
     </div>
     <div class="col-auto ms-auto d-flex gap-2">
+      {% if saldo > 0 %}
+      <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modalCompletarConfeccion">
+        <i data-lucide="check-circle" class="me-1"></i>Completar pago
+      </button>
+      {% endif %}
       <a href="{% url 'editar_confeccion' confeccion.id %}" class="btn btn-outline-primary">
         <i data-lucide="pencil" class="me-1"></i>Editar
       </a>
@@ -64,8 +69,12 @@
             </div>
           </div>
           <div class="datagrid-item">
-            <div class="datagrid-title text-muted">Empleado</div>
-            <div class="datagrid-content">{{ confeccion.empleado|default:"—" }}</div>
+            <div class="datagrid-title text-muted">Empleados asignados</div>
+            <div class="datagrid-content">
+              {% for a in confeccion.asignaciones.all %}
+                <div>{{ a.empleado }} <span class="text-muted small">({{ a.porcentaje_comision|floatformat:2 }}% · Bs. {{ a.monto_comision|floatformat:2 }})</span></div>
+              {% empty %}—{% endfor %}
+            </div>
           </div>
           <div class="datagrid-item">
             <div class="datagrid-title text-muted">Fecha inicio</div>
@@ -291,6 +300,13 @@
               <div class="invalid-feedback d-block">{{ form.descripcion.errors.0 }}</div>
             {% endif %}
           </div>
+          <div class="mb-3">
+            <div class="form-check form-switch">
+              {{ form.via_caja }}
+              <label class="form-check-label fw-semibold" for="{{ form.via_caja.id_for_label }}">{{ form.via_caja.label }}</label>
+            </div>
+            <div class="form-text text-muted">{{ form.via_caja.help_text }}</div>
+          </div>
           <button type="submit" class="btn btn-success w-100">
             <i data-lucide="plus-circle" class="me-1"></i>Registrar pago
           </button>
@@ -315,6 +331,7 @@
             <tr>
               <th>Fecha</th>
               <th>Forma</th>
+              <th>Estado</th>
               <th class="text-end">Monto</th>
             </tr>
           </thead>
@@ -326,11 +343,18 @@
                 <small class="text-muted">{{ pago.get_concepto_display }}</small>
               </td>
               <td>{{ pago.get_forma_pago_display }}</td>
+              <td>
+                {% if pago.via_caja %}
+                  <span class="badge-estado badge-entregado">En caja</span>
+                {% else %}
+                  <span class="badge-estado badge-pendiente">Reservado</span>
+                {% endif %}
+              </td>
               <td class="text-end fw-semibold text-success">Bs. {{ pago.monto|floatformat:2 }}</td>
             </tr>
             {% empty %}
             <tr>
-              <td colspan="3">
+              <td colspan="4">
                 <div class="empty-state">
                   <i data-lucide="credit-card" class="d-block"></i>
                   Sin pagos registrados.
@@ -345,4 +369,50 @@
 
   </div>
 </div>
+
+{% if saldo > 0 %}
+<div class="modal modal-blur fade" id="modalCompletarConfeccion" tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog modal-sm modal-dialog-centered" role="document">
+    <div class="modal-content">
+      <form method="post" action="{% url 'agregar_pago_confeccion' confeccion.id %}">
+        {% csrf_token %}
+        <div class="modal-header">
+          <h5 class="modal-title">Completar pago {{ confeccion.codigo }}</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Monto a cobrar (Bs)</label>
+            <input type="number" name="monto" class="form-control" step="0.01" min="0.01"
+                   value="{{ saldo|floatformat:2 }}" required>
+            <div class="form-text text-muted">Saldo pendiente: <strong>Bs. {{ saldo|floatformat:2 }}</strong></div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Forma de pago</label>
+            <select name="forma_pago" class="form-select">
+              <option value="efectivo">Efectivo</option>
+              <option value="transferencia">Transferencia</option>
+              <option value="qr">QR</option>
+              <option value="tarjeta">Tarjeta</option>
+            </select>
+          </div>
+          <div class="mb-2">
+            <div class="form-check form-switch">
+              <input type="checkbox" name="via_caja" id="via_caja_completar_confeccion" class="form-check-input" role="switch" checked>
+              <label class="form-check-label fw-semibold" for="via_caja_completar_confeccion">Registrar en caja</label>
+            </div>
+            <div class="form-text text-muted">Si no está marcado, el pago queda en reserva.</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-success">
+            <i data-lucide="check-circle" class="me-1"></i>Completar pago
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
 {% endblock %}
