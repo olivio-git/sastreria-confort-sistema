@@ -10,6 +10,11 @@
         <i data-lucide="plus"></i>
       </button>
     </div>
+    <div class="d-flex align-items-center gap-1 ms-2">
+      <label class="form-label mb-0 small text-muted text-nowrap">Costo Bs</label>
+      {{ item_form.costo }}
+    </div>
+    {% if item_form.costo.errors %}<div class="text-danger small">{{ item_form.costo.errors.as_text }}</div>{% endif %}
     {{ item_form.id }}
     {{ item_form.DELETE }}
     <button type="button" class="btn btn-sm btn-icon btn-ghost-danger ms-auto remove-item" title="Quitar prenda">

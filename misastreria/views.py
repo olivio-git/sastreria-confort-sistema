@@ -2098,6 +2098,61 @@ def lista_confecciones(request):
     })
 
 
+def _parsear_lineas_pago(post):
+    """Lee líneas de pago divididas del POST: pago[i][monto] / pago[i][forma_pago].
+    Si no hay líneas, cae al envío simple (monto / forma_pago). Devuelve
+    (lineas, errores) donde lineas = [(Decimal monto, str forma_pago), ...]."""
+    import re
+    from decimal import Decimal, InvalidOperation
+    lineas, errores = [], []
+    indices = sorted({
+        int(m.group(1)) for k in post.keys()
+        for m in [re.match(r'^pago\[(\d+)\]\[monto\]$', k)] if m
+    })
+    for i in indices:
+        monto_str = (post.get(f'pago[{i}][monto]') or '').strip()
+        forma = (post.get(f'pago[{i}][forma_pago]') or 'efectivo').strip()
+        if not monto_str:
+            continue
+        try:
+            monto = Decimal(monto_str)
+        except (InvalidOperation, ValueError):
+            errores.append(f"Monto inválido: {monto_str}")
+            continue
+        if monto > 0:
+            lineas.append((monto, forma))
+    if not lineas:  # fallback: envío simple (ej. modal "Completar pago")
+        monto_str = (post.get('monto') or '').strip()
+        if monto_str:
+            try:
+                monto = Decimal(monto_str)
+                if monto > 0:
+                    lineas.append((monto, (post.get('forma_pago') or 'efectivo').strip()))
+            except (InvalidOperation, ValueError):
+                errores.append(f"Monto inválido: {monto_str}")
+    return lineas, errores
+
+
+def _registrar_pagos_confeccion(confeccion, post, usuario, descripcion_default, saldo_max):
+    """Registra pagos divididos de una confección (cada línea → confeccion_pago).
+    Valida que el total no exceda saldo_max. Devuelve (total_registrado, errores)."""
+    from decimal import Decimal
+    from .caja_signals import registrar_pago_confeccion
+    lineas, errores = _parsear_lineas_pago(post)
+    if errores:
+        return Decimal('0'), errores
+    total = sum((m for m, _ in lineas), Decimal('0'))
+    if total <= 0:
+        return Decimal('0'), []
+    if saldo_max is not None and total > saldo_max:
+        return Decimal('0'), [f"El pago (Bs {total:.2f}) excede el saldo pendiente de Bs {saldo_max:.2f}."]
+    via_caja = bool(post.get('via_caja'))
+    descripcion = (post.get('descripcion') or '').strip() or descripcion_default
+    for monto, forma in lineas:
+        registrar_pago_confeccion(confeccion, monto, forma, descripcion, usuario, via_caja=via_caja)
+    return total, []
+
+
 @login_required
 def crear_confeccion(request):
     if request.method == 'POST':
@@ -2110,8 +2165,17 @@ def crear_confeccion(request):
             confeccion.save()
             formset.instance = confeccion
             formset.save()
+            confeccion.recalcular_precio()  # precio = suma de costos por prenda
             _guardar_asignaciones(confeccion, request.POST, ConfeccionEmpleado, 'confeccion')
-            messages.success(request, f"Confección {confeccion.codigo} creada exitosamente.")
+            # Adelanto inicial: una o varias formas de pago (pagos divididos)
+            _total, pago_errores = _registrar_pagos_confeccion(
+                confeccion, request.POST, request.user,
+                f"Adelanto confección {confeccion.codigo}", saldo_max=confeccion.precio,
+            )
+            if pago_errores:
+                messages.warning(request, f"Confección {confeccion.codigo} creada, pero el adelanto no se registró: {'; '.join(pago_errores)}")
+            else:
+                messages.success(request, f"Confección {confeccion.codigo} creada exitosamente.")
             return redirect('detalle_confeccion', id=confeccion.id)
         else:
             messages.error(request, "Por favor corrige los errores del formulario.")
@@ -2152,6 +2216,7 @@ def editar_confeccion(request, id):
             from .models import ConfeccionEmpleado
             form.save()
             formset.save()
+            confeccion.recalcular_precio()  # precio = suma de costos por prenda
             _guardar_asignaciones(confeccion, request.POST, ConfeccionEmpleado, 'confeccion')
             messages.success(request, 'Confección actualizada exitosamente.')
             return redirect('detalle_confeccion', id=confeccion.id)
@@ -2195,28 +2260,22 @@ def detalle_confeccion(request, id):
 @login_required
 def agregar_pago_confeccion(request, id):
     from .forms import PagoConfeccionForm
-    from .caja_signals import registrar_pago_confeccion
     from django.http import HttpResponseNotAllowed
     if request.method != 'POST':
         return HttpResponseNotAllowed(['POST'])
     confeccion = get_object_or_404(Confeccion, id=id)
-    form = PagoConfeccionForm(request.POST)
-    if form.is_valid():
-        monto = form.cleaned_data['monto']
-        saldo = confeccion.saldo_pendiente
-        if monto > saldo:
-            form.add_error('monto', f"El pago excede el saldo pendiente de Bs {saldo:.2f}.")
-        else:
-            registrar_pago_confeccion(
-                confeccion,
-                monto,
-                form.cleaned_data['forma_pago'],
-                form.cleaned_data.get('descripcion', ''),
-                request.user,
-                via_caja=form.cleaned_data.get('via_caja', True),
-            )
-            messages.success(request, f"Pago de Bs {monto:.2f} registrado correctamente.")
-            return redirect('detalle_confeccion', id=id)
+    # Soporta una o varias formas de pago (pagos divididos) en un mismo cobro.
+    total, errores = _registrar_pagos_confeccion(
+        confeccion, request.POST, request.user,
+        f"Pago confección {confeccion.codigo}", saldo_max=confeccion.saldo_pendiente,
+    )
+    if total > 0 and not errores:
+        messages.success(request, f"Pago de Bs {total:.2f} registrado correctamente.")
+        return redirect('detalle_confeccion', id=id)
+    for err in errores:
+        messages.error(request, err)
+    if not errores and total <= 0:
+        messages.error(request, "Ingresá al menos un monto de pago.")
     items = confeccion.items.select_related('tipo_prenda').all()
     pagos = confeccion.caja_movimientos.filter(
         movimiento_reverso__isnull=True,
@@ -2229,7 +2288,7 @@ def agregar_pago_confeccion(request, id):
         'precio': confeccion.precio,
         'pagado': confeccion.total_pagado,
         'saldo': confeccion.saldo_pendiente,
-        'form': form,
+        'form': PagoConfeccionForm(),
     })
 
 
@@ -2361,8 +2420,8 @@ def exportar_recibo_confeccion_pdf(request, id):
     # Financial summary table (replaces single total)
     fin_data = [
         ['Precio total', f"Bs.  {confeccion.precio:.2f}"],
-        ['Adelanto',     f"Bs.  {confeccion.adelanto:.2f}"],
-        ['Saldo pendiente', f"Bs.  {confeccion.saldo:.2f}"],
+        ['Pagado',       f"Bs.  {confeccion.total_pagado:.2f}"],
+        ['Saldo pendiente', f"Bs.  {confeccion.saldo_pendiente:.2f}"],
     ]
     fin_tbl = Table(fin_data, colWidths=[W_PAGE * 0.55, W_PAGE * 0.45])
     fin_tbl.setStyle(TableStyle([

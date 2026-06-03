@@ -13,7 +13,7 @@ from decimal import Decimal
 
 from django.test import TestCase
 
-from misastreria.models import Confeccion
+from misastreria.models import Confeccion, ConfeccionItem
 from .factories import make_confeccion, make_cliente
 
 
@@ -135,3 +135,36 @@ class ConfeccionStrTests(TestCase):
         c = make_confeccion()
         self.assertIn('CONF-001', str(c))
         self.assertIn('Sin cliente', str(c))
+
+
+class ConfeccionRecalcularPrecioTests(TestCase):
+
+    def test_suma_costos_de_items(self):
+        c = make_confeccion(precio=Decimal('0'), saldo=Decimal('0'))
+        ConfeccionItem.objects.create(confeccion=c, costo=Decimal('250.00'))
+        ConfeccionItem.objects.create(confeccion=c, costo=Decimal('120.00'))
+        c.recalcular_precio()
+        c.refresh_from_db()
+        self.assertEqual(c.precio, Decimal('370.00'))
+
+    def test_saldo_se_recalcula_con_adelanto(self):
+        c = make_confeccion(precio=Decimal('0'), adelanto=Decimal('100.00'), saldo=Decimal('0'))
+        ConfeccionItem.objects.create(confeccion=c, costo=Decimal('370.00'))
+        c.recalcular_precio()
+        c.refresh_from_db()
+        self.assertEqual(c.precio, Decimal('370.00'))
+        self.assertEqual(c.saldo, Decimal('270.00'))
+
+    def test_no_borra_precio_si_items_sin_costo(self):
+        """Confección antigua: ítems sin costo no deben poner el precio en 0."""
+        c = make_confeccion(precio=Decimal('500.00'), saldo=Decimal('500.00'))
+        ConfeccionItem.objects.create(confeccion=c, costo=None)
+        c.recalcular_precio()
+        c.refresh_from_db()
+        self.assertEqual(c.precio, Decimal('500.00'))
+
+    def test_sin_items_no_cambia_precio(self):
+        c = make_confeccion(precio=Decimal('500.00'), saldo=Decimal('500.00'))
+        c.recalcular_precio()
+        c.refresh_from_db()
+        self.assertEqual(c.precio, Decimal('500.00'))

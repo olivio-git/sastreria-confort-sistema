@@ -807,6 +807,19 @@ class Confeccion(models.Model):
         self.saldo = self.precio - self.adelanto
         super().save(*args, **kwargs)
 
+    def recalcular_precio(self):
+        """Recalcula el precio total = suma de los costos de cada prenda (ítem).
+        Solo aplica si hay al menos un costo por ítem cargado, para no borrar el
+        precio de confecciones antiguas cuyos ítems no tienen costo. Usa .update()
+        para no disparar los signals de caja (mismo patrón que Venta/Alquiler)."""
+        from django.db.models import Sum
+        agg = self.items.aggregate(t=Sum('costo'))['t']
+        if agg is None or agg <= 0:
+            return
+        self.precio = agg
+        self.saldo = self.precio - (self.adelanto or Decimal('0'))
+        Confeccion.objects.filter(pk=self.pk).update(precio=self.precio, saldo=self.saldo)
+
     @property
     def empleados_extra(self):
         """Cantidad de empleados asignados además del principal (para mostrar '+N')."""
@@ -854,6 +867,10 @@ class ConfeccionItem(models.Model):
     confeccion = models.ForeignKey(Confeccion, on_delete=models.CASCADE, related_name='items')
     tipo_prenda = models.ForeignKey(TipoPrenda, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Tipo de Prenda")
     talla = models.CharField(max_length=30, blank=True, verbose_name="Talla")
+    costo = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        verbose_name="Costo", help_text="Precio de esta prenda confeccionada.",
+    )
 
     # Pantalón
     pantalon_largo_total        = models.CharField(max_length=20, blank=True)

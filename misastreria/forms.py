@@ -247,9 +247,13 @@ class ConfeccionForm(forms.ModelForm):
         # empleado/porcentaje_comision ya no se editan aquí: se manejan como
         # asignaciones (varios empleados con % distinto). La vista setea el
         # empleado "lead" desde la primera asignación.
+        # adelanto/forma_pago/saldo ya NO se editan aquí: los pagos (adelanto inicial
+        # y posteriores) se registran como movimientos confeccion_pago, permitiendo
+        # varias formas de pago por cobro (pagos divididos). El precio se auto-calcula
+        # de los costos por prenda.
         fields = [
             'fecha_inicio', 'color', 'modelo', 'cliente', 'garantia_meses', 'observaciones',
-            'precio', 'adelanto', 'saldo', 'fecha_prueba', 'fecha_entrega', 'estado', 'forma_pago',
+            'precio', 'fecha_prueba', 'fecha_entrega', 'estado',
         ]
         widgets = {
             'fecha_inicio':    forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
@@ -257,8 +261,7 @@ class ConfeccionForm(forms.ModelForm):
             'fecha_entrega':   forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
             'observaciones':   forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
             'garantia_meses':  forms.NumberInput(attrs={'class': 'form-control', 'min': 1, 'max': 60, 'placeholder': 'Ej: 6'}),
-            'saldo':           forms.NumberInput(attrs={'class': 'form-control', 'readonly': 'readonly'}),
-            'forma_pago':      forms.Select(attrs={'class': 'form-select'}),
+            'precio':          forms.NumberInput(attrs={'class': 'form-control', 'readonly': 'readonly', 'step': '0.01'}),
         }
 
     def __init__(self, *args, **kwargs):
@@ -286,7 +289,7 @@ class ConfeccionItemForm(forms.ModelForm):
     class Meta:
         model = ConfeccionItem
         fields = [
-            'tipo_prenda', 'talla',
+            'tipo_prenda', 'talla', 'costo',
             'pantalon_largo_total', 'pantalon_contorno_cintura', 'pantalon_contorno_cadera',
             'pantalon_largo_entrepierna', 'pantalon_contorno_pierna', 'pantalon_contorno_rodilla',
             'pantalon_contorno_bota', 'pantalon_tiro_delantero', 'pantalon_tiro_trasero',
@@ -310,8 +313,13 @@ class ConfeccionItemForm(forms.ModelForm):
         self.fields['tipo_prenda'].required = False
         self.fields['talla'].widget = forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Ej: 42 ó 42-43', 'style': 'width:9rem'})
         self.fields['talla'].required = False
+        self.fields['costo'].widget = forms.NumberInput(attrs={
+            'class': 'form-control costo-input', 'step': '0.01', 'min': '0',
+            'placeholder': '0.00', 'style': 'width:8rem;text-align:right',
+        })
+        self.fields['costo'].required = False
         for name in list(self.fields.keys()):
-            if name in ('tipo_prenda', 'talla'):
+            if name in ('tipo_prenda', 'talla', 'costo'):
                 continue
             self.fields[name].widget = forms.TextInput(attrs={
                 'class': 'form-control medida-input',

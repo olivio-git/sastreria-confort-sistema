@@ -278,34 +278,25 @@
       <div class="card-body">
         <form method="post" action="{% url 'agregar_pago_confeccion' confeccion.id %}">
           {% csrf_token %}
-          <div class="mb-3">
-            <label class="form-label fw-semibold">{{ form.monto.label }}</label>
-            {{ form.monto }}
-            {% if form.monto.errors %}
-              <div class="invalid-feedback d-block">{{ form.monto.errors.0 }}</div>
-            {% endif %}
-            <div class="form-text text-muted">Saldo pendiente: <strong>Bs. {{ saldo|floatformat:2 }}</strong></div>
+          <label class="form-label fw-semibold mb-1">Pago <span class="text-muted small fw-normal">(podés dividirlo en varias formas de pago)</span></label>
+          <div id="pagos-container" class="d-flex flex-column gap-2 mb-2"></div>
+          <button type="button" id="add-pago-btn" class="btn btn-sm btn-outline-success mb-3">
+            <i data-lucide="plus" class="me-1"></i>Agregar forma de pago
+          </button>
+          <div class="form-text text-muted mb-3">
+            Saldo pendiente: <strong>Bs. {{ saldo|floatformat:2 }}</strong> ·
+            Total a registrar: <strong id="pago-total-display">Bs. 0.00</strong>
           </div>
           <div class="mb-3">
-            <label class="form-label fw-semibold">{{ form.forma_pago.label }}</label>
-            {{ form.forma_pago }}
-            {% if form.forma_pago.errors %}
-              <div class="invalid-feedback d-block">{{ form.forma_pago.errors.0 }}</div>
-            {% endif %}
-          </div>
-          <div class="mb-3">
-            <label class="form-label fw-semibold">{{ form.descripcion.label }}</label>
-            {{ form.descripcion }}
-            {% if form.descripcion.errors %}
-              <div class="invalid-feedback d-block">{{ form.descripcion.errors.0 }}</div>
-            {% endif %}
+            <label class="form-label fw-semibold">Nota</label>
+            <input type="text" name="descripcion" class="form-control" placeholder="Nota (opcional)">
           </div>
           <div class="mb-3">
             <div class="form-check form-switch">
-              {{ form.via_caja }}
-              <label class="form-check-label fw-semibold" for="{{ form.via_caja.id_for_label }}">{{ form.via_caja.label }}</label>
+              <input type="checkbox" name="via_caja" id="id_via_caja_pago" class="form-check-input" role="switch" checked>
+              <label class="form-check-label fw-semibold" for="id_via_caja_pago">Registrar en caja</label>
             </div>
-            <div class="form-text text-muted">{{ form.via_caja.help_text }}</div>
+            <div class="form-text text-muted">Si no está marcado, el pago queda en reserva y no entra a caja hasta el pago final.</div>
           </div>
           <button type="submit" class="btn btn-success w-100">
             <i data-lucide="plus-circle" class="me-1"></i>Registrar pago
@@ -415,4 +406,46 @@
   </div>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  var container = document.getElementById('pagos-container');
+  if (!container) return;
+  var addBtn = document.getElementById('add-pago-btn');
+  var totDisp = document.getElementById('pago-total-display');
+  var FORMAS_PAGO = [['efectivo', 'Efectivo'], ['transferencia', 'Transferencia'], ['qr', 'QR'], ['tarjeta', 'Tarjeta']];
+  var idx = 0;
+
+  function recalc() {
+    var total = 0;
+    container.querySelectorAll('.pago-monto').forEach(function (i) { total += parseFloat(i.value) || 0; });
+    if (totDisp) totDisp.textContent = 'Bs. ' + total.toFixed(2);
+  }
+
+  function addRow(value) {
+    var i = idx++;
+    var opts = FORMAS_PAGO.map(function (f) { return '<option value="' + f[0] + '">' + f[1] + '</option>'; }).join('');
+    var row = document.createElement('div');
+    row.className = 'd-flex gap-2 align-items-center pago-row';
+    row.innerHTML =
+      '<div class="input-group" style="max-width:200px">' +
+        '<span class="input-group-text">Bs</span>' +
+        '<input type="number" step="0.01" min="0" name="pago[' + i + '][monto]" class="form-control pago-monto" placeholder="0.00" value="' + (value || '') + '">' +
+      '</div>' +
+      '<select name="pago[' + i + '][forma_pago]" class="form-select pago-forma" style="max-width:160px">' + opts + '</select>' +
+      '<button type="button" class="btn btn-sm btn-outline-danger pago-del" title="Quitar"><i data-lucide="x"></i></button>';
+    container.appendChild(row);
+    row.querySelector('.pago-monto').addEventListener('input', recalc);
+    row.querySelector('.pago-del').addEventListener('click', function () { row.remove(); recalc(); });
+    if (window.lucide) lucide.createIcons();
+    recalc();
+  }
+
+  addBtn.addEventListener('click', function () { addRow(); });
+  // Primera fila precargada con el saldo pendiente (caso común: pago único completo)
+  addRow('{{ saldo|floatformat:2 }}');
+})();
+</script>
 {% endblock %}

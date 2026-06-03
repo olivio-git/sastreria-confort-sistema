@@ -317,6 +317,23 @@ class PagosReparacionTests(TestCase):
         # total=150, pagado=0 → saldo=150
         self.assertEqual(self.rep.saldo_pendiente, Decimal('150.00'))
 
+    def test_crear_entregada_no_duplica_movimiento(self):
+        """Regresión: crear una reparación YA entregada generaba 2 movimientos
+        (reparacion_saldo + reparacion_cobro). El re-guardado de recalcular_total()
+        es un update entregado→entregado y NO debe disparar el saldo final; solo
+        registrar_reparacion_en_caja() debe crear el cobro."""
+        rep = make_reparacion(total=Decimal('0'), estado='entregado')  # create → signal early-return
+        make_reparacion_item(rep, costo=Decimal('150.00'))             # ítem real (como en la view)
+        rep.recalcular_total()                 # update entregado→entregado, total→150 (como en la view)
+        registrar_reparacion_en_caja(rep)      # cobro explícito de la view
+        self.assertEqual(
+            _movs_activos(reparacion=rep, concepto='reparacion_saldo').count(), 0,
+            "No debe crearse reparacion_saldo al crear una reparación ya entregada")
+        self.assertEqual(
+            _movs_activos(reparacion=rep, concepto='reparacion_cobro').count(), 1)
+        # total cobrado = un solo movimiento por el total
+        self.assertEqual(_calcular_pagado_reparacion(rep), Decimal('150.00'))
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Confeccion — flujo

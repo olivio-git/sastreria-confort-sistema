@@ -124,10 +124,19 @@ function makeCombobox(input, hiddenId, endpoint) {
   clearBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
   wrapper.appendChild(clearBtn);
 
+  // Dropdown va al body con position:fixed para no quedar recortado por el
+  // overflow del contenedor (ej: table-responsive, card-body).
   var dropdown = document.createElement('ul');
   dropdown.className = 'combobox-dropdown';
-  dropdown.style.cssText = 'position:absolute;top:calc(100% + 2px);left:0;width:100%;z-index:1055;display:none;margin:0;padding:0;list-style:none;max-height:240px;overflow-y:auto;';
-  wrapper.appendChild(dropdown);
+  dropdown.style.cssText = 'position:fixed;z-index:9999;display:none;margin:0;padding:0;list-style:none;max-height:240px;overflow-y:auto;';
+  document.body.appendChild(dropdown);
+
+  function positionDropdown() {
+    var rect = input.getBoundingClientRect();
+    dropdown.style.top   = (rect.bottom + 2) + 'px';
+    dropdown.style.left  = rect.left + 'px';
+    dropdown.style.width = rect.width + 'px';
+  }
 
   function syncUI() {
     var has = !!hidden.value;
@@ -149,6 +158,7 @@ function makeCombobox(input, hiddenId, endpoint) {
 
   function renderList(list) {
     closeDropdown();
+    positionDropdown();
     if (!list.length) {
       var li = document.createElement('li');
       li.className = 'combobox-empty';
@@ -204,6 +214,22 @@ function makeCombobox(input, hiddenId, endpoint) {
   input.addEventListener('focus', function() { if (!hidden.value) filterAndShow(); });
   input.addEventListener('input', function() { hidden.value = ''; syncUI(); filterAndShow(); });
   input.addEventListener('blur',  function() { setTimeout(closeDropdown, 200); });
+
+  // Reposicionar si el dropdown está abierto y la página se desplaza/redimensiona
+  window.addEventListener('scroll', function() {
+    if (dropdown.style.display !== 'none') positionDropdown();
+  }, true);
+  window.addEventListener('resize', function() {
+    if (dropdown.style.display !== 'none') positionDropdown();
+  });
+
+  // Cuando el dropdown está abierto, redirigir el wheel al dropdown
+  document.addEventListener('wheel', function(e) {
+    if (dropdown.style.display === 'none') return;
+    if (dropdown.contains(e.target)) return;
+    dropdown.scrollTop += e.deltaY;
+    e.preventDefault();
+  }, { passive: false });
 }
 
 // ── Combobox local (filtra array pre-cargado, sin AJAX) ──────────────────────

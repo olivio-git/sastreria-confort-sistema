@@ -730,8 +730,12 @@ def reparacion_to_caja(sender, instance, created, **kwargs):
         _reversar_movimientos_activos(referencia_field='referencia_reparacion', instance=instance)
         return
 
-    # Transición: cualquier estado → 'entregado'
-    if instance.estado != 'entregado':
+    # Transición GENUINA: otro estado → 'entregado'.
+    # Un update 'entregado' → 'entregado' (ej. recalcular_total durante la creación
+    # de una reparación ya entregada) NO debe generar el saldo final: ese caso lo
+    # cubre registrar_reparacion_en_caja() con concepto 'reparacion_cobro'. Sin este
+    # guard se generaban DOS movimientos (reparacion_saldo + reparacion_cobro).
+    if instance.estado != 'entregado' or old_estado == 'entregado':
         return
     # Idempotencia: ya existe cobro o saldo final
     if CajaMovimiento.objects.filter(
