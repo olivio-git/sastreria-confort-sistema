@@ -125,6 +125,41 @@
     </div>
   </div>
 
+  {% if not venta %}
+  <!-- Pago: una o varias formas de pago (pagos divididos) -->
+  <div class="card mb-3">
+    <div class="card-header d-flex align-items-center">
+      <h3 class="card-title mb-0">Pago <span class="text-muted small fw-normal">(Opcional — podés dividirlo en varias formas de pago)</span></h3>
+      <button type="button" id="add-pago-btn" class="btn btn-sm btn-outline-success ms-auto">
+        <i data-lucide="plus"></i>Agregar forma de pago
+      </button>
+    </div>
+    <div class="card-body">
+      <div id="pagos-container" class="d-flex flex-column gap-2"></div>
+      <div class="row g-3 mt-1 align-items-end">
+        <div class="col-md-4">
+          <div class="form-check form-switch">
+            <input type="checkbox" name="via_caja" id="id_via_caja" class="form-check-input" role="switch" checked>
+            <label class="form-check-label" for="id_via_caja">Registrar en caja</label>
+          </div>
+          <div class="form-text">Si no está marcado, queda en reserva.</div>
+        </div>
+        <div class="col-md-4 text-md-end ms-md-auto">
+          <div class="text-muted small">Total pagado</div>
+          <div class="fw-bold fs-5" id="pago-total-display">Bs 0.00</div>
+        </div>
+        <div class="col-md-4 text-md-end">
+          <div class="text-muted small">Saldo</div>
+          <div class="fw-bold fs-5" id="pago-saldo-display">Bs 0.00</div>
+        </div>
+      </div>
+      <div class="form-text mt-2">
+        Lo que no se cobre ahora queda como saldo pendiente y se completa desde el detalle de la venta.
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <div class="d-flex justify-content-end gap-2">
     <a href="{% url 'lista_ventas' %}" class="btn btn-outline-secondary">Cancelar</a>
     <button type="submit" class="btn btn-primary">
@@ -214,6 +249,43 @@ function calcTotales() {
   document.getElementById('resDescuento').textContent = '- ' + descuento.toFixed(2);
   document.getElementById('resTotal').textContent     = total.toFixed(2);
   sinItems.style.display = tbody.querySelectorAll('.item-row').length ? 'none' : 'block';
+  recalcPago();
+}
+
+// ── Pago: formas de pago divididas (solo en creación) ──
+const pagosContainer = document.getElementById('pagos-container');
+const FORMAS_PAGO = [['efectivo', 'Efectivo'], ['transferencia', 'Transferencia'], ['qr', 'QR'], ['tarjeta', 'Tarjeta']];
+let pagoIdx = 0;
+
+function recalcPago() {
+  if (!pagosContainer) return;
+  const total = parseFloat(document.getElementById('resTotal').textContent) || 0;
+  let pagado = 0;
+  pagosContainer.querySelectorAll('.pago-monto').forEach(i => { pagado += parseFloat(i.value) || 0; });
+  const totDisp = document.getElementById('pago-total-display');
+  const salDisp = document.getElementById('pago-saldo-display');
+  if (totDisp) totDisp.textContent = 'Bs ' + pagado.toFixed(2);
+  if (salDisp) salDisp.textContent = 'Bs ' + Math.max(0, total - pagado).toFixed(2);
+}
+
+function addPagoRow() {
+  if (!pagosContainer) return;
+  const idx = pagoIdx++;
+  const opts = FORMAS_PAGO.map(f => '<option value="' + f[0] + '">' + f[1] + '</option>').join('');
+  const row = document.createElement('div');
+  row.className = 'd-flex gap-2 align-items-center pago-row';
+  row.innerHTML =
+    '<div class="input-group" style="max-width:220px">' +
+      '<span class="input-group-text">Bs</span>' +
+      '<input type="number" step="0.01" min="0" name="pago[' + idx + '][monto]" class="form-control pago-monto" placeholder="0.00">' +
+    '</div>' +
+    '<select name="pago[' + idx + '][forma_pago]" class="form-select pago-forma" style="max-width:180px">' + opts + '</select>' +
+    '<button type="button" class="btn btn-sm btn-outline-danger pago-del" title="Quitar"><i data-lucide="x"></i></button>';
+  pagosContainer.appendChild(row);
+  row.querySelector('.pago-monto').addEventListener('input', recalcPago);
+  row.querySelector('.pago-del').addEventListener('click', function () { row.remove(); recalcPago(); });
+  if (window.lucide) lucide.createIcons();
+  recalcPago();
 }
 
 function addRow(prendaItemId, precio, tipoRepId, tipoRepNombre, precioRep, empleadoId, montoComision) {
@@ -280,6 +352,12 @@ if (ITEMS_INICIALES.length > 0) {
 
 document.getElementById('btnAgregarItem').addEventListener('click', () => addRow());
 descInput.addEventListener('input', calcTotales);
+
+const addPagoBtn = document.getElementById('add-pago-btn');
+if (addPagoBtn) {
+  addPagoBtn.addEventListener('click', addPagoRow);
+  addPagoRow();  // una fila por defecto
+}
 
 window.initConjuntoModal('modalConjuntos', CONJUNTOS, function(conjunto, slotsIncluidos) {
   const result = window.addConjuntoToForm(conjunto, slotsIncluidos, {

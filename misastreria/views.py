@@ -1839,19 +1839,48 @@ def _prendas_venta_json():
     return _prenda_items_json('venta')
 
 
+def _registrar_pagos_venta(venta, post, usuario, descripcion_default, saldo_max):
+    """Registra pagos divididos de una venta (cada línea → venta_pago/venta_saldo).
+    Valida que el total no exceda saldo_max. Devuelve (total_registrado, errores).
+    Gemelo de _registrar_pagos_confeccion: el paso a 'efectuada' lo dispara
+    registrar_pago_venta cuando el saldo llega a 0."""
+    from decimal import Decimal
+    from .caja_signals import registrar_pago_venta
+    lineas, errores = _parsear_lineas_pago(post)
+    if errores:
+        return Decimal('0'), errores
+    total = sum((m for m, _ in lineas), Decimal('0'))
+    if total <= 0:
+        return Decimal('0'), []
+    if saldo_max is not None and total > saldo_max:
+        return Decimal('0'), [f"El pago (Bs {total:.2f}) excede el total de Bs {saldo_max:.2f}."]
+    via_caja = bool(post.get('via_caja'))
+    descripcion = (post.get('descripcion') or '').strip() or descripcion_default
+    for monto, forma in lineas:
+        registrar_pago_venta(venta, monto, forma, descripcion, usuario, via_caja=via_caja)
+    return total, []
+
+
 @login_required
 def crear_venta(request):
     if request.method == 'POST':
         form = VentaForm(request.POST)
         if form.is_valid():
+            # El estado lo elige el operador en el select. Ya NO se cobra el total
+            # automáticamente: el cobro viene solo de las líneas de pago de abajo
+            # (una o varias formas de pago), y lo no cobrado queda como saldo a
+            # completar en el detalle.
             venta = form.save()
-            estado = venta.estado
-            estado_items = 'reservado' if estado == 'en_proceso' else 'baja'
+            estado_items = 'reservado' if venta.estado == 'en_proceso' else 'baja'
             errores = _guardar_items_venta(venta, request.POST, estado_items=estado_items)
-            if estado == 'efectuada':
-                from .caja_signals import registrar_venta_en_caja
-                registrar_venta_en_caja(venta)
-            if errores:
+            # Pago inicial: una o varias formas de pago (pagos divididos). Opcional.
+            _total, pago_errores = _registrar_pagos_venta(
+                venta, request.POST, request.user,
+                f"Pago venta {venta.codigo}", saldo_max=venta.total,
+            )
+            if pago_errores:
+                messages.warning(request, f"Venta {venta.codigo} creada, pero el pago no se registró: {'; '.join(pago_errores)}")
+            elif errores:
                 messages.warning(request, 'Venta creada con advertencias: ' + '; '.join(errores))
             else:
                 messages.success(request, f"Venta {venta.codigo} creada exitosamente.")
