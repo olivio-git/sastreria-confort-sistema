@@ -50,6 +50,23 @@
             <div class="datagrid-title text-muted">Concepto</div>
             <div class="datagrid-content">{{ movimiento.get_concepto_display }}</div>
           </div>
+          {% with ref=movimiento.referencia_link %}
+          {% if ref %}
+          <div class="datagrid-item">
+            <div class="datagrid-title text-muted">Referencia</div>
+            <div class="datagrid-content">
+              {% if ref.url %}
+                <a href="{{ ref.url }}" class="text-decoration-none">
+                  {{ ref.tipo }} {{ ref.codigo }}
+                  <i data-lucide="external-link" style="width:14px;height:14px" class="ms-1"></i>
+                </a>
+              {% else %}
+                {{ ref.tipo }} {{ ref.codigo }}
+              {% endif %}
+            </div>
+          </div>
+          {% endif %}
+          {% endwith %}
           <div class="datagrid-item">
             <div class="datagrid-title text-muted">Monto</div>
             <div class="datagrid-content">

@@ -213,14 +213,34 @@
     </div>
 
     <!-- Operaciones devengadas -->
-    <h4 class="mb-2 small fw-semibold text-muted text-uppercase">Operaciones devengadas</h4>
-    <div class="table-responsive mb-4" style="max-height:260px;overflow-y:auto">
-      <table class="table table-sm table-vcenter">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+      <h4 class="m-0 small fw-semibold text-muted text-uppercase">Operaciones devengadas</h4>
+      {% if total_operaciones_comision %}
+      <span class="text-muted small">({{ total_operaciones_comision }})</span>
+      {% endif %}
+    </div>
+
+    {% if conteo_comision %}
+    <!-- Filtro por tipo (cliente-side) -->
+    <div class="date-shortcuts flex-wrap mb-2" data-row-filter="tablaDevengadas" data-row-filter-attr="tipo">
+      <button type="button" class="btn btn-outline-secondary active" data-value="">
+        Todas <span class="text-muted">{{ total_operaciones_comision }}</span>
+      </button>
+      {% for key, label, n in conteo_comision %}
+      <button type="button" class="btn btn-outline-secondary" data-value="{{ key }}">
+        {{ label }} <span class="text-muted">{{ n }}</span>
+      </button>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="table-responsive mb-4" style="max-height:520px;overflow-y:auto">
+      <table class="table table-sm table-vcenter" id="tablaDevengadas">
         <thead>
           <tr>
             <th>Tipo</th>
             <th>Código</th>
-            <th>Fecha entrega</th>
+            <th>Fecha</th>
             <th>Cliente</th>
             <th class="text-end">Base</th>
             <th class="text-end">%</th>
@@ -228,58 +248,30 @@
           </tr>
         </thead>
         <tbody>
-          {% for r in reparaciones_comision %}
-          <tr>
-            <td><span class="badge-estado badge-en_proceso">Reparación</span></td>
-            <td>{{ r.reparacion.codigo }}</td>
-            <td>{{ r.reparacion.fecha_entrega|default:"—" }}</td>
-            <td>{{ r.reparacion.cliente|default:"—" }}</td>
-            <td class="text-end">Bs. {{ r.reparacion.total|floatformat:2 }}</td>
-            <td class="text-end">{{ r.porcentaje_comision|floatformat:2 }}%</td>
-            <td class="text-end fw-semibold">Bs. {{ r.monto_comision|floatformat:2 }}</td>
+          {% for o in operaciones_comision %}
+          <tr data-tipo="{{ o.tipo_key }}">
+            <td><span class="badge-estado {{ o.badge }}">{{ o.tipo }}</span></td>
+            <td>
+              {{ o.codigo }}
+              {% if o.detalle %}<div class="text-muted small">{{ o.detalle }}</div>{% endif %}
+            </td>
+            <td>{{ o.fecha|default:"—" }}</td>
+            <td>{{ o.cliente|default:"—" }}</td>
+            <td class="text-end">{% if o.base is not None %}Bs. {{ o.base|floatformat:2 }}{% else %}—{% endif %}</td>
+            <td class="text-end">{% if o.porcentaje %}{{ o.porcentaje|floatformat:2 }}%{% else %}—{% endif %}</td>
+            <td class="text-end fw-semibold">Bs. {{ o.comision|floatformat:2 }}</td>
           </tr>
-          {% endfor %}
-          {% for c in confecciones_comision %}
-          <tr>
-            <td><span class="badge-estado badge-alquilado">Confección</span></td>
-            <td>{{ c.confeccion.codigo }}</td>
-            <td>{{ c.confeccion.fecha_entrega|default:"—" }}</td>
-            <td>{{ c.confeccion.cliente|default:"—" }}</td>
-            <td class="text-end">Bs. {{ c.confeccion.precio|floatformat:2 }}</td>
-            <td class="text-end">{{ c.porcentaje_comision|floatformat:2 }}%</td>
-            <td class="text-end fw-semibold">Bs. {{ c.monto_comision|floatformat:2 }}</td>
-          </tr>
-          {% endfor %}
-          {% for v in arreglos_venta_comision %}
-          <tr>
-            <td><span class="badge-estado badge-entregado">Arreglo venta</span></td>
-            <td>{{ v.venta.codigo }}</td>
-            <td>{{ v.tipo_reparacion|default:"Arreglo" }}</td>
-            <td>{{ v.venta.cliente|default:"—" }}</td>
-            <td class="text-end">Bs. {{ v.precio_reparacion|floatformat:2 }}</td>
-            <td class="text-end">{{ v.porcentaje_comision|floatformat:2 }}%</td>
-            <td class="text-end fw-semibold">Bs. {{ v.monto_comision|floatformat:2 }}</td>
-          </tr>
-          {% endfor %}
-          {% for a in arreglos_alquiler_comision %}
-          <tr>
-            <td><span class="badge-estado badge-devuelto">Arreglo alquiler</span></td>
-            <td>{{ a.alquiler.codigo }}</td>
-            <td>{{ a.tipo_reparacion|default:"Arreglo" }}</td>
-            <td>{{ a.alquiler.cliente|default:"—" }}</td>
-            <td class="text-end">Bs. {{ a.precio_reparacion|floatformat:2 }}</td>
-            <td class="text-end">{{ a.porcentaje_comision|floatformat:2 }}%</td>
-            <td class="text-end fw-semibold">Bs. {{ a.monto_comision|floatformat:2 }}</td>
-          </tr>
-          {% endfor %}
-          {% if not reparaciones_comision and not confecciones_comision and not arreglos_venta_comision and not arreglos_alquiler_comision %}
+          {% empty %}
           <tr>
             <td colspan="7" class="text-center text-muted py-3">
               <i data-lucide="percent" style="width:1.5rem;height:1.5rem;opacity:.4" class="d-block mx-auto mb-1"></i>
               Sin comisiones devengadas.
             </td>
           </tr>
-          {% endif %}
+          {% endfor %}
+          <tr class="d-none" data-row-filter-empty>
+            <td colspan="7" class="text-center text-muted py-3">Sin operaciones de este tipo.</td>
+          </tr>
         </tbody>
       </table>
     </div>

@@ -195,10 +195,8 @@ def eliminar_empleado(request, id):
     return render(request, 'misastreria/empleados/eliminar.html', {'empleado': empleado})
 
 def _calcular_saldo_comision_empleado(empleado):
-    """Devengado (asignaciones en trabajos entregados con %) menos total pagado."""
-    dev_rep = empleado.asignaciones_reparacion.filter(
-        reparacion__estado='entregado'
-    ).exclude(porcentaje_comision=0).aggregate(
+    """Devengado (asignaciones en todos los estados, monto fijo o %) menos total pagado."""
+    dev_rep = empleado.asignaciones_reparacion.exclude(porcentaje_comision=0).aggregate(
         s=Sum(
             ExpressionWrapper(
                 F('reparacion__total') * F('porcentaje_comision') / Decimal('100'),
@@ -207,41 +205,24 @@ def _calcular_saldo_comision_empleado(empleado):
         )
     )['s'] or Decimal('0')
 
-    dev_conf = empleado.asignaciones_confeccion.filter(
-        confeccion__estado='entregado'
-    ).exclude(porcentaje_comision=0).aggregate(
-        s=Sum(
-            ExpressionWrapper(
-                F('confeccion__precio') * F('porcentaje_comision') / Decimal('100'),
-                output_field=DecimalField(max_digits=12, decimal_places=2),
-            )
-        )
+    dev_conf = empleado.asignaciones_confeccion.exclude(monto_comision_fijo=0).aggregate(
+        s=Sum('monto_comision_fijo')
     )['s'] or Decimal('0')
 
-    dev_venta = empleado.arreglos_venta.filter(
-        venta__estado='efectuada'
-    ).exclude(porcentaje_comision__isnull=True).exclude(porcentaje_comision=0).aggregate(
-        s=Sum(
-            ExpressionWrapper(
-                F('precio_reparacion') * F('porcentaje_comision') / Decimal('100'),
-                output_field=DecimalField(max_digits=12, decimal_places=2),
-            )
-        )
+    dev_venta = empleado.arreglos_venta.aggregate(
+        s=Sum(Coalesce('monto_comision_fijo', Value(Decimal('0'))))
     )['s'] or Decimal('0')
 
-    dev_alquiler = empleado.arreglos_alquiler.filter(
-        alquiler__estado='devuelto'
-    ).exclude(porcentaje_comision__isnull=True).exclude(porcentaje_comision=0).aggregate(
-        s=Sum(
-            ExpressionWrapper(
-                F('precio_reparacion') * F('porcentaje_comision') / Decimal('100'),
-                output_field=DecimalField(max_digits=12, decimal_places=2),
-            )
-        )
+    dev_alquiler = empleado.arreglos_alquiler.aggregate(
+        s=Sum(Coalesce('monto_comision_fijo', Value(Decimal('0'))))
+    )['s'] or Decimal('0')
+
+    dev_prod = empleado.asignaciones_produccion.aggregate(
+        s=Sum('monto_comision_fijo')
     )['s'] or Decimal('0')
 
     pagado = empleado.pagos_comision.aggregate(s=Sum('monto'))['s'] or Decimal('0')
-    return (dev_rep + dev_conf + dev_venta + dev_alquiler) - pagado
+    return (dev_rep + dev_conf + dev_venta + dev_alquiler + dev_prod) - pagado
 
 
 @login_required
@@ -250,49 +231,47 @@ def detalle_empleado(request, id):
     permisos = empleado.permisos.order_by('-fecha_permiso')
     faltas = empleado.faltas.order_by('-fecha_falta')
 
-    # Reparaciones entregadas con comision asignada (vía tabla de asignaciones)
-    reparaciones_comision = empleado.asignaciones_reparacion.filter(
-        reparacion__estado='entregado',
-    ).exclude(porcentaje_comision=0).select_related('reparacion__cliente').annotate(
+    # Reparaciones con comision asignada (todos los estados)
+    reparaciones_comision = empleado.asignaciones_reparacion.exclude(
+        porcentaje_comision=0
+    ).select_related('reparacion__cliente').annotate(
         monto_comision_calc=ExpressionWrapper(
             F('reparacion__total') * F('porcentaje_comision') / Decimal('100'),
             output_field=DecimalField(max_digits=12, decimal_places=2),
         )
     ).order_by('-reparacion__fecha_entrega', '-id')
 
-    # Confecciones entregadas con comision asignada (vía tabla de asignaciones)
-    confecciones_comision = empleado.asignaciones_confeccion.filter(
-        confeccion__estado='entregado',
-    ).exclude(porcentaje_comision=0).select_related('confeccion__cliente').annotate(
-        monto_comision_calc=ExpressionWrapper(
-            F('confeccion__precio') * F('porcentaje_comision') / Decimal('100'),
-            output_field=DecimalField(max_digits=12, decimal_places=2),
-        )
+    # Confecciones con comision asignada (todos los estados, monto fijo)
+    confecciones_comision = empleado.asignaciones_confeccion.exclude(
+        monto_comision_fijo=0
+    ).select_related('confeccion__cliente').annotate(
+        monto_comision_calc=F('monto_comision_fijo')
     ).order_by('-confeccion__fecha_entrega', '-id')
 
-    # Arreglos de ventas efectuadas con comision asignada
-    arreglos_venta_comision = empleado.arreglos_venta.filter(
-        venta__estado='efectuada',
-    ).exclude(porcentaje_comision__isnull=True).exclude(porcentaje_comision=0).select_related(
+    # Arreglos de ventas con comision asignada (todos los estados)
+    arreglos_venta_comision = empleado.arreglos_venta.exclude(
+        monto_comision_fijo__isnull=True
+    ).exclude(monto_comision_fijo=0).select_related(
         'venta__cliente', 'prenda_item', 'tipo_reparacion',
     ).annotate(
-        monto_comision_calc=ExpressionWrapper(
-            F('precio_reparacion') * F('porcentaje_comision') / Decimal('100'),
-            output_field=DecimalField(max_digits=12, decimal_places=2),
-        )
+        monto_comision_calc=F('monto_comision_fijo')
     ).order_by('-venta__id', '-id')
 
-    # Arreglos de alquileres devueltos con comision asignada
-    arreglos_alquiler_comision = empleado.arreglos_alquiler.filter(
-        alquiler__estado='devuelto',
-    ).exclude(porcentaje_comision__isnull=True).exclude(porcentaje_comision=0).select_related(
+    # Arreglos de alquileres con comision asignada (todos los estados)
+    arreglos_alquiler_comision = empleado.arreglos_alquiler.exclude(
+        monto_comision_fijo__isnull=True
+    ).exclude(monto_comision_fijo=0).select_related(
         'alquiler__cliente', 'prenda_item', 'tipo_reparacion',
     ).annotate(
-        monto_comision_calc=ExpressionWrapper(
-            F('precio_reparacion') * F('porcentaje_comision') / Decimal('100'),
-            output_field=DecimalField(max_digits=12, decimal_places=2),
-        )
+        monto_comision_calc=F('monto_comision_fijo')
     ).order_by('-alquiler__id', '-id')
+
+    # Producción con comisión asignada (todos los estados, monto fijo)
+    produccion_comision = empleado.asignaciones_produccion.exclude(
+        monto_comision_fijo=0
+    ).select_related('orden').annotate(
+        monto_comision_calc=F('monto_comision_fijo')
+    ).order_by('-orden__creado', '-id')
 
     # Totales devengados
     total_devengado_rep = reparaciones_comision.aggregate(
@@ -307,10 +286,90 @@ def detalle_empleado(request, id):
     total_devengado_alquiler = arreglos_alquiler_comision.aggregate(
         s=Sum('monto_comision_calc')
     )['s'] or Decimal('0')
+    total_devengado_prod = produccion_comision.aggregate(
+        s=Sum('monto_comision_calc')
+    )['s'] or Decimal('0')
     total_devengado = (
         total_devengado_rep + total_devengado_conf
         + total_devengado_venta + total_devengado_alquiler
+        + total_devengado_prod
     )
+
+    # Lista unificada de operaciones devengadas (ordenada por fecha desc) para
+    # dar trazabilidad y permitir filtrar por tipo en el detalle del empleado.
+    operaciones_comision = []
+    for r in reparaciones_comision:
+        operaciones_comision.append({
+            'tipo': 'Reparación', 'tipo_key': 'reparacion', 'badge': 'badge-en_proceso',
+            'codigo': r.reparacion.codigo,
+            'fecha': r.reparacion.fecha_entrega,
+            'cliente': r.reparacion.cliente,
+            'base': r.reparacion.total,
+            'porcentaje': r.porcentaje_comision,
+            'detalle': '',
+            'comision': r.monto_comision_calc,
+        })
+    for c in confecciones_comision:
+        operaciones_comision.append({
+            'tipo': 'Confección', 'tipo_key': 'confeccion', 'badge': 'badge-alquilado',
+            'codigo': c.confeccion.codigo,
+            'fecha': c.confeccion.fecha_entrega,
+            'cliente': c.confeccion.cliente,
+            'base': c.confeccion.precio,
+            'porcentaje': None,
+            'detalle': '',
+            'comision': c.monto_comision_calc,
+        })
+    for v in arreglos_venta_comision:
+        operaciones_comision.append({
+            'tipo': 'Arreglo venta', 'tipo_key': 'venta', 'badge': 'badge-entregado',
+            'codigo': v.venta.codigo,
+            'fecha': v.venta.fecha_venta,
+            'cliente': v.venta.cliente,
+            'base': v.precio_reparacion,
+            'porcentaje': None,
+            'detalle': str(v.tipo_reparacion) if v.tipo_reparacion else '',
+            'comision': v.monto_comision_calc,
+        })
+    for a in arreglos_alquiler_comision:
+        operaciones_comision.append({
+            'tipo': 'Arreglo alquiler', 'tipo_key': 'alquiler', 'badge': 'badge-devuelto',
+            'codigo': a.alquiler.codigo,
+            'fecha': a.alquiler.fecha_alquiler,
+            'cliente': a.alquiler.cliente,
+            'base': a.precio_reparacion,
+            'porcentaje': None,
+            'detalle': str(a.tipo_reparacion) if a.tipo_reparacion else '',
+            'comision': a.monto_comision_calc,
+        })
+    for p in produccion_comision:
+        operaciones_comision.append({
+            'tipo': 'Producción', 'tipo_key': 'produccion', 'badge': 'badge-tipo-stock',
+            'codigo': p.orden.codigo,
+            'fecha': p.orden.fecha_estimada or p.orden.fecha_inicio,
+            'cliente': None,
+            'base': None,
+            'porcentaje': None,
+            'detalle': p.get_responsabilidad_display(),
+            'comision': p.monto_comision_calc,
+        })
+    operaciones_comision.sort(
+        key=lambda o: (o['fecha'] or date.min, o['codigo']), reverse=True
+    )
+
+    # Conteo por tipo para los chips de filtro
+    tipos_comision = [
+        ('reparacion', 'Reparación'),
+        ('confeccion', 'Confección'),
+        ('venta', 'Arreglo venta'),
+        ('alquiler', 'Arreglo alquiler'),
+        ('produccion', 'Producción'),
+    ]
+    conteo_comision = [
+        (key, label, sum(1 for o in operaciones_comision if o['tipo_key'] == key))
+        for key, label in tipos_comision
+    ]
+    conteo_comision = [c for c in conteo_comision if c[2] > 0]
 
     # Pagos
     pagos_comision = empleado.pagos_comision.order_by('-fecha', '-id')
@@ -322,12 +381,12 @@ def detalle_empleado(request, id):
         'empleado': empleado,
         'permisos': permisos,
         'faltas': faltas,
-        'reparaciones_comision': reparaciones_comision,
-        'confecciones_comision': confecciones_comision,
-        'arreglos_venta_comision': arreglos_venta_comision,
-        'arreglos_alquiler_comision': arreglos_alquiler_comision,
+        'operaciones_comision': operaciones_comision,
+        'conteo_comision': conteo_comision,
+        'total_operaciones_comision': len(operaciones_comision),
         'pagos_comision': pagos_comision,
         'total_devengado': total_devengado,
+        'total_devengado_prod': total_devengado_prod,
         'total_pagado': total_pagado,
         'saldo_comision': saldo_comision,
         'pago_form': PagoComisionEmpleadoForm(),
@@ -878,9 +937,10 @@ def lista_reparaciones(request):
     })
 
 
-def _parse_asignaciones(post):
+def _parse_asignaciones(post, monto_key='pct'):
     """Lee las filas de empleados asignados del POST.
-    Retorna lista de (empleado_id, pct_Decimal) válidas, en orden, sin duplicados."""
+    Retorna lista de (empleado_id, monto_Decimal) válidas, en orden, sin duplicados.
+    monto_key: 'pct' para reparaciones (porcentaje), 'monto' para confecciones (Bs fijo)."""
     try:
         count = int(post.get('asignaciones_count', '0'))
     except ValueError:
@@ -889,7 +949,7 @@ def _parse_asignaciones(post):
     vistos = set()
     for i in range(count + 1):  # +1: 'count' es high-water de índices (puede haber huecos)
         emp = post.get(f'asignacion[{i}][empleado]', '').strip()
-        pct = post.get(f'asignacion[{i}][pct]', '').strip()
+        pct = post.get(f'asignacion[{i}][{monto_key}]', '').strip()
         if not emp or emp in vistos:
             continue
         try:
@@ -901,39 +961,112 @@ def _parse_asignaciones(post):
     return pares
 
 
-def _guardar_asignaciones(instance, post, modelo_asignacion, fk_name):
+def _guardar_asignaciones(instance, post, modelo_asignacion, fk_name,
+                          commission_field='porcentaje_comision', monto_key='pct', sync_lead=True):
     """Borra y recrea las asignaciones de empleados de un servicio desde POST.
-    Sincroniza el 'lead' (instance.empleado + porcentaje_comision) con la primera fila.
+    Sincroniza el 'lead' (instance.empleado) con la primera fila.
+    commission_field: campo del modelo de asignación que guarda la comisión.
+    monto_key: clave del POST para el valor de comisión ('pct' o 'monto').
+    sync_lead: si True, también sincroniza instance.porcentaje_comision con la primera fila.
     Retorna lista de errores."""
     from .models import Empleado
     instance.asignaciones.all().delete()
     errores = []
     lead_emp = None
     lead_pct = None
-    for emp_id, pct in _parse_asignaciones(post):
+    for emp_id, pct in _parse_asignaciones(post, monto_key=monto_key):
         try:
             emp = Empleado.objects.get(pk=emp_id)
         except Empleado.DoesNotExist:
             errores.append(f"Empleado {emp_id} no encontrado.")
             continue
-        modelo_asignacion.objects.create(**{fk_name: instance, 'empleado': emp, 'porcentaje_comision': pct})
+        modelo_asignacion.objects.create(**{fk_name: instance, 'empleado': emp, commission_field: pct})
         if lead_emp is None:
             lead_emp = emp
             lead_pct = pct
     instance.empleado = lead_emp
-    instance.porcentaje_comision = lead_pct
-    instance.save(update_fields=['empleado', 'porcentaje_comision'])
+    if sync_lead:
+        instance.porcentaje_comision = lead_pct
+        instance.save(update_fields=['empleado', 'porcentaje_comision'])
+    else:
+        instance.save(update_fields=['empleado'])
     return errores
 
 
-def _asignaciones_json(instance):
-    """Serializa las asignaciones de un servicio para precargar el form de edición."""
+def _asignaciones_json(instance, monto_field='porcentaje_comision'):
+    """Serializa las asignaciones de un servicio para precargar el form de edición.
+    monto_field: campo del modelo de asignación que guarda el valor de comisión.
+    El JSON siempre usa la clave 'monto' para que el partial JS pueda leer data.monto."""
     if not instance or not instance.pk:
         return '[]'
     return json.dumps([
         {'empleado_id': a.empleado_id, 'empleado_nombre': str(a.empleado),
-         'porcentaje': str(a.porcentaje_comision)}
+         'monto': str(getattr(a, monto_field))}
         for a in instance.asignaciones.select_related('empleado').all()
+    ])
+
+
+def _parse_asignaciones_produccion(post):
+    """Lee filas de empleado/fase/monto de producción. NO deduplica por empleado
+    (un mismo empleado puede repetirse en distintas fases). Retorna (filas, errores)
+    donde filas = [(empleado_id:int, responsabilidad:str, monto:Decimal)]."""
+    valid = {c[0] for c in OrdenProduccion.ESTADO_CHOICES}
+    try:
+        count = int(post.get('asignaciones_prod_count', '0'))
+    except ValueError:
+        count = 0
+    filas, errores = [], []
+    for i in range(count + 1):
+        emp = post.get(f'asignacion_prod[{i}][empleado]', '').strip()
+        resp = post.get(f'asignacion_prod[{i}][responsabilidad]', '').strip()
+        monto = post.get(f'asignacion_prod[{i}][monto]', '').strip()
+        if not emp:
+            continue  # fila vacía / hueco
+        if resp not in valid:
+            errores.append(f"Fila {i+1}: fase inválida.")
+            continue
+        try:
+            emp_id = int(emp)
+        except ValueError:
+            errores.append(f"Fila {i+1}: empleado inválido.")
+            continue
+        try:
+            monto_dec = Decimal(monto) if monto else Decimal('0')
+        except Exception:
+            monto_dec = Decimal('0')
+        filas.append((emp_id, resp, monto_dec))
+    return filas, errores
+
+
+def _guardar_asignaciones_produccion(orden, post):
+    """Borra y recrea OrdenProduccionEmpleado para la orden. Retorna lista de errores."""
+    from .models import Empleado, OrdenProduccionEmpleado
+    filas, errores = _parse_asignaciones_produccion(post)
+    orden.empleados_produccion.all().delete()
+    for emp_id, resp, monto in filas:
+        try:
+            emp = Empleado.objects.get(pk=emp_id)
+        except Empleado.DoesNotExist:
+            errores.append(f"Empleado {emp_id} no encontrado.")
+            continue
+        try:
+            with transaction.atomic():
+                OrdenProduccionEmpleado.objects.create(
+                    orden=orden, empleado=emp,
+                    responsabilidad=resp, monto_comision_fijo=monto)
+        except IntegrityError:
+            errores.append(f"{emp} ya está asignado a la fase '{resp}' en esta orden.")
+    return errores
+
+
+def _asignaciones_json_produccion(orden):
+    """Serializa asignaciones de producción para precargar el form de edición."""
+    if not orden or not orden.pk:
+        return '[]'
+    return json.dumps([
+        {'empleado_id': a.empleado_id, 'empleado_nombre': str(a.empleado),
+         'responsabilidad': a.responsabilidad, 'monto': str(a.monto_comision_fijo)}
+        for a in orden.empleados_produccion.select_related('empleado').all()
     ])
 
 
@@ -1631,14 +1764,14 @@ def _guardar_items_venta(venta, post_data, estado_items='baja'):
     tipo_reparacion_ids   = post_data.getlist('item_tipo_reparacion')
     precios_reparacion    = post_data.getlist('item_precio_reparacion')
     empleado_ids          = post_data.getlist('item_empleado')
-    porcentajes_comision  = post_data.getlist('item_porcentaje_comision')
+    montos_comision       = post_data.getlist('item_monto_comision')
     errores               = []
     seen                  = set()
 
-    for i, (pi_id, precio_str, grupo_str, tr_id, prec_rep_str, emp_id, pct_str) in enumerate(
+    for i, (pi_id, precio_str, grupo_str, tr_id, prec_rep_str, emp_id, monto_str) in enumerate(
         zip_longest(
             prenda_item_ids, precios, grupos, tipo_reparacion_ids, precios_reparacion,
-            empleado_ids, porcentajes_comision, fillvalue=''
+            empleado_ids, montos_comision, fillvalue=''
         ), 1
     ):
         if not pi_id:
@@ -1673,9 +1806,9 @@ def _guardar_items_venta(venta, post_data, estado_items='baja'):
             tipo_reparacion = TipoReparacion.objects.filter(pk=tr_id).first()
         empleado_arreglo = Empleado.objects.filter(pk=emp_id).first() if emp_id else None
         try:
-            pct_comision = Decimal(pct_str) if (pct_str and empleado_arreglo) else None
+            monto_comision = Decimal(monto_str) if (monto_str and empleado_arreglo) else None
         except Exception:
-            pct_comision = None
+            monto_comision = None
         vi = VentaItem.objects.create(
             venta=venta,
             prenda_item=pi,
@@ -1683,7 +1816,7 @@ def _guardar_items_venta(venta, post_data, estado_items='baja'):
             tipo_reparacion=tipo_reparacion,
             precio_reparacion=precio_reparacion,
             empleado=empleado_arreglo,
-            porcentaje_comision=pct_comision,
+            monto_comision_fijo=monto_comision,
             grupo_conjunto=grupo,
         )
         kardex_events.emit_venta(vi.prenda_item, venta, vi.precio_unitario)
@@ -1814,7 +1947,7 @@ def editar_venta(request, id):
             'tipo_reparacion_id': item.tipo_reparacion_id,
             'precio_reparacion': float(item.precio_reparacion or 0),
             'empleado_id': item.empleado_id,
-            'porcentaje_comision': float(item.porcentaje_comision) if item.porcentaje_comision is not None else None,
+            'monto_comision': float(item.monto_comision_fijo) if item.monto_comision_fijo is not None else None,
         }
         for item in venta.items.all()
     ]
@@ -2166,7 +2299,8 @@ def crear_confeccion(request):
             formset.instance = confeccion
             formset.save()
             confeccion.recalcular_precio()  # precio = suma de costos por prenda
-            _guardar_asignaciones(confeccion, request.POST, ConfeccionEmpleado, 'confeccion')
+            _guardar_asignaciones(confeccion, request.POST, ConfeccionEmpleado, 'confeccion',
+                                  commission_field='monto_comision_fijo', monto_key='monto', sync_lead=False)
             # Adelanto inicial: una o varias formas de pago (pagos divididos)
             _total, pago_errores = _registrar_pagos_confeccion(
                 confeccion, request.POST, request.user,
@@ -2217,7 +2351,8 @@ def editar_confeccion(request, id):
             form.save()
             formset.save()
             confeccion.recalcular_precio()  # precio = suma de costos por prenda
-            _guardar_asignaciones(confeccion, request.POST, ConfeccionEmpleado, 'confeccion')
+            _guardar_asignaciones(confeccion, request.POST, ConfeccionEmpleado, 'confeccion',
+                                  commission_field='monto_comision_fijo', monto_key='monto', sync_lead=False)
             messages.success(request, 'Confección actualizada exitosamente.')
             return redirect('detalle_confeccion', id=confeccion.id)
         else:
@@ -2232,7 +2367,7 @@ def editar_confeccion(request, id):
         'formset': formset,
         'titulo': 'Editar Confección',
         'confeccion': confeccion,
-        'asignaciones_json': _asignaciones_json(confeccion),
+        'asignaciones_json': _asignaciones_json(confeccion, 'monto_comision_fijo'),
         'tipos_prenda_json': json.dumps(tipos_prenda),
         'modelo_opts_json': json.dumps(modelo_opts),
     })
@@ -2557,14 +2692,14 @@ def _guardar_items_alquiler(alquiler, post_data, estado_anterior=None):
     tipo_reparacion_ids   = post_data.getlist('item_tipo_reparacion')
     precios_reparacion    = post_data.getlist('item_precio_reparacion')
     empleado_ids          = post_data.getlist('item_empleado')
-    porcentajes_comision  = post_data.getlist('item_porcentaje_comision')
+    montos_comision       = post_data.getlist('item_monto_comision')
     errores               = []
     seen                  = set()
 
-    for i, (pi_id, precio_str, grupo_str, tr_id, prec_rep_str, emp_id, pct_str) in enumerate(
+    for i, (pi_id, precio_str, grupo_str, tr_id, prec_rep_str, emp_id, monto_str) in enumerate(
         zip_longest(
             prenda_item_ids, precios, grupos, tipo_reparacion_ids, precios_reparacion,
-            empleado_ids, porcentajes_comision, fillvalue=''
+            empleado_ids, montos_comision, fillvalue=''
         ), 1
     ):
         if not pi_id:
@@ -2603,9 +2738,9 @@ def _guardar_items_alquiler(alquiler, post_data, estado_anterior=None):
             tipo_reparacion = TipoReparacion.objects.filter(pk=tr_id).first()
         empleado_arreglo = Empleado.objects.filter(pk=emp_id).first() if emp_id else None
         try:
-            pct_comision = Decimal(pct_str) if (pct_str and empleado_arreglo) else None
+            monto_comision = Decimal(monto_str) if (monto_str and empleado_arreglo) else None
         except Exception:
-            pct_comision = None
+            monto_comision = None
         ai = AlquilerItem.objects.create(
             alquiler=alquiler,
             prenda_item=pi,
@@ -2613,7 +2748,7 @@ def _guardar_items_alquiler(alquiler, post_data, estado_anterior=None):
             tipo_reparacion=tipo_reparacion,
             precio_reparacion=precio_reparacion,
             empleado=empleado_arreglo,
-            porcentaje_comision=pct_comision,
+            monto_comision_fijo=monto_comision,
             grupo_conjunto=grupo,
         )
         if alquiler.estado in ESTADOS_QUE_BLOQUEAN:
@@ -2742,7 +2877,7 @@ def editar_alquiler(request, id):
             'tipo_reparacion_id': item.tipo_reparacion_id,
             'precio_reparacion': float(item.precio_reparacion or 0),
             'empleado_id': item.empleado_id,
-            'porcentaje_comision': float(item.porcentaje_comision) if item.porcentaje_comision is not None else None,
+            'monto_comision': float(item.monto_comision_fijo) if item.monto_comision_fijo is not None else None,
         }
         for item in alquiler.items.all()
     ]
@@ -5774,13 +5909,15 @@ def lista_ordenes(request):
         periodo = periodo or '3meses'
         desde = (hoy - timedelta(days=90)).isoformat()
 
-    qs = OrdenProduccion.objects.select_related('empleado', 'confeccion').order_by('-creado')
+    qs = OrdenProduccion.objects.select_related('confeccion').prefetch_related(
+        'empleados_produccion__empleado'
+    ).order_by('-creado')
     if q:
         qs = qs.filter(
             Q(codigo__icontains=q) |
             Q(descripcion__icontains=q) |
-            Q(empleado__nombres__icontains=q)
-        )
+            Q(empleados_produccion__empleado__nombres__icontains=q)
+        ).distinct()
     if estado:
         qs = qs.filter(estado=estado)
     if desde:
@@ -5811,6 +5948,7 @@ def crear_orden(request):
         if form.is_valid():
             orden = form.save()
             errores = _guardar_insumos_orden(orden, request.POST)
+            errores += _guardar_asignaciones_produccion(orden, request.POST)
             if errores:
                 messages.warning(request, 'Orden creada con advertencias: ' + '; '.join(errores))
             else:
@@ -5819,11 +5957,12 @@ def crear_orden(request):
         else:
             messages.error(request, 'Por favor corrige los errores del formulario.')
     else:
-        form = OrdenProduccionForm()
+        form = OrdenProduccionForm(initial={'tipo': 'stock'})
     return render(request, 'misastreria/produccion/form.html', {
         'form':        form,
         'titulo':      'Nueva Orden de Producción',
         'insumos_json': _insumos_json(),
+        'asignaciones_json': '[]',
     })
 
 
@@ -5835,6 +5974,7 @@ def editar_orden(request, id):
         if form.is_valid():
             orden = form.save()
             errores = _guardar_insumos_orden(orden, request.POST)
+            errores += _guardar_asignaciones_produccion(orden, request.POST)
             if errores:
                 messages.warning(request, 'Actualizado con advertencias: ' + '; '.join(errores))
             else:
@@ -5851,6 +5991,7 @@ def editar_orden(request, id):
         'orden':            orden,
         'items_existentes': items_existentes,
         'insumos_json':     _insumos_json(),
+        'asignaciones_json': _asignaciones_json_produccion(orden),
     })
 
 
@@ -7839,7 +7980,9 @@ def lista_movimientos_caja(request):
         hasta = hoy.isoformat()
 
     qs = CajaMovimiento.objects.filter(via_caja=True).select_related(
-        'sesion', 'cliente', 'tipo_gasto'
+        'sesion', 'cliente', 'tipo_gasto',
+        'referencia_venta', 'referencia_alquiler', 'referencia_confeccion',
+        'referencia_reparacion', 'referencia_pago_comision',
     ).annotate(
         tiene_reverso=Exists(
             CajaMovimiento.objects.filter(movimiento_reverso_id=OuterRef('pk'))
@@ -7930,6 +8073,7 @@ def detalle_movimiento_caja(request, pk):
             'sesion', 'cliente', 'tipo_gasto', 'usuario',
             'referencia_alquiler', 'referencia_venta',
             'referencia_confeccion', 'referencia_reparacion',
+            'referencia_pago_comision', 'referencia_pago_comision__empleado',
         ),
         pk=pk,
     )
@@ -8047,7 +8191,11 @@ def abrir_sesion_caja(request):
 @login_required
 def detalle_sesion_caja(request, pk):
     sesion = get_object_or_404(CajaSesion.objects.select_related('usuario_apertura', 'usuario_cierre'), pk=pk)
-    movimientos = CajaMovimiento.objects.filter(sesion=sesion, via_caja=True).select_related('cliente', 'tipo_gasto').annotate(
+    movimientos = CajaMovimiento.objects.filter(sesion=sesion, via_caja=True).select_related(
+        'cliente', 'tipo_gasto',
+        'referencia_venta', 'referencia_alquiler', 'referencia_confeccion',
+        'referencia_reparacion', 'referencia_pago_comision',
+    ).annotate(
         tiene_reverso=Exists(CajaMovimiento.objects.filter(movimiento_reverso_id=OuterRef('pk')))
     ).order_by('fecha', 'id')
     movimientos_garantia = movimientos.filter(concepto__in=('garantia_alquiler', 'garantia_devolucion'))
@@ -8415,7 +8563,7 @@ def cerrar_sesion_caja(request, pk):
     if request.method == 'POST':
         form = CajaSesionCierreForm(request.POST)
         if form.is_valid():
-            monto_declarado = form.cleaned_data['monto_cierre_declarado']
+            monto_declarado = form.cleaned_data.get('monto_cierre_declarado') or Decimal('0')
             observaciones = form.cleaned_data.get('observaciones', '')
             saldo_sistema = sesion.saldo_efectivo_sistema
             diferencia = monto_declarado - saldo_sistema

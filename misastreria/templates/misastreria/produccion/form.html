@@ -34,19 +34,6 @@
           {% if form.descripcion.errors %}<div class="invalid-feedback d-block">{{ form.descripcion.errors }}</div>{% endif %}
         </div>
         <div class="col-md-6">
-          <label class="form-label">{{ form.empleado.label }}{% if not form.empleado.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
-          <div style="position:relative">
-            <input type="text"
-                   data-empleado-search="id_empleado"
-                   data-endpoint="{% url 'buscar_empleados' %}"
-                   class="form-control"
-                   placeholder="Seleccionar empleado…"
-                   value="{% if form.instance.pk and form.instance.empleado %}{{ form.instance.empleado }}{% endif %}"
-                   autocomplete="off">
-            <input type="hidden" name="empleado" id="id_empleado" value="{{ form.empleado.value|default:'' }}">
-          </div>
-        </div>
-        <div class="col-md-6">
           <label class="form-label">{{ form.tipo.label }}{% if not form.tipo.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
           {{ form.tipo }}
           {% if form.tipo.errors %}<div class="invalid-feedback d-block">{{ form.tipo.errors }}</div>{% endif %}
@@ -139,6 +126,8 @@
       Sin insumos registrados (opcional).
     </div>
   </div>
+
+  {% include 'misastreria/_asignaciones_produccion.html' with asig_form_id='ordenForm' asignaciones_json=asignaciones_json %}
 
   <div class="d-flex gap-2">
     <button type="submit" class="btn btn-primary">

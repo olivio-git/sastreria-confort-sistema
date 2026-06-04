@@ -829,7 +829,7 @@ class OrdenProduccionForm(forms.ModelForm):
         fields = [
             'tipo', 'descripcion', 'confeccion',
             'prenda_inventario', 'cantidad',
-            'fecha_inicio', 'fecha_estimada', 'empleado', 'notas',
+            'fecha_inicio', 'fecha_estimada', 'notas',
         ]
         widgets = {
             'descripcion':    forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
@@ -847,7 +847,6 @@ class OrdenProduccionForm(forms.ModelForm):
                 field.widget.attrs['class'] = 'form-select' if is_select else 'form-control'
         self.fields['confeccion'].required = False
         self.fields['fecha_estimada'].required = False
-        self.fields['empleado'].required = False
         self.fields['prenda_inventario'].required = False
         self.fields['cantidad'].required = False
 
@@ -907,16 +906,22 @@ class CajaSesionAperturaForm(forms.ModelForm):
 
 
 class CajaSesionCierreForm(forms.ModelForm):
+    monto_cierre_declarado = forms.DecimalField(
+        required=True, min_value=0, max_digits=10, decimal_places=2,
+        label='Monto Declarado (Bs)',
+        widget=forms.NumberInput(attrs={
+            'class': 'form-control',
+            'step': '0.01',
+            'min': '0',
+            'placeholder': 'Total contado al cerrar',
+        }),
+        error_messages={'required': 'Declará el monto contado para poder cerrar la caja.'},
+    )
+
     class Meta:
         model = CajaSesion
         fields = ['monto_cierre_declarado', 'observaciones']
         widgets = {
-            'monto_cierre_declarado': forms.NumberInput(attrs={
-                'class': 'form-control',
-                'step': '0.01',
-                'min': '0',
-                'placeholder': 'Total contado al cerrar',
-            }),
             'observaciones': forms.Textarea(attrs={
                 'class': 'form-control',
                 'rows': 3,

@@ -3,7 +3,7 @@ from .models import (
     Cliente, PrendaInventario, PrendaItem, Insumo,
     Venta, VentaItem, Alquiler, AlquilerItem, Transaccion,
     Reparacion, Empleado, Permiso, Falta, Confeccion,
-    OrdenProduccion, InsumoCortado,
+    OrdenProduccion, OrdenProduccionEmpleado, InsumoCortado,
     TipoGasto, CajaSesion, CajaMovimiento,
 )
 from .kardex_events import (
@@ -114,14 +114,18 @@ class InsumoCortadoInline(admin.TabularInline):
     model = InsumoCortado
     extra = 1
 
+class OrdenProduccionEmpleadoInline(admin.TabularInline):
+    model = OrdenProduccionEmpleado
+    extra = 1
+
 @admin.register(OrdenProduccion)
 class OrdenProduccionAdmin(admin.ModelAdmin):
-    list_display  = ['codigo', 'descripcion', 'tipo', 'estado', 'empleado', 'fecha_inicio', 'fecha_estimada']
+    list_display  = ['codigo', 'descripcion', 'tipo', 'estado', 'fecha_inicio', 'fecha_estimada']
     list_filter   = ['tipo', 'estado', 'fecha_inicio']
-    search_fields = ['codigo', 'descripcion', 'empleado__nombres']
+    search_fields = ['codigo', 'descripcion', 'empleados_produccion__empleado__nombres']
     readonly_fields = ['codigo']
     list_per_page = 20
-    inlines = [InsumoCortadoInline]
+    inlines = [InsumoCortadoInline, OrdenProduccionEmpleadoInline]
 
 
 # ============================================================

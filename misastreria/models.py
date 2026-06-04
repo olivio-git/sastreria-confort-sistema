@@ -700,12 +700,12 @@ class VentaItem(models.Model):
         null=True, blank=True, related_name='arreglos_venta',
         verbose_name="Empleado del arreglo",
     )
-    porcentaje_comision = models.DecimalField(
-        max_digits=5, decimal_places=2,
+    monto_comision_fijo = models.DecimalField(
+        max_digits=10, decimal_places=2,
         null=True, blank=True,
-        validators=[MinValueValidator(Decimal('0.00')), MaxValueValidator(Decimal('100.00'))],
-        verbose_name="Porcentaje Comisión (%)",
-        help_text="Comisión del empleado sobre el precio del arreglo. Se devenga cuando la venta está efectuada.",
+        validators=[MinValueValidator(Decimal('0.00'))],
+        verbose_name="Comisión (Bs)",
+        help_text="Monto fijo en Bs que gana el empleado por el arreglo.",
     )
     subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="Subtotal")
     grupo_conjunto = models.PositiveSmallIntegerField(null=True, blank=True, db_index=True)
@@ -720,10 +720,8 @@ class VentaItem(models.Model):
 
     @property
     def monto_comision(self):
-        """Comisión devengada por el arreglo (sobre el precio del arreglo)."""
-        if not self.porcentaje_comision:
-            return Decimal('0')
-        return (self.precio_reparacion or Decimal('0')) * self.porcentaje_comision / Decimal('100')
+        """Comisión devengada por el arreglo (monto fijo en Bs)."""
+        return self.monto_comision_fijo or Decimal('0')
 
     def __str__(self):
         return f"{self.prenda_item.codigo_item}"
@@ -830,8 +828,8 @@ class Confeccion(models.Model):
 
 
 class ConfeccionEmpleado(models.Model):
-    """Empleado asignado a una confección con su porcentaje de comisión.
-    Permite varios empleados por trabajo, cada uno con un % distinto."""
+    """Empleado asignado a una confección con su monto fijo de comisión en Bs.
+    Permite varios empleados por trabajo, cada uno con un monto distinto."""
     confeccion = models.ForeignKey(
         Confeccion, on_delete=models.CASCADE, related_name='asignaciones',
         verbose_name="Confección",
@@ -840,10 +838,12 @@ class ConfeccionEmpleado(models.Model):
         Empleado, on_delete=models.CASCADE, related_name='asignaciones_confeccion',
         verbose_name="Empleado",
     )
-    porcentaje_comision = models.DecimalField(
-        max_digits=5, decimal_places=2,
-        validators=[MinValueValidator(Decimal('0.00')), MaxValueValidator(Decimal('100.00'))],
-        verbose_name="Porcentaje Comisión (%)",
+    monto_comision_fijo = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        default=Decimal('0'),
+        validators=[MinValueValidator(Decimal('0.00'))],
+        verbose_name="Comisión (Bs)",
+        help_text="Monto fijo en Bs que gana el empleado por esta confección.",
     )
 
     class Meta:
@@ -856,11 +856,10 @@ class ConfeccionEmpleado(models.Model):
 
     @property
     def monto_comision(self):
-        precio = self.confeccion.precio or Decimal('0')
-        return (precio * (self.porcentaje_comision or Decimal('0')) / Decimal('100'))
+        return self.monto_comision_fijo or Decimal('0')
 
     def __str__(self):
-        return f"{self.empleado} — {self.porcentaje_comision}% de {self.confeccion.codigo}"
+        return f"{self.empleado} — Bs. {self.monto_comision_fijo} de {self.confeccion.codigo}"
 
 
 class ConfeccionItem(models.Model):
@@ -1056,12 +1055,12 @@ class AlquilerItem(models.Model):
         null=True, blank=True, related_name='arreglos_alquiler',
         verbose_name="Empleado del arreglo",
     )
-    porcentaje_comision = models.DecimalField(
-        max_digits=5, decimal_places=2,
+    monto_comision_fijo = models.DecimalField(
+        max_digits=10, decimal_places=2,
         null=True, blank=True,
-        validators=[MinValueValidator(Decimal('0.00')), MaxValueValidator(Decimal('100.00'))],
-        verbose_name="Porcentaje Comisión (%)",
-        help_text="Comisión del empleado sobre el precio del arreglo. Se devenga cuando el alquiler está devuelto.",
+        validators=[MinValueValidator(Decimal('0.00'))],
+        verbose_name="Comisión (Bs)",
+        help_text="Monto fijo en Bs que gana el empleado por el arreglo.",
     )
     subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="Subtotal")
     grupo_conjunto = models.PositiveSmallIntegerField(null=True, blank=True, db_index=True)
@@ -1076,10 +1075,8 @@ class AlquilerItem(models.Model):
 
     @property
     def monto_comision(self):
-        """Comisión devengada por el arreglo (sobre el precio del arreglo)."""
-        if not self.porcentaje_comision:
-            return Decimal('0')
-        return (self.precio_reparacion or Decimal('0')) * self.porcentaje_comision / Decimal('100')
+        """Comisión devengada por el arreglo (monto fijo en Bs)."""
+        return self.monto_comision_fijo or Decimal('0')
 
     def __str__(self):
         return f"{self.prenda_item.codigo_item}"
@@ -1196,10 +1193,6 @@ class OrdenProduccion(models.Model):
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='corte', verbose_name="Estado")
     fecha_inicio = models.DateField(default=timezone.now, verbose_name="Fecha de Inicio")
     fecha_estimada = models.DateField(null=True, blank=True, verbose_name="Fecha Estimada")
-    empleado = models.ForeignKey(
-        Empleado, on_delete=models.SET_NULL, null=True, blank=True,
-        related_name='ordenes_produccion', verbose_name="Responsable",
-    )
     notas = models.TextField(blank=True, verbose_name="Notas")
     creado = models.DateTimeField(auto_now_add=True)
 
@@ -1232,6 +1225,47 @@ class InsumoCortado(models.Model):
 
     def __str__(self):
         return f"{self.insumo} × {self.cantidad}"
+
+
+class OrdenProduccionEmpleado(models.Model):
+    """Empleado asignado a una fase (responsabilidad) de una orden de producción,
+    con su monto fijo de comisión en Bs. Un mismo empleado puede aparecer en varias
+    fases de la misma orden; una misma fase puede repartirse entre empleados."""
+    orden = models.ForeignKey(
+        OrdenProduccion, on_delete=models.CASCADE, related_name='empleados_produccion',
+        verbose_name="Orden",
+    )
+    empleado = models.ForeignKey(
+        Empleado, on_delete=models.CASCADE, related_name='asignaciones_produccion',
+        verbose_name="Empleado",
+    )
+    responsabilidad = models.CharField(
+        max_length=20, choices=OrdenProduccion.ESTADO_CHOICES,
+        verbose_name="Fase",
+    )
+    monto_comision_fijo = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal('0'),
+        validators=[MinValueValidator(Decimal('0.00'))],
+        verbose_name="Comisión (Bs)",
+        help_text="Monto fijo en Bs que gana el empleado por esta fase.",
+    )
+
+    class Meta:
+        verbose_name = "Asignación de producción"
+        verbose_name_plural = "Asignaciones de producción"
+        constraints = [
+            models.UniqueConstraint(
+                fields=['orden', 'empleado', 'responsabilidad'],
+                name='unique_orden_empleado_responsabilidad'),
+        ]
+        ordering = ['id']
+
+    @property
+    def monto_comision(self):
+        return self.monto_comision_fijo or Decimal('0')
+
+    def __str__(self):
+        return f"{self.empleado} — {self.get_responsabilidad_display()} — Bs. {self.monto_comision_fijo} de {self.orden.codigo}"
 
 
 # ============================================================
@@ -1642,6 +1676,30 @@ class CajaMovimiento(models.Model):
     @property
     def fue_reversado(self):
         return hasattr(self, 'reverso_de')
+
+    @property
+    def referencia_link(self):
+        """Documento de origen del movimiento como {tipo, codigo, url}, o None
+        si es manual/sin referencia. Permite enlazar desde la lista y el detalle
+        de caja al detalle del servicio que generó el movimiento."""
+        from django.urls import reverse
+        if self.referencia_venta_id:
+            return {'tipo': 'Venta', 'codigo': self.referencia_venta.codigo,
+                    'url': reverse('detalle_venta', args=[self.referencia_venta_id])}
+        if self.referencia_alquiler_id:
+            return {'tipo': 'Alquiler', 'codigo': self.referencia_alquiler.codigo,
+                    'url': reverse('detalle_alquiler', args=[self.referencia_alquiler_id])}
+        if self.referencia_confeccion_id:
+            return {'tipo': 'Confección', 'codigo': self.referencia_confeccion.codigo,
+                    'url': reverse('detalle_confeccion', args=[self.referencia_confeccion_id])}
+        if self.referencia_reparacion_id:
+            return {'tipo': 'Reparación', 'codigo': self.referencia_reparacion.codigo,
+                    'url': reverse('detalle_reparacion', args=[self.referencia_reparacion_id])}
+        if self.referencia_pago_comision_id:
+            pago = self.referencia_pago_comision
+            return {'tipo': 'Comisión', 'codigo': pago.codigo,
+                    'url': reverse('detalle_empleado', args=[pago.empleado_id]) if pago.empleado_id else None}
+        return None
 
 
 class Conjunto(models.Model):

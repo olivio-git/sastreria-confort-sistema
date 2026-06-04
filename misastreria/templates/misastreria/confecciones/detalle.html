@@ -72,7 +72,7 @@
             <div class="datagrid-title text-muted">Empleados asignados</div>
             <div class="datagrid-content">
               {% for a in confeccion.asignaciones.all %}
-                <div>{{ a.empleado }} <span class="text-muted small">({{ a.porcentaje_comision|floatformat:2 }}% · Bs. {{ a.monto_comision|floatformat:2 }})</span></div>
+                <div>{{ a.empleado }} <span class="text-muted small">(Bs. {{ a.monto_comision|floatformat:2 }})</span></div>
               {% empty %}—{% endfor %}
             </div>
           </div>

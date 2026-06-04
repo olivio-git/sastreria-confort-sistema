@@ -17,7 +17,7 @@ from misastreria.models import (
     Insumo,
     CajaSesion, CajaMovimiento, TipoGasto,
     Transaccion,
-    OrdenProduccion,
+    OrdenProduccion, OrdenProduccionEmpleado,
     EstadoAlquiler,
     UbicacionItem,
     Conjunto,
@@ -201,3 +201,19 @@ def make_movimiento_caja(sesion=None, **kwargs):
     )
     defaults.update(kwargs)
     return CajaMovimiento.objects.create(sesion=sesion, **defaults)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Producción
+# ──────────────────────────────────────────────────────────────────────────────
+
+def make_orden_produccion(**kwargs):
+    defaults = dict(descripcion='Orden test', tipo='cliente', estado='corte')
+    defaults.update(kwargs)
+    return OrdenProduccion.objects.create(**defaults)
+
+
+def make_orden_produccion_empleado(orden, empleado, responsabilidad='corte', monto=Decimal('0')):
+    return OrdenProduccionEmpleado.objects.create(
+        orden=orden, empleado=empleado, responsabilidad=responsabilidad,
+        monto_comision_fijo=monto)

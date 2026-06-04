@@ -155,7 +155,7 @@
         <select name="item_empleado" class="form-select form-select-sm item-empleado" style="flex:1;min-width:0" title="Empleado que hace el arreglo (comisión)">
           <option value="">— Empleado comisión —</option>
         </select>
-        <input type="number" name="item_porcentaje_comision" class="form-control form-control-sm item-pct-comision" style="width:75px;flex-shrink:0" step="0.01" min="0" max="100" placeholder="%" title="% de comisión sobre el precio del arreglo">
+        <input type="number" name="item_monto_comision" class="form-control form-control-sm item-monto-comision" style="width:75px;flex-shrink:0" step="0.01" min="0" placeholder="Bs" title="Comisión fija en Bs del arreglo">
       </div>
     </td>
     <td class="text-end align-middle"><span class="item-subtotal fw-semibold">0.00</span></td>
@@ -216,7 +216,7 @@ function calcTotales() {
   sinItems.style.display = tbody.querySelectorAll('.item-row').length ? 'none' : 'block';
 }
 
-function addRow(prendaItemId, precio, tipoRepId, tipoRepNombre, precioRep, empleadoId, pctComision) {
+function addRow(prendaItemId, precio, tipoRepId, tipoRepNombre, precioRep, empleadoId, montoComision) {
   const tmpl      = document.getElementById('itemRowTemplate');
   const row       = tmpl.content.cloneNode(true).querySelector('tr');
   const textInput = row.querySelector('.item-articulo-text');
@@ -224,7 +224,7 @@ function addRow(prendaItemId, precio, tipoRepId, tipoRepNombre, precioRep, emple
   const repText   = row.querySelector('.item-rep-text');
   const repId     = row.querySelector('.item-rep-id');
   const empSelect = row.querySelector('.item-empleado');
-  const pctInput  = row.querySelector('.item-pct-comision');
+  const montoInput = row.querySelector('.item-monto-comision');
 
   EMPLEADOS.forEach(function(e) {
     const opt = document.createElement('option');
@@ -238,7 +238,7 @@ function addRow(prendaItemId, precio, tipoRepId, tipoRepNombre, precioRep, emple
   if (tipoRepId)    { repId.value = tipoRepId; repText.value = tipoRepNombre || ''; }
   if (precioRep)    row.querySelector('.item-precio-rep').value = parseFloat(precioRep).toFixed(2);
   if (empleadoId)   empSelect.value = empleadoId;
-  if (pctComision != null && pctComision !== '') pctInput.value = parseFloat(pctComision).toFixed(2);
+  if (montoComision != null && montoComision !== '') montoInput.value = parseFloat(montoComision).toFixed(2);
 
   window.makePrendaFlyoutCombobox(textInput, hiddenInput, PRENDAS);
   window.makeLocalCombobox(repText, repId, TIPOS_REPARACION);
@@ -272,7 +272,7 @@ function addRow(prendaItemId, precio, tipoRepId, tipoRepNombre, precioRep, emple
 if (ITEMS_INICIALES.length > 0) {
   ITEMS_INICIALES.forEach(function(item) {
     const tr = TIPOS_REPARACION.find(t => t.id === item.tipo_reparacion_id);
-    addRow(item.prenda_item_id, item.precio_unitario, item.tipo_reparacion_id, tr ? tr.nombre : '', item.precio_reparacion, item.empleado_id, item.porcentaje_comision);
+    addRow(item.prenda_item_id, item.precio_unitario, item.tipo_reparacion_id, tr ? tr.nombre : '', item.precio_reparacion, item.empleado_id, item.monto_comision);
   });
 } else {
   addRow();

@@ -110,6 +110,7 @@
           <th>Código</th>
           <th>Tipo</th>
           <th>Concepto</th>
+          <th>Referencia</th>
           <th class="text-end">Monto</th>
           <th>Forma Pago</th>
           <th>Origen</th>
@@ -128,6 +129,21 @@
             </span>
           </td>
           <td>{{ m.get_concepto_display }}</td>
+          <td style="white-space:nowrap">
+            {% with ref=m.referencia_link %}
+              {% if ref %}
+                {% if ref.url %}
+                  <a href="{{ ref.url }}" class="text-decoration-none" title="Ver {{ ref.tipo }}">
+                    <span class="text-muted small">{{ ref.tipo }}</span> {{ ref.codigo }}
+                  </a>
+                {% else %}
+                  <span class="text-muted small">{{ ref.tipo }}</span> {{ ref.codigo }}
+                {% endif %}
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            {% endwith %}
+          </td>
           <td class="text-end fw-semibold">Bs. {{ m.monto|floatformat:2 }}</td>
           <td>{{ m.get_forma_pago_display }}</td>
           <td>
@@ -167,7 +183,7 @@
         </tr>
         {% empty %}
         <tr>
-          <td colspan="9">
+          <td colspan="10">
             <div class="empty-state">
               <i data-lucide="banknote" style="width:2.5rem;height:2.5rem;opacity:.3;display:block;margin:0 auto .75rem"></i>
               No hay movimientos en el período seleccionado.

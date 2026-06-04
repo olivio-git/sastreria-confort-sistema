@@ -781,3 +781,33 @@ window.initConjuntoModal = function(modalId, CONJUNTOS, onConfirm) {
 
   modalEl.addEventListener('show.bs.modal', renderConjuntos);
 };
+
+// ── Filtro de filas client-side por atributo (chips) ──────────────────────────
+// Uso: contenedor de botones con [data-row-filter="tablaId"] y
+// [data-row-filter-attr="tipo"]; cada botón lleva data-value. Las filas del
+// tbody se filtran por su atributo data-{attr}. Botón con data-value="" = todas.
+document.querySelectorAll('[data-row-filter]').forEach(function(group) {
+  var table = document.getElementById(group.dataset.rowFilter);
+  if (!table) return;
+  var attr = group.dataset.rowFilterAttr || 'tipo';
+  var buttons = Array.from(group.querySelectorAll('button[data-value]'));
+  var emptyRow = table.querySelector('[data-row-filter-empty]');
+
+  function apply(value) {
+    var visibles = 0;
+    table.querySelectorAll('tbody tr[data-' + attr + ']').forEach(function(row) {
+      var match = !value || row.getAttribute('data-' + attr) === value;
+      row.style.display = match ? '' : 'none';
+      if (match) visibles++;
+    });
+    if (emptyRow) emptyRow.classList.toggle('d-none', visibles > 0);
+    buttons.forEach(function(b) {
+      b.classList.toggle('active', b.dataset.value === value);
+    });
+  }
+
+  group.addEventListener('click', function(e) {
+    var btn = e.target.closest('button[data-value]');
+    if (btn) apply(btn.dataset.value);
+  });
+});

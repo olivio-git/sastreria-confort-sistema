@@ -83,7 +83,13 @@
           <td class="text-muted">{{ o.descripcion|truncatechars:50 }}</td>
           <td><span class="badge-estado badge-tipo-{{ o.tipo }}">{{ o.get_tipo_display }}</span></td>
           <td><span class="badge-estado badge-{{ o.estado }}">{{ o.get_estado_display }}</span></td>
-          <td>{{ o.empleado|default:"—" }}</td>
+          <td>
+            {% with emps=o.empleados_produccion.all %}
+              {% if emps %}
+                {{ emps.0.empleado }}{% if emps|length > 1 %} <span class="text-muted">+{{ emps|length|add:"-1" }}</span>{% endif %}
+              {% else %}—{% endif %}
+            {% endwith %}
+          </td>
           <td>
             {% if o.tipo == 'stock' and o.prenda_inventario %}
               {{ o.prenda_inventario.nombre }} {{ o.prenda_inventario.talla }} &times; {{ o.cantidad }}
