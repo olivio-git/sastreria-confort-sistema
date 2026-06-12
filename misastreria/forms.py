@@ -179,10 +179,11 @@ class ReparacionForm(forms.ModelForm):
         # empleado/porcentaje_comision ya no se editan aquí: se manejan como
         # asignaciones (varios empleados con % distinto). La vista setea el
         # empleado "lead" desde la primera asignación.
-        fields = ['fecha_entrega', 'cliente', 'estado']
+        fields = ['fecha_entrega', 'cliente', 'estado', 'forma_pago']
         widgets = {
             'fecha_entrega': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}, format='%Y-%m-%d'),
             'estado':        forms.Select(attrs={'class': 'form-select'}),
+            'forma_pago':    forms.Select(attrs={'class': 'form-select'}),
             'cliente':       forms.HiddenInput(),
         }
 

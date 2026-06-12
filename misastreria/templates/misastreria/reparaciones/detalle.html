@@ -33,8 +33,15 @@
       </form>
       {% endif %}
       {% if reparacion.estado != 'entregado' %}
-      <form method="post" action="{% url 'marcar_entregado' reparacion.id %}">
+      <form method="post" action="{% url 'marcar_entregado' reparacion.id %}" class="d-flex gap-2">
         {% csrf_token %}
+        {% if reparacion.saldo_pendiente > 0 %}
+        <select name="forma_pago" class="form-select" style="width:auto" title="Forma de pago del saldo">
+          {% for val, label in forma_pago_choices %}
+          <option value="{{ val }}" {% if reparacion.forma_pago == val %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        {% endif %}
         <button type="submit" class="btn btn-success">
           <i data-lucide="check-circle" class="me-1"></i>Entregar
         </button>

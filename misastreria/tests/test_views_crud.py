@@ -144,6 +144,23 @@ class ReparacionViewTests(BaseViewTest):
         rep.refresh_from_db()
         self.assertEqual(rep.estado, 'entregado')
 
+    def test_marcar_entregado_respeta_forma_pago(self):
+        """El cobro del saldo al entregar debe usar la forma de pago elegida (QR),
+        no el default efectivo. Regresión del bug 'aparece en efectivo'."""
+        from misastreria.models import CajaMovimiento
+        rep = make_reparacion(total=Decimal('40.00'))
+        self.client.post(
+            reverse('marcar_entregado', kwargs={'id': rep.pk}),
+            {'forma_pago': 'qr'},
+        )
+        rep.refresh_from_db()
+        self.assertEqual(rep.estado, 'entregado')
+        self.assertEqual(rep.forma_pago, 'qr')
+        mov = CajaMovimiento.objects.get(
+            referencia_reparacion=rep, concepto='reparacion_saldo',
+        )
+        self.assertEqual(mov.forma_pago, 'qr')
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Confecciones

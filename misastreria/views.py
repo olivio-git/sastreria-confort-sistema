@@ -1200,6 +1200,7 @@ def eliminar_reparacion(request, id):
 @login_required
 def detalle_reparacion(request, id):
     from .forms import PagoReparacionForm
+    from .models import FORMA_PAGO_CHOICES
     reparacion = get_object_or_404(Reparacion, id=id)
     items = reparacion.items.select_related('tipo_prenda', 'tipo_reparacion').all()
     pagos = reparacion.caja_movimientos.filter(
@@ -1214,6 +1215,7 @@ def detalle_reparacion(request, id):
         'pagado': reparacion.total_pagado,
         'saldo': reparacion.saldo_pendiente,
         'form': PagoReparacionForm(),
+        'forma_pago_choices': FORMA_PAGO_CHOICES,
     })
 
 
@@ -1262,6 +1264,11 @@ def marcar_entregado(request, id):
     reparacion = get_object_or_404(Reparacion, id=id)
     if request.method == 'POST':
         if reparacion.estado != 'entregado':
+            from .models import FORMA_PAGO_CHOICES
+            forma_pago = (request.POST.get('forma_pago') or '').strip()
+            formas_validas = {c[0] for c in FORMA_PAGO_CHOICES}
+            if forma_pago in formas_validas:
+                reparacion.forma_pago = forma_pago
             reparacion.estado = 'entregado'
             reparacion.save()
             messages.success(request, f"La reparación {reparacion.codigo} ha sido marcada como entregada.")
@@ -3812,7 +3819,7 @@ def exportar_empleados_pdf(request):
     styles.add(ParagraphStyle(name='Titulo', fontSize=16, alignment=1, spaceAfter=20, fontName='Helvetica-Bold'))
 
     elements = [
-        Paragraph("SASTRERÍA CONFORT Y MÁS", styles['Titulo']),
+        Paragraph("FORTIUM TAILOR", styles['Titulo']),
         Paragraph("Reporte de Empleados", styles['Heading2']),
         Spacer(1, 12),
         Table(data, style=[
@@ -3853,7 +3860,7 @@ def exportar_empleados_excel(request):
 
     # Encabezado principal
     ws.merge_cells('A1:E1')
-    ws['A1'] = "SASTRERÍA CONFORT Y MÁS - Reporte de Empleados"
+    ws['A1'] = "FORTIUM TAILOR - Reporte de Empleados"
     ws['A1'].font = Font(size=14, bold=True)
     ws['A1'].alignment = Alignment(horizontal='center')
 
@@ -3976,7 +3983,7 @@ def exportar_clientes_pdf(request, datos, filtros_aplicados):
 
     elements = []
 
-    elements.append(Paragraph("SISTEMA DE GESTION SASTRERIA CONFORT Y MAS", styles['CompanyTitle']))
+    elements.append(Paragraph("SISTEMA DE GESTION FORTIUM TAILOR", styles['CompanyTitle']))
     elements.append(Spacer(1, 0.1 * inch))
 
     elements.append(Paragraph("REPORTE DE CLIENTES", styles['ReportTitle']))
@@ -4069,7 +4076,7 @@ def exportar_clientes_excel(request, datos, filtros_aplicados):
     
     # Títulos principales
     ws.merge_cells('A1:F1') # 6 columnas
-    ws['A1'] = "SISTEMA DE GESTION SASTRERIA CONFORT Y MAS"
+    ws['A1'] = "SISTEMA DE GESTION FORTIUM TAILOR"
     ws['A1'].font = Font(name='Calibri', size=20, bold=True, color='1E3A8A')
     ws['A1'].alignment = Alignment(horizontal="center", vertical="center")
 
@@ -4243,7 +4250,7 @@ def exportar_reparaciones_pdf(request, reparaciones_data, filtros_aplicados):
     elements = []
 
     # Títulos del reporte
-    elements.append(Paragraph("SISTEMA DE GESTION SASTRERIA CONFORT Y MAS", styles['CompanyTitle']))
+    elements.append(Paragraph("SISTEMA DE GESTION FORTIUM TAILOR", styles['CompanyTitle']))
     elements.append(Spacer(1, 0.1 * inch))
     elements.append(Paragraph("REPORTE DE REPARACIONES", styles['ReportTitle']))
     elements.append(Spacer(1, 0.2 * inch))
@@ -4340,7 +4347,7 @@ def exportar_reparaciones_excel(request, reparaciones_data, filtros_aplicados):
     
     # Títulos principales
     ws.merge_cells('A1:H1')
-    ws['A1'] = "SISTEMA DE GESTION SASTRERIA CONFORT Y MAS"
+    ws['A1'] = "SISTEMA DE GESTION FORTIUM TAILOR"
     ws['A1'].font = Font(name='Calibri', size=20, bold=True, color='1E3A8A')
     ws['A1'].alignment = Alignment(horizontal="center", vertical="center")
 
@@ -4548,7 +4555,7 @@ def exportar_reporte_ventas_pdf(request, ventas, fecha_desde, fecha_hasta, total
 
     elements = []
 
-    elements.append(Paragraph("SISTEMA DE GESTION SASTRERIA CONFORT Y MAS", styles['CompanyTitle']))
+    elements.append(Paragraph("SISTEMA DE GESTION FORTIUM TAILOR", styles['CompanyTitle']))
     elements.append(Spacer(1, 0.1 * inch))
 
     elements.append(Paragraph("REPORTE DE VENTAS", styles['ReportTitle']))
@@ -4671,7 +4678,7 @@ def exportar_reporte_ventas_excel(request, ventas, fecha_desde, fecha_hasta, tot
     total_alignment = Alignment(horizontal="right")
 
     ws.merge_cells('A1:H1')
-    ws['A1'] = "SISTEMA DE GESTION SASTRERIA CONFORT Y MAS"
+    ws['A1'] = "SISTEMA DE GESTION FORTIUM TAILOR"
     ws['A1'].font = Font(name='Calibri', size=20, bold=True, color='1E3A8A')
     ws['A1'].alignment = Alignment(horizontal="center", vertical="center")
 
@@ -4894,7 +4901,7 @@ def exportar_reporte_confecciones_pdf(request, confecciones, fecha_desde, fecha_
 
     elements = []
 
-    elements.append(Paragraph("SISTEMA DE GESTION SASTRERIA CONFORT Y MAS", styles['CompanyTitle']))
+    elements.append(Paragraph("SISTEMA DE GESTION FORTIUM TAILOR", styles['CompanyTitle']))
     elements.append(Spacer(1, 0.1 * inch))
 
     elements.append(Paragraph("REPORTE DE CONFECCIONES", styles['ReportTitle']))
@@ -5019,7 +5026,7 @@ def exportar_reporte_confecciones_excel(request, confecciones, fecha_desde, fech
     total_alignment = Alignment(horizontal="right")
 
     ws.merge_cells('A1:G1') # Ajusta el rango por el número de columnas (7 columnas)
-    ws['A1'] = "SISTEMA DE GESTION SASTRERIA CONFORT Y MAS"
+    ws['A1'] = "SISTEMA DE GESTION FORTIUM TAILOR"
     ws['A1'].font = Font(name='Calibri', size=20, bold=True, color='1E3A8A')
     ws['A1'].alignment = Alignment(horizontal="center", vertical="center")
 
@@ -5217,7 +5224,7 @@ def exportar_reporte_alquileres_pdf(request, alquileres, fecha_desde, fecha_hast
     styles.add(ParagraphStyle(name='TotalStyle', fontSize=10, fontName='DejaVuSans', alignment=2))
 
     elements = []
-    elements.append(Paragraph("SISTEMA DE GESTION SASTRERIA CONFORT Y MAS", styles['CompanyTitle']))
+    elements.append(Paragraph("SISTEMA DE GESTION FORTIUM TAILOR", styles['CompanyTitle']))
     elements.append(Spacer(1, 0.1 * inch))
     elements.append(Paragraph("REPORTE DE ALQUILERES", styles['ReportTitle']))
     elements.append(Spacer(1, 0.2 * inch))
@@ -5341,7 +5348,7 @@ def exportar_reporte_alquileres_excel(request, alquileres, fecha_desde, fecha_ha
     num_cols = 9
     col_letter = get_column_letter(num_cols)
     ws.merge_cells(f'A1:{col_letter}1')
-    ws['A1'] = "SISTEMA DE GESTION SASTRERIA CONFORT Y MAS"
+    ws['A1'] = "SISTEMA DE GESTION FORTIUM TAILOR"
     ws['A1'].font = Font(name='Calibri', size=20, bold=True, color='1E3A8A')
     ws['A1'].alignment = Alignment(horizontal="center", vertical="center")
 
@@ -5475,6 +5482,7 @@ def reporte_transacciones(request):
         fecha__date__gte=desde,
         fecha__date__lte=hasta,
         movimiento_reverso__isnull=True,
+        reverso_de__isnull=True,
         via_caja=True,
     ).exclude(
         concepto__in=['apertura_caja', 'sobrante_caja', 'faltante_caja']
@@ -5557,7 +5565,7 @@ def exportar_reporte_transacciones_pdf(request, transacciones, fecha_desde, fech
 
     elements = []
 
-    elements.append(Paragraph("SISTEMA DE GESTION SASTRERIA CONFORT Y MAS", styles['CompanyTitle']))
+    elements.append(Paragraph("SISTEMA DE GESTION FORTIUM TAILOR", styles['CompanyTitle']))
     elements.append(Spacer(1, 0.1 * inch))
 
     elements.append(Paragraph("REPORTE DE TRANSACCIONES", styles['ReportTitle']))
@@ -5678,7 +5686,7 @@ def exportar_reporte_transacciones_excel(request, transacciones, fecha_desde, fe
     saldo_negativo_color = "DC2626" # Rojo
 
     ws.merge_cells('A1:G1') # 7 columnas
-    ws['A1'] = "SISTEMA DE GESTION SASTRERIA CONFORT Y MAS"
+    ws['A1'] = "SISTEMA DE GESTION FORTIUM TAILOR"
     ws['A1'].font = Font(name='Calibri', size=20, bold=True, color='1E3A8A')
     ws['A1'].alignment = Alignment(horizontal="center", vertical="center")
 
@@ -6193,6 +6201,7 @@ def kardex_financiero(request):
         fecha__date__gte=desde,
         fecha__date__lte=hasta,
         movimiento_reverso__isnull=True,
+        reverso_de__isnull=True,
         via_caja=True,
     ).exclude(concepto__in=['apertura_caja', 'sobrante_caja', 'faltante_caja'])
 
@@ -6279,6 +6288,7 @@ def _calcular_arqueo(sesion):
     movs = CajaMovimiento.objects.filter(
         sesion=sesion,
         movimiento_reverso__isnull=True,
+        reverso_de__isnull=True,
         via_caja=True,
     ).exclude(
         concepto__in=('garantia_alquiler', 'garantia_devolucion', 'apertura_caja', 'sobrante_caja', 'faltante_caja')
@@ -6306,6 +6316,7 @@ def _build_resumen_context(request):
         fecha__date__gte=desde,
         fecha__date__lte=hasta,
         movimiento_reverso__isnull=True,
+        reverso_de__isnull=True,
         via_caja=True,
     ).exclude(concepto__in=['apertura_caja', 'sobrante_caja', 'faltante_caja', 'garantia_alquiler', 'garantia_devolucion'])
 
@@ -7373,7 +7384,7 @@ def exportar_analitica_items_pdf(request, rows, filtros):
     ff = filtros.get('fecha_fin', '')
     servicio = filtros.get('servicio', 'ambos')
 
-    elements.append(Paragraph("SISTEMA DE GESTION SASTRERIA CONFORT Y MAS", styles['CompanyTitle']))
+    elements.append(Paragraph("SISTEMA DE GESTION FORTIUM TAILOR", styles['CompanyTitle']))
     elements.append(Spacer(1, 0.1 * inch))
     elements.append(Paragraph("ANÁLISIS DE ITEMS", styles['ReportTitle']))
     elements.append(Spacer(1, 0.1 * inch))
@@ -7473,7 +7484,7 @@ def exportar_analitica_empleados_pdf(request, rows, filtros):
     fi = filtros.get('fecha_inicio', '')
     ff = filtros.get('fecha_fin', '')
 
-    elements.append(Paragraph("SISTEMA DE GESTION SASTRERIA CONFORT Y MAS", styles['CompanyTitle']))
+    elements.append(Paragraph("SISTEMA DE GESTION FORTIUM TAILOR", styles['CompanyTitle']))
     elements.append(Spacer(1, 0.1 * inch))
     elements.append(Paragraph("PERFORMANCE POR EMPLEADO", styles['ReportTitle']))
     elements.append(Spacer(1, 0.1 * inch))
@@ -7576,7 +7587,7 @@ def exportar_analitica_clientes_ltv_pdf(request, rows, filtros):
     ff = filtros.get('fecha_fin', '')
     limit = filtros.get('limit', 50)
 
-    elements.append(Paragraph("SISTEMA DE GESTION SASTRERIA CONFORT Y MAS", styles['CompanyTitle']))
+    elements.append(Paragraph("SISTEMA DE GESTION FORTIUM TAILOR", styles['CompanyTitle']))
     elements.append(Spacer(1, 0.1 * inch))
     elements.append(Paragraph("LIFETIME VALUE DE CLIENTES", styles['ReportTitle']))
     elements.append(Spacer(1, 0.1 * inch))
@@ -7671,7 +7682,7 @@ def exportar_analitica_operativas_pdf(request, kpis, filtros):
     fi = filtros.get('fecha_inicio', '')
     ff = filtros.get('fecha_fin', '')
 
-    elements.append(Paragraph("SISTEMA DE GESTION SASTRERIA CONFORT Y MAS", styles['CompanyTitle']))
+    elements.append(Paragraph("SISTEMA DE GESTION FORTIUM TAILOR", styles['CompanyTitle']))
     elements.append(Spacer(1, 0.1 * inch))
     elements.append(Paragraph("MÉTRICAS OPERATIVAS", styles['ReportTitle']))
     elements.append(Spacer(1, 0.1 * inch))
@@ -7796,7 +7807,7 @@ def exportar_analitica_comparativas_pdf(request, comparativa, filtros):
     pant = comparativa['periodo_anterior']
     deltas = comparativa['deltas']
 
-    elements.append(Paragraph("SISTEMA DE GESTION SASTRERIA CONFORT Y MAS", styles['CompanyTitle']))
+    elements.append(Paragraph("SISTEMA DE GESTION FORTIUM TAILOR", styles['CompanyTitle']))
     elements.append(Spacer(1, 0.1 * inch))
     elements.append(Paragraph("COMPARATIVA AÑO VS AÑO", styles['ReportTitle']))
     elements.append(Spacer(1, 0.1 * inch))
