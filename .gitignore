@@ -25,6 +25,9 @@ env/
 # Directorio temporal del dev anterior (código duplicado)
 temp_upload/
 
+# Manual de usuario (borrador local, no se versiona)
+manual/
+
 # Archivos binarios y dumps locales
 manage.zip
 *.sql
