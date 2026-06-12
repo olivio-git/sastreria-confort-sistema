@@ -1363,6 +1363,7 @@ class CajaSesion(models.Model):
         from django.db.models import Sum
         movs = self.movimientos.filter(
             movimiento_reverso__isnull=True,
+            reverso_de__isnull=True,
             via_caja=True,
         ).exclude(concepto__in=self._CONCEPTOS_GARANTIA)
         ingresos = (
@@ -1379,6 +1380,7 @@ class CajaSesion(models.Model):
         from django.db.models import Sum
         movs = self.movimientos.filter(
             movimiento_reverso__isnull=True,
+            reverso_de__isnull=True,
             via_caja=True,
             forma_pago='efectivo',
         ).exclude(concepto__in=self._CONCEPTOS_GARANTIA)
@@ -1395,7 +1397,7 @@ class CajaSesion(models.Model):
         from django.db.models import Sum
         return (
             self.movimientos
-            .filter(tipo='ingreso', movimiento_reverso__isnull=True, via_caja=True)
+            .filter(tipo='ingreso', movimiento_reverso__isnull=True, reverso_de__isnull=True, via_caja=True)
             .exclude(concepto__in=('apertura_caja', 'garantia_alquiler'))
             .aggregate(s=Sum('monto'))['s'] or Decimal('0')
         )
@@ -1405,7 +1407,7 @@ class CajaSesion(models.Model):
         from django.db.models import Sum
         return (
             self.movimientos
-            .filter(tipo='egreso', movimiento_reverso__isnull=True, via_caja=True)
+            .filter(tipo='egreso', movimiento_reverso__isnull=True, reverso_de__isnull=True, via_caja=True)
             .exclude(concepto='garantia_devolucion')
             .aggregate(s=Sum('monto'))['s'] or Decimal('0')
         )

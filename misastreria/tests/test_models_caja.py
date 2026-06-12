@@ -177,6 +177,56 @@ class CajaSesionSaldoSistemaTests(TestCase):
         self.assertEqual(sesion.saldo_sistema, Decimal('100.00'))
 
 
+class CajaSesionReversoNeteaTests(TestCase):
+    """Una anulación (ingreso reversado + egreso contra-asiento) debe netear a cero,
+    no descontar el doble. Regresión del bug del saldo -120."""
+
+    def _reversar(self, sesion, original):
+        """Replica el mecanismo de reverso: crea el contra-asiento y enlaza el original."""
+        reverso = CajaMovimiento.objects.create(
+            sesion=sesion,
+            tipo='egreso' if original.tipo == 'ingreso' else 'ingreso',
+            concepto='anulacion_cobro',
+            monto=original.monto,
+            forma_pago=original.forma_pago,
+            origen='automatico',
+        )
+        original.movimiento_reverso = reverso
+        original.save(update_fields=['movimiento_reverso'])
+        return reverso
+
+    def test_ingreso_anulado_no_afecta_saldo(self):
+        sesion = make_sesion_caja()  # apertura 100
+        ingreso = make_movimiento_caja(
+            sesion=sesion, tipo='ingreso',
+            concepto='reparacion_saldo', monto=Decimal('40.00'),
+        )
+        self._reversar(sesion, ingreso)
+        # El ingreso original queda excluido y el contra-asiento NO debe contarse:
+        # saldo vuelve a ser solo la apertura.
+        self.assertEqual(sesion.saldo_sistema, Decimal('100.00'))
+        self.assertEqual(sesion.total_ingresos, Decimal('0.00'))
+        self.assertEqual(sesion.total_egresos, Decimal('0.00'))
+
+    def test_cobro_real_mas_anulacion_solo_cuenta_el_cobro(self):
+        """Escenario del usuario: 1 cobro real + N anulaciones → solo cuenta el cobro."""
+        sesion = make_sesion_caja()  # apertura 100
+        for monto in (Decimal('40.00'), Decimal('80.00'), Decimal('40.00')):
+            ingreso = make_movimiento_caja(
+                sesion=sesion, tipo='ingreso',
+                concepto='reparacion_saldo', monto=monto,
+            )
+            self._reversar(sesion, ingreso)
+        # Un cobro real que se queda activo
+        make_movimiento_caja(
+            sesion=sesion, tipo='ingreso',
+            concepto='reparacion_cobro', monto=Decimal('40.00'), forma_pago='qr',
+        )
+        self.assertEqual(sesion.total_ingresos, Decimal('40.00'))
+        self.assertEqual(sesion.total_egresos, Decimal('0.00'))
+        self.assertEqual(sesion.saldo_sistema, Decimal('140.00'))  # 100 apertura + 40
+
+
 class CajaSesionTotalesTests(TestCase):
 
     def test_total_ingresos_cuenta_solo_ingresos_operativos(self):

@@ -101,6 +101,7 @@ def _ajustar_total_en_caja(*, referencia_field, instance, concepto_cobro, nuevo_
     base = CajaMovimiento.objects.filter(
         **{referencia_field: instance},
         movimiento_reverso__isnull=True,
+        reverso_de__isnull=True,
     ).exclude(concepto__in=['garantia_alquiler', 'garantia_devolucion'])
     ingresos = base.filter(tipo='ingreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
     egresos  = base.filter(tipo='egreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
@@ -194,6 +195,7 @@ def _calcular_pagado_alquiler(alquiler):
     base = CajaMovimiento.objects.filter(
         referencia_alquiler=alquiler,
         movimiento_reverso__isnull=True,
+        reverso_de__isnull=True,
     ).exclude(concepto__in=['garantia_alquiler', 'garantia_devolucion'])
     ingresos = base.filter(tipo='ingreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
     egresos  = base.filter(tipo='egreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
@@ -389,6 +391,7 @@ def _calcular_pagado_venta(venta):
     base = CajaMovimiento.objects.filter(
         referencia_venta=venta,
         movimiento_reverso__isnull=True,
+        reverso_de__isnull=True,
     )
     ingresos = base.filter(tipo='ingreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
     egresos  = base.filter(tipo='egreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
@@ -509,6 +512,7 @@ def _calcular_saldo_confeccion(confeccion):
     base = CajaMovimiento.objects.filter(
         referencia_confeccion=confeccion,
         movimiento_reverso__isnull=True,
+        reverso_de__isnull=True,
     )
     ingresos = base.filter(tipo='ingreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
     egresos  = base.filter(tipo='egreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
@@ -524,6 +528,7 @@ def _calcular_pagado_confeccion(confeccion):
     base = CajaMovimiento.objects.filter(
         referencia_confeccion=confeccion,
         movimiento_reverso__isnull=True,
+        reverso_de__isnull=True,
     )
     ingresos = base.filter(tipo='ingreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
     egresos  = base.filter(tipo='egreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
@@ -648,6 +653,7 @@ def _calcular_pagado_reparacion(reparacion):
     base = CajaMovimiento.objects.filter(
         referencia_reparacion=reparacion,
         movimiento_reverso__isnull=True,
+        reverso_de__isnull=True,
     )
     ingresos = base.filter(tipo='ingreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
     egresos  = base.filter(tipo='egreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
