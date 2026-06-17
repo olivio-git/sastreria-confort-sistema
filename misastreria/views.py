@@ -8008,6 +8008,16 @@ def lista_movimientos_caja(request):
     hasta = request.GET.get('hasta', '').strip()
     periodo = request.GET.get('periodo', '').strip()
 
+    def _fecha_valida(valor):
+        try:
+            date.fromisoformat(valor)
+            return valor
+        except (ValueError, TypeError):
+            return ''
+
+    desde = _fecha_valida(desde)
+    hasta = _fecha_valida(hasta)
+
     hoy = django_tz.localdate()
     if periodo == 'hoy':
         desde = hoy.isoformat()

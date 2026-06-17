@@ -10,11 +10,11 @@
       </h2>
     </div>
     <div class="col-auto ms-auto d-flex gap-2">
-      <a href="{% url 'export_resumen_caja_pdf' %}?periodo={{ periodo }}&desde={{ desde }}&hasta={{ hasta }}"
+      <a href="{% url 'export_resumen_caja_pdf' %}?periodo={{ periodo }}&desde={{ desde|date:'Y-m-d' }}&hasta={{ hasta|date:'Y-m-d' }}"
          class="btn btn-outline-secondary" title="Exportar PDF">
         <i data-lucide="file-text" class="me-1"></i>PDF
       </a>
-      <a href="{% url 'export_resumen_caja_excel' %}?periodo={{ periodo }}&desde={{ desde }}&hasta={{ hasta }}"
+      <a href="{% url 'export_resumen_caja_excel' %}?periodo={{ periodo }}&desde={{ desde|date:'Y-m-d' }}&hasta={{ hasta|date:'Y-m-d' }}"
          class="btn btn-outline-secondary" title="Exportar Excel">
         <i data-lucide="file-spreadsheet" class="me-1"></i>Excel
       </a>
@@ -47,11 +47,11 @@
     <form method="get" class="row g-2 align-items-end" id="filterForm">
       <div class="col-12 col-md-auto">
         <label class="form-label small mb-1 fw-semibold text-muted">Desde</label>
-        <input type="date" name="desde" class="form-control" value="{{ desde }}" id="inputDesde">
+        <input type="date" name="desde" class="form-control" value="{{ desde|date:'Y-m-d' }}" id="inputDesde">
       </div>
       <div class="col-12 col-md-auto">
         <label class="form-label small mb-1 fw-semibold text-muted">Hasta</label>
-        <input type="date" name="hasta" class="form-control" value="{{ hasta }}" id="inputHasta">
+        <input type="date" name="hasta" class="form-control" value="{{ hasta|date:'Y-m-d' }}" id="inputHasta">
       </div>
       <input type="hidden" name="periodo" value="{{ periodo }}" id="hiddenPeriodo">
       <div class="col-auto ms-auto d-flex gap-2 align-items-end flex-wrap">
@@ -179,7 +179,7 @@
       <div class="card-header d-flex align-items-center">
         <h3 class="card-title">Sesiones del período</h3>
         <div class="ms-auto">
-          <a href="{% url 'lista_movimientos_caja' %}?desde={{ desde }}&hasta={{ hasta }}" class="btn btn-outline-secondary btn-sm">
+          <a href="{% url 'lista_movimientos_caja' %}?desde={{ desde|date:'Y-m-d' }}&hasta={{ hasta|date:'Y-m-d' }}" class="btn btn-outline-secondary btn-sm">
             Ver todos los movimientos
           </a>
         </div>
