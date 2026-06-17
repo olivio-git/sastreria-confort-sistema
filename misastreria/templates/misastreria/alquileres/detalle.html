@@ -36,6 +36,12 @@
         <i data-lucide="rotate-cw" class="me-1"></i>Devolver
       </a>
       {% endif %}
+      {% if alquiler.estado != 'reservado' %}
+      <button type="button" class="btn {% if alquiler.con_recargo %}btn-danger{% else %}btn-outline-danger{% endif %}"
+              data-bs-toggle="modal" data-bs-target="#modalRecargoAlquiler">
+        <i data-lucide="alarm-clock" class="me-1"></i>Cobro de recargo
+      </button>
+      {% endif %}
       <a href="{% url 'editar_alquiler' alquiler.id %}" class="btn btn-outline-primary">
         <i data-lucide="pencil" class="me-1"></i>Editar
       </a>
@@ -323,6 +329,62 @@
           <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
           <button type="submit" class="btn btn-success">
             <i data-lucide="check-circle" class="me-1"></i>Completar pago
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if alquiler.estado != 'reservado' %}
+<div class="modal modal-blur fade" id="modalRecargoAlquiler" tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog modal-sm modal-dialog-centered" role="document">
+    <div class="modal-content">
+      <form method="post" action="{% url 'agregar_recargo_alquiler' alquiler.id %}">
+        {% csrf_token %}
+        <div class="modal-header">
+          <h5 class="modal-title">Cobro de recargo {{ alquiler.codigo }}</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          {% if alquiler.con_recargo %}
+          <div class="alert alert-warning py-2 mb-3 d-flex align-items-center gap-2">
+            <i data-lucide="alarm-clock" style="width:1rem;height:1rem"></i>
+            <span class="small">Devolución fuera de la fecha/hora acordada.</span>
+          </div>
+          {% endif %}
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Monto del recargo (Bs)</label>
+            <input type="number" name="monto" class="form-control" step="0.01" min="0.01"
+                   placeholder="0.00" required>
+            <div class="form-text text-muted">Ingreso extra por mora; no afecta el saldo del alquiler.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Forma de pago</label>
+            <select name="forma_pago" class="form-select">
+              <option value="efectivo">Efectivo</option>
+              <option value="transferencia">Transferencia</option>
+              <option value="qr">QR</option>
+              <option value="tarjeta">Tarjeta</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Nota</label>
+            <input type="text" name="descripcion" class="form-control" placeholder="Nota (opcional)">
+          </div>
+          <div class="mb-2">
+            <div class="form-check form-switch">
+              <input type="checkbox" name="via_caja" id="via_caja_recargo_alquiler" class="form-check-input" role="switch" checked>
+              <label class="form-check-label fw-semibold" for="via_caja_recargo_alquiler">Registrar en caja</label>
+            </div>
+            <div class="form-text text-muted">Si no está marcado, el recargo queda en reserva.</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-danger">
+            <i data-lucide="alarm-clock" class="me-1"></i>Cobrar recargo
           </button>
         </div>
       </form>

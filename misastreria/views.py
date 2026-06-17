@@ -225,12 +225,12 @@ def _calcular_saldo_comision_empleado(empleado):
     return (dev_rep + dev_conf + dev_venta + dev_alquiler + dev_prod) - pagado
 
 
-@login_required
-def detalle_empleado(request, id):
-    empleado = get_object_or_404(Empleado, id=id)
-    permisos = empleado.permisos.order_by('-fecha_permiso')
-    faltas = empleado.faltas.order_by('-fecha_falta')
+def _devengaciones_empleado(empleado):
+    """Datos de devengaciones (ganancias) y pagos de comisión de un empleado.
 
+    Fuente única de verdad usada tanto por el detalle en pantalla como por la
+    exportación a Excel, para que nunca difieran.
+    """
     # Reparaciones con comision asignada (todos los estados)
     reparaciones_comision = empleado.asignaciones_reparacion.exclude(
         porcentaje_comision=0
@@ -377,10 +377,7 @@ def detalle_empleado(request, id):
 
     saldo_comision = total_devengado - total_pagado
 
-    return render(request, 'misastreria/empleados/detalle.html', {
-        'empleado': empleado,
-        'permisos': permisos,
-        'faltas': faltas,
+    return {
         'operaciones_comision': operaciones_comision,
         'conteo_comision': conteo_comision,
         'total_operaciones_comision': len(operaciones_comision),
@@ -389,8 +386,152 @@ def detalle_empleado(request, id):
         'total_devengado_prod': total_devengado_prod,
         'total_pagado': total_pagado,
         'saldo_comision': saldo_comision,
+    }
+
+
+@login_required
+def detalle_empleado(request, id):
+    empleado = get_object_or_404(Empleado, id=id)
+    permisos = empleado.permisos.order_by('-fecha_permiso')
+    faltas = empleado.faltas.order_by('-fecha_falta')
+
+    datos = _devengaciones_empleado(empleado)
+
+    return render(request, 'misastreria/empleados/detalle.html', {
+        'empleado': empleado,
+        'permisos': permisos,
+        'faltas': faltas,
         'pago_form': PagoComisionEmpleadoForm(),
+        **datos,
     })
+
+
+@login_required
+def exportar_devengaciones_empleado_excel(request, id):
+    """Resumen descargable (Excel) de las devengaciones de un empleado:
+    operaciones devengadas (ganancias) e historial de pagos."""
+    empleado = get_object_or_404(Empleado, id=id)
+    datos = _devengaciones_empleado(empleado)
+
+    azul = PatternFill('solid', fgColor='2563EB')
+    gris = PatternFill('solid', fgColor='E2E8F0')
+    blanco_bold = Font(bold=True, color='FFFFFF')
+    bold = Font(bold=True)
+    derecha = Alignment(horizontal='right')
+    centro = Alignment(horizontal='center')
+
+    wb = openpyxl.Workbook()
+
+    # --- Hoja 1: Operaciones devengadas (ganancias) ---
+    ws = wb.active
+    ws.title = "Devengaciones"
+
+    ws.merge_cells('A1:G1')
+    ws['A1'] = f"FORTIUM TAILOR — Devengaciones de {empleado}"
+    ws['A1'].font = Font(size=14, bold=True)
+    ws['A1'].alignment = centro
+
+    ws['A2'] = "Generado:"
+    ws['B2'] = django_tz.localtime().strftime('%d/%m/%Y %H:%M')
+
+    # Resumen
+    resumen = [
+        ('Total devengado', datos['total_devengado']),
+        ('Total pagado', datos['total_pagado']),
+        ('Saldo pendiente', datos['saldo_comision']),
+    ]
+    fila = 4
+    for etiqueta, valor in resumen:
+        ws.cell(row=fila, column=1, value=etiqueta).font = bold
+        c = ws.cell(row=fila, column=2, value=float(valor))
+        c.number_format = '#,##0.00'
+        c.font = bold
+        fila += 1
+
+    # Tabla de operaciones devengadas
+    fila += 1
+    encabezado_op = fila
+    headers_op = ['Tipo', 'Código', 'Fecha', 'Cliente', 'Base', '%', 'Comisión']
+    for col, texto in enumerate(headers_op, 1):
+        c = ws.cell(row=encabezado_op, column=col, value=texto)
+        c.font = blanco_bold
+        c.fill = azul
+        c.alignment = centro
+    fila += 1
+
+    for o in datos['operaciones_comision']:
+        ws.cell(row=fila, column=1, value=o['tipo'])
+        ws.cell(row=fila, column=2, value=f"{o['codigo']}" + (f" — {o['detalle']}" if o['detalle'] else ''))
+        ws.cell(row=fila, column=3, value=o['fecha'].strftime('%d/%m/%Y') if o['fecha'] else '—')
+        ws.cell(row=fila, column=4, value=str(o['cliente']) if o['cliente'] else '—')
+        cb = ws.cell(row=fila, column=5, value=float(o['base']) if o['base'] is not None else '—')
+        if o['base'] is not None:
+            cb.number_format = '#,##0.00'
+        cp = ws.cell(row=fila, column=6, value=float(o['porcentaje']) if o['porcentaje'] else '—')
+        if o['porcentaje']:
+            cp.number_format = '0.00'
+        cc = ws.cell(row=fila, column=7, value=float(o['comision']))
+        cc.number_format = '#,##0.00'
+        fila += 1
+
+    # Total devengado al pie
+    ws.cell(row=fila, column=6, value='Total').font = bold
+    ct = ws.cell(row=fila, column=7, value=float(datos['total_devengado']))
+    ct.number_format = '#,##0.00'
+    ct.font = bold
+    ct.fill = gris
+
+    anchos_op = [16, 28, 13, 28, 14, 8, 14]
+    for col, ancho in enumerate(anchos_op, 1):
+        ws.column_dimensions[get_column_letter(col)].width = ancho
+
+    # --- Hoja 2: Historial de pagos ---
+    ws2 = wb.create_sheet("Pagos")
+    ws2.merge_cells('A1:F1')
+    ws2['A1'] = f"FORTIUM TAILOR — Pagos de comisión de {empleado}"
+    ws2['A1'].font = Font(size=14, bold=True)
+    ws2['A1'].alignment = centro
+
+    headers_pago = ['Código', 'Fecha', 'Forma de pago', 'Vía caja', 'Descripción', 'Monto']
+    for col, texto in enumerate(headers_pago, 1):
+        c = ws2.cell(row=3, column=col, value=texto)
+        c.font = blanco_bold
+        c.fill = azul
+        c.alignment = centro
+
+    fila = 4
+    for p in datos['pagos_comision']:
+        ws2.cell(row=fila, column=1, value=p.codigo)
+        ws2.cell(row=fila, column=2, value=django_tz.localtime(p.fecha).strftime('%d/%m/%Y %H:%M'))
+        ws2.cell(row=fila, column=3, value=p.get_forma_pago_display())
+        ws2.cell(row=fila, column=4, value='Sí' if p.via_caja else 'No')
+        ws2.cell(row=fila, column=5, value=p.descripcion or '—')
+        cm = ws2.cell(row=fila, column=6, value=float(p.monto))
+        cm.number_format = '#,##0.00'
+        fila += 1
+
+    ws2.cell(row=fila, column=5, value='Total pagado').font = bold
+    cpt = ws2.cell(row=fila, column=6, value=float(datos['total_pagado']))
+    cpt.number_format = '#,##0.00'
+    cpt.font = bold
+    cpt.fill = gris
+
+    anchos_pago = [14, 18, 16, 10, 32, 14]
+    for col, ancho in enumerate(anchos_pago, 1):
+        ws2.column_dimensions[get_column_letter(col)].width = ancho
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    response = HttpResponse(
+        output.read(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+    nombre = (empleado.codigo or str(empleado.id))
+    response['Content-Disposition'] = f'attachment; filename="devengaciones_{nombre}.xlsx"'
+    return response
+
 
 @login_required
 def crear_permiso(request, empleado_id):
@@ -3265,7 +3406,7 @@ def detalle_alquiler(request, id):
     items = alquiler.items.select_related('prenda_item__prenda').all()
     pagos = alquiler.caja_movimientos.filter(
         movimiento_reverso__isnull=True,
-        concepto__in=['alquiler_cobro', 'alquiler_pago'],
+        concepto__in=['alquiler_cobro', 'alquiler_pago', 'alquiler_recargo'],
     ).order_by('-fecha', '-id')
     total = alquiler.total
     pagado = alquiler.total_pagado
@@ -3310,7 +3451,7 @@ def agregar_pago_alquiler(request, id):
     items = alquiler.items.select_related('prenda_item__prenda').all()
     pagos = alquiler.caja_movimientos.filter(
         movimiento_reverso__isnull=True,
-        concepto__in=['alquiler_cobro', 'alquiler_pago'],
+        concepto__in=['alquiler_cobro', 'alquiler_pago', 'alquiler_recargo'],
     ).order_by('-fecha', '-id')
     return render(request, 'misastreria/alquileres/detalle.html', {
         'alquiler': alquiler,
@@ -3321,6 +3462,35 @@ def agregar_pago_alquiler(request, id):
         'saldo': alquiler.saldo_pendiente,
         'form': form,
     })
+
+
+@login_required
+def agregar_recargo_alquiler(request, id):
+    """Cobra un recargo (mora por devolución tardía) e ingresa a caja con su
+    forma de pago. Es un ingreso extra, independiente del saldo del alquiler."""
+    from .forms import PagoAlquilerForm
+    from .caja_signals import registrar_recargo_alquiler
+    from django.http import HttpResponseNotAllowed
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['POST'])
+    alquiler = get_object_or_404(Alquiler, id=id)
+    form = PagoAlquilerForm(request.POST)
+    if form.is_valid():
+        registrar_recargo_alquiler(
+            alquiler,
+            form.cleaned_data['monto'],
+            form.cleaned_data['forma_pago'],
+            form.cleaned_data.get('descripcion', ''),
+            request.user,
+            via_caja=form.cleaned_data.get('via_caja', True),
+        )
+        messages.success(
+            request,
+            f"Recargo de Bs {form.cleaned_data['monto']:.2f} registrado para {alquiler.codigo}.",
+        )
+    else:
+        messages.error(request, "No se pudo registrar el recargo. Revisá el monto.")
+    return redirect('detalle_alquiler', id=id)
 
 
 @login_required

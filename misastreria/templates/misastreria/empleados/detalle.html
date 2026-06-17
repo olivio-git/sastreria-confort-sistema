@@ -13,6 +13,9 @@
       <h2 class="page-title"><i data-lucide="id-card" class="me-2 text-muted"></i>{{ empleado }}</h2>
     </div>
     <div class="col-auto ms-auto d-flex gap-2">
+      <a href="{% url 'exportar_devengaciones_empleado_excel' empleado.id %}" class="btn btn-outline-success" title="Descargar resumen de devengaciones en Excel">
+        <i data-lucide="file-spreadsheet"></i>Excel devengaciones
+      </a>
       <a href="{% url 'editar_empleado' empleado.id %}" class="btn btn-outline-primary">
         <i data-lucide="pencil"></i>Editar
       </a>

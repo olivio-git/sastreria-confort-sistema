@@ -196,7 +196,7 @@ def _calcular_pagado_alquiler(alquiler):
         referencia_alquiler=alquiler,
         movimiento_reverso__isnull=True,
         reverso_de__isnull=True,
-    ).exclude(concepto__in=['garantia_alquiler', 'garantia_devolucion'])
+    ).exclude(concepto__in=['garantia_alquiler', 'garantia_devolucion', 'alquiler_recargo'])
     ingresos = base.filter(tipo='ingreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
     egresos  = base.filter(tipo='egreso').aggregate(s=Sum('monto'))['s'] or Decimal('0')
     return ingresos - egresos
@@ -223,6 +223,27 @@ def registrar_pago_alquiler(alquiler, monto, forma_pago, descripcion, usuario, v
         alquiler.refresh_from_db()
         if alquiler.saldo_pendiente <= Decimal('0'):
             _liberar_pagos_reservados('referencia_alquiler', alquiler)
+
+
+def registrar_recargo_alquiler(alquiler, monto, forma_pago, descripcion, usuario, via_caja=True):
+    """
+    Registra un cobro de recargo (mora por devolución tardía) de un alquiler.
+    Es un ingreso EXTRA, independiente del total/saldo del alquiler — por eso
+    se excluye de _calcular_pagado_alquiler. Sin guarda de idempotencia.
+    """
+    mov = _crear_mov_auto(
+        concepto='alquiler_recargo',
+        monto=monto,
+        forma_pago=forma_pago or 'efectivo',
+        descripcion=descripcion or f"Recargo por devolución tardía {alquiler.codigo}",
+        referencia_alquiler=alquiler,
+        cliente=getattr(alquiler, 'cliente', None),
+        via_caja=via_caja,
+    )
+    if mov and usuario:
+        mov.usuario = usuario
+        mov.save(update_fields=['usuario'])
+    return mov
 
 
 def registrar_reparacion_en_caja(instance):

@@ -18,6 +18,7 @@ urlpatterns = [
     path('empleados/editar/<int:id>/', views.editar_empleado, name='editar_empleado'),
     path('empleados/eliminar/<int:id>/', views.eliminar_empleado, name='eliminar_empleado'),
     path('empleados/<int:id>/detalle/', views.detalle_empleado, name='detalle_empleado'),
+    path('empleados/<int:id>/devengaciones/excel/', views.exportar_devengaciones_empleado_excel, name='exportar_devengaciones_empleado_excel'),
     path('empleados/permiso/<int:empleado_id>/', views.crear_permiso, name='crear_permiso'),
     path('empleados/falta/<int:empleado_id>/', views.crear_falta, name='crear_falta'),
     path('empleados/permiso/eliminar/<int:id>/', views.eliminar_permiso, name='eliminar_permiso'),
@@ -90,6 +91,7 @@ urlpatterns = [
     path('alquileres/comprobante/pdf/<int:id>/', views.exportar_comprobante_alquiler_pdf, name='exportar_comprobante_alquiler_pdf'),
     path('alquileres/detalle/<int:id>/', views.detalle_alquiler, name='detalle_alquiler'),
     path('alquileres/<int:id>/pago/', views.agregar_pago_alquiler, name='agregar_pago_alquiler'),
+    path('alquileres/<int:id>/recargo/', views.agregar_recargo_alquiler, name='agregar_recargo_alquiler'),
     # Prendas
     path('prendas/', views.lista_prendas, name='lista_prendas'),
     path('prendas/crear/', views.crear_prenda, name='crear_prenda'),
