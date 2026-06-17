@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Manual del Administrador — Fortium Tailor</title>
+<style>
+  @page {
+    size: A4;
+    margin: 20mm 18mm 18mm 18mm;
+    @bottom-center { content: counter(page) " / " counter(pages); }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    font-family: "Liberation Sans", "Helvetica Neue", Arial, sans-serif;
+    color: #1e293b; font-size: 11.5pt; line-height: 1.5; margin: 0;
+  }
+  h1, h2, h3 { color: #1e3a8a; line-height: 1.25; }
+  h1 { font-size: 24pt; margin: 0 0 4px; }
+  h2 {
+    font-size: 15pt; margin: 26px 0 10px; padding-bottom: 6px;
+    border-bottom: 2px solid #2563eb; break-after: avoid;
+  }
+  h3 { font-size: 12.5pt; margin: 18px 0 6px; break-after: avoid; }
+  p { margin: 8px 0; }
+  ol, ul { margin: 8px 0 8px 22px; padding: 0; }
+  li { margin: 4px 0; }
+  code {
+    font-family: "Liberation Mono", monospace; font-size: 10.5pt;
+    background: #f1f5f9; padding: 1px 5px; border-radius: 4px;
+    border: 1px solid #e2e8f0; word-break: break-all;
+  }
+  strong { color: #0f172a; }
+
+  /* Portada */
+  .cover {
+    border-top: 6px solid #1e3a8a; border-bottom: 6px solid #2563eb;
+    padding: 28px 0 22px; margin-bottom: 8px;
+  }
+  .cover .sub { color: #2563eb; font-size: 13pt; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; }
+  .cover .sys { font-size: 12pt; color: #475569; margin-top: 6px; }
+  .meta { color: #64748b; font-size: 10pt; margin-top: 10px; }
+
+  /* Cajas de aviso */
+  .note {
+    border-left: 5px solid #2563eb; background: #eff6ff;
+    padding: 10px 14px; margin: 14px 0; border-radius: 0 6px 6px 0;
+    break-inside: avoid; font-size: 10.8pt;
+  }
+  .warn { border-left-color: #d97706; background: #fffbeb; }
+  .danger { border-left-color: #dc2626; background: #fef2f2; }
+  .note .tag { display: block; font-weight: 700; color: #1e3a8a; margin-bottom: 4px; text-transform: uppercase; font-size: 9pt; letter-spacing: .4px; }
+  .warn .tag { color: #b45309; }
+  .danger .tag { color: #b91c1c; }
+
+  /* Figuras */
+  figure { margin: 12px 0 16px; break-inside: avoid; text-align: center; }
+  figure img { max-width: 100%; border: 1px solid #cbd5e1; border-radius: 6px; }
+  figure.small img { max-width: 58%; }
+  figcaption { color: #64748b; font-size: 9.5pt; margin-top: 6px; font-style: italic; }
+
+  /* Tablas de credenciales */
+  table { width: 100%; border-collapse: collapse; margin: 8px 0 18px; break-inside: avoid; font-size: 10.6pt; }
+  th, td { border: 1px solid #cbd5e1; padding: 7px 10px; text-align: left; vertical-align: top; }
+  th { background: #1e3a8a; color: #fff; font-weight: 700; }
+  tbody tr:nth-child(even) { background: #f8fafc; }
+  td code { background: #fff; }
+  .svc { background: #dbeafe; font-weight: 700; color: #1e3a8a; }
+  .svc a { color: #1d4ed8; font-size: 10pt; font-weight: 400; }
+
+  .pagebreak { break-before: page; }
+  a { color: #1d4ed8; text-decoration: none; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="sub">Manual del Administrador</div>
+  <h1>Fortium Tailor</h1>
+  <div class="sys">Sistema de gestión para sastrería &middot; Guía para el dueño</div>
+  <div class="meta">Documento confidencial &middot; Junio 2026</div>
+</div>
+
+<div class="note danger">
+  <span class="tag">Confidencial</span>
+  Este documento contiene contraseñas y accesos al sistema. Guardalo en un lugar
+  seguro y no lo compartas. Si entregás una copia, hacelo solo a personas de total confianza.
+</div>
+
+<p>Este manual explica las tareas de administración que <strong>no están en el sistema
+de todos los días</strong>, como cambiar la contraseña de una persona o crear un
+usuario nuevo. También reúne todos los accesos (sistema, hosting, base de datos y sitio web).</p>
+
+<p>En las imágenes, los <strong>círculos rojos con números</strong> (1, 2, 3&hellip;)
+muestran exactamente dónde hacer clic, en el mismo orden que los pasos.</p>
+
+<!-- ============================================================ -->
+<h2>1. Credenciales de acceso</h2>
+
+<h3>Sistema Fortium Tailor</h3>
+<p>Ingreso normal al sistema: <a href="https://fortiumtailor.com/sistema/login/">https://fortiumtailor.com/sistema/login/</a></p>
+<table>
+  <thead><tr><th style="width:38%">Usuario</th><th>Contraseña</th></tr></thead>
+  <tbody>
+    <tr><td><code>admin</code></td><td><code>Fortium_1212</code></td></tr>
+    <tr><td><code>operador</code></td><td><code>franklin1212</code></td></tr>
+    <tr><td><code>analuzpachecho</code></td><td><code>secretaria1212</code></td></tr>
+  </tbody>
+</table>
+
+<h3>Otros accesos</h3>
+<table>
+  <thead><tr><th style="width:38%">Servicio</th><th>Usuario y contraseña</th></tr></thead>
+  <tbody>
+    <tr>
+      <td class="svc">Hosting — NameCheap<br><a href="https://www.namecheap.com/myaccount/login/">namecheap.com/myaccount/login</a></td>
+      <td>Usuario: <code>franklinchungara</code><br>Contraseña: <code>Franklin_1212</code></td>
+    </tr>
+    <tr>
+      <td class="svc">Base de datos del sistema</td>
+      <td>Usuario: <code>fortoyye_fortiumdbuserFortium_1212</code><br>Contraseña: <code>Fortium_1212</code></td>
+    </tr>
+    <tr>
+      <td class="svc">Sitio web — WordPress<br><a href="https://fortiumtailor.com/wp-login.php">fortiumtailor.com/wp-login.php</a></td>
+      <td>Usuario: <code>franklin</code><br>Contraseña: <code>Franklin_1212</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <span class="tag">Para qué es cada uno</span>
+  El <strong>Sistema Fortium Tailor</strong> es donde se trabaja todos los días.
+  El <strong>Hosting (NameCheap)</strong> y la <strong>Base de datos</strong> son
+  servicios técnicos del servidor; normalmente no se tocan. El <strong>Sitio web
+  (WordPress)</strong> es la página pública de la empresa.
+</div>
+
+<!-- ============================================================ -->
+<h2>2. Panel de Administración de usuarios</h2>
+
+<p>El panel de administración sirve para manejar quién puede entrar al sistema y sus
+contraseñas. Es una dirección aparte de la del uso diario.</p>
+
+<table>
+  <tbody>
+    <tr><td class="svc" style="width:38%">Panel de administración</td><td><a href="https://fortiumtailor.com/sistema/admin/">https://fortiumtailor.com/sistema/admin/</a></td></tr>
+    <tr><td class="svc">Administrar usuarios</td><td><a href="https://fortiumtailor.com/sistema/admin/auth/user/">https://fortiumtailor.com/sistema/admin/auth/user/</a></td></tr>
+  </tbody>
+</table>
+
+<div class="note warn">
+  <span class="tag">Importante</span>
+  A este panel <strong>solo se puede entrar con el usuario <code>admin</code></strong>.
+  Los demás usuarios (operador, secretaria) no tienen acceso.
+</div>
+
+<h3>2.1 Cómo entrar</h3>
+<p>Abrí tu navegador (Chrome, Edge, etc.) y entrá a
+<a href="https://fortiumtailor.com/sistema/admin/">https://fortiumtailor.com/sistema/admin/</a>.
+Vas a ver esta pantalla:</p>
+
+<figure class="small">
+  <img src="img/01-login.png" alt="Pantalla para iniciar sesión">
+  <figcaption>Pantalla de inicio de sesión del panel de administración</figcaption>
+</figure>
+
+<ol>
+  <li>En <strong>Nombre de usuario</strong>, escribí <code>admin</code>.</li>
+  <li>En <strong>Contraseña</strong>, escribí la contraseña de <code>admin</code> (ver punto 1).</li>
+  <li>Hacé clic en <strong>Iniciar sesión</strong>.</li>
+</ol>
+
+<h3>2.2 La pantalla principal</h3>
+<p>Una vez adentro, en la lista de la izquierda lo único que vas a necesitar está arriba,
+donde dice <strong>Usuarios</strong>. Más abajo aparece una lista larga (Clientes, Ventas,
+Caja, etc.): <strong>no hace falta que toques nada de eso</strong>, se maneja desde el
+sistema normal.</p>
+
+<!-- ============================================================ -->
+<h2>3. Cambiar la contraseña de una persona</h2>
+
+<p><strong>Paso 1 &mdash; Abrí la lista de usuarios.</strong> En la columna de la izquierda
+hacé clic en <strong>Usuarios</strong>. Vas a ver a todas las personas con acceso:</p>
+
+<figure>
+  <img src="img/03-users-list.png" alt="Lista de usuarios">
+  <figcaption>Lista de usuarios del sistema</figcaption>
+</figure>
+
+<ul>
+  <li><strong>(1)</strong> Para cambiarle la contraseña a alguien, hacé clic sobre <strong>su nombre</strong>.</li>
+  <li><strong>(2)</strong> El botón <strong>AÑADIR USUARIO</strong> (arriba a la derecha) sirve para crear uno nuevo (ver punto 4).</li>
+</ul>
+
+<p><strong>Paso 2 &mdash; Abrí el cambio de contraseña.</strong> Al hacer clic en el nombre se
+abre la ficha de esa persona. En el recuadro <strong>Contraseña</strong>, hacé clic en el
+botón <strong>Restablecer contraseña</strong> (marcado con el número 1):</p>
+
+<figure>
+  <img src="img/04-user-change.png" alt="Ficha de la persona con el botón Restablecer contraseña">
+  <figcaption>Ficha del usuario. (1) Botón "Restablecer contraseña". (2) Casilla "Activo".</figcaption>
+</figure>
+
+<div class="note">
+  <span class="tag">Nota</span>
+  Es normal que la contraseña actual no se vea: por seguridad nunca se muestra.
+</div>
+
+<p><strong>Paso 3 &mdash; Escribí la contraseña nueva.</strong> Se abre esta pantalla:</p>
+
+<figure>
+  <img src="img/05-password-change.png" alt="Pantalla para escribir la nueva contraseña">
+  <figcaption>Formulario para escribir la nueva contraseña</figcaption>
+</figure>
+
+<ol>
+  <li>Escribí la <strong>contraseña nueva</strong>.</li>
+  <li>Escribí <strong>la misma contraseña otra vez</strong> para confirmar.</li>
+  <li>Hacé clic en <strong>CAMBIAR CONTRASEÑA</strong>.</li>
+</ol>
+
+<p><strong>La contraseña debe cumplir estas reglas</strong> (si no, el sistema no la acepta):</p>
+<ul>
+  <li>Tener <strong>8 caracteres o más</strong>.</li>
+  <li>No parecerse al nombre de usuario.</li>
+  <li>No ser una contraseña demasiado fácil o común (por ejemplo <code>12345678</code>).</li>
+  <li>No ser solamente números.</li>
+</ul>
+<p>Listo. Avisale a la persona su contraseña nueva.</p>
+
+<!-- ============================================================ -->
+<h2>4. Crear un usuario nuevo</h2>
+
+<p><strong>Paso 1.</strong> Entrá a <strong>Usuarios</strong> (columna izquierda) y hacé clic
+en <strong>AÑADIR USUARIO</strong>, arriba a la derecha.</p>
+
+<p><strong>Paso 2.</strong> Se abre este formulario. Completá los campos marcados:</p>
+
+<figure>
+  <img src="img/06-user-add.png" alt="Formulario para crear un usuario">
+  <figcaption>Formulario para crear un usuario nuevo</figcaption>
+</figure>
+
+<ol>
+  <li><strong>Nombre de usuario</strong> &mdash; con el que la persona va a entrar.
+      <em>(Obligatorio.)</em> Sin espacios; pueden ser letras y números.</li>
+  <li><strong>Contraseña</strong> &mdash; la clave para entrar. <em>(Obligatorio.)</em></li>
+  <li><strong>Contraseña (confirmación)</strong> &mdash; la misma contraseña otra vez.
+      <em>(Obligatorio.)</em> Tiene las mismas reglas del punto 3.</li>
+  <li>Hacé clic en <strong>GUARDAR</strong>.</li>
+</ol>
+
+<div class="note">
+  <span class="tag">Nota</span>
+  El recuadro "Autenticación basada en contraseña" dejalo como está (<strong>Habilitado</strong>).
+</div>
+
+<p><strong>Paso 3 (opcional).</strong> Después de guardar, el sistema abre la ficha completa de
+la persona. Ahí podés llenar datos que <strong>no son obligatorios</strong> y se pueden dejar en blanco:</p>
+<ul>
+  <li><strong>Nombre</strong>, <strong>Apellidos</strong> y <strong>Dirección de correo
+      electrónico</strong> &mdash; opcionales.</li>
+</ul>
+<p>Si no los llenás, el usuario igual funciona. Si los completás, hacé clic en
+<strong>GUARDAR</strong> al final de la página.</p>
+
+<!-- ============================================================ -->
+<h2>5. Quitar o dar acceso sin borrar a nadie</h2>
+
+<p>En la ficha de una persona (la del punto 3) hay una casilla llamada <strong>Activo</strong>
+(marcada con el número 2 en esa imagen):</p>
+<ul>
+  <li>Casilla <strong>"Activo" marcada</strong> &rarr; la persona <strong>puede entrar</strong> al sistema.</li>
+  <li>Casilla <strong>"Activo" desmarcada</strong> &rarr; la persona <strong>no puede entrar</strong>,
+      pero <strong>no se borra</strong> y no se pierde su historial.</li>
+</ul>
+<p>Cuando un empleado deja de trabajar, lo mejor es <strong>desmarcar "Activo"</strong> (en
+vez de borrarlo) y luego bajar hasta el final de la página y apretar <strong>GUARDAR</strong>.
+Si vuelve, volvés a marcar "Activo" y queda como antes.</p>
+
+<div class="note warn">
+  <span class="tag">Importante</span>
+  Las casillas <strong>"Es staff"</strong> y <strong>"Superusuario"</strong>, que están justo
+  debajo, dan acceso a este panel de administración y a permisos avanzados. Dejalas
+  desmarcadas para los empleados normales. Solo el usuario <code>admin</code> debe tenerlas marcadas.
+</div>
+
+<h2>6. Salir</h2>
+<p>Cuando termines, hacé clic en <strong>CERRAR SESIÓN</strong>, arriba a la derecha. Es
+importante, sobre todo si la computadora la usan varias personas.</p>
+
+<h2>7. Recomendaciones</h2>
+<ul>
+  <li><strong>No borres usuarios.</strong> Para quitarle el acceso a alguien, desmarcá
+      <strong>"Activo"</strong> (punto 5). Así no se pierde nada.</li>
+  <li><strong>Usá este panel solo para usuarios y contraseñas.</strong> Las ventas, la caja,
+      los empleados y todo lo demás se manejan desde el sistema normal.</li>
+  <li>Los cambios acá se guardan al instante y <strong>no se pueden deshacer</strong>; revisá
+      antes de apretar GUARDAR.</li>
+</ul>
+
+</body>
+</html>
