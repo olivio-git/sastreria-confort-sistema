@@ -1716,6 +1716,34 @@ def _pdf_total_tbl(label, amount_str, page_w):
     return t
 
 
+def _pdf_fin_tbl(rows, page_w):
+    """Financial summary table for client receipts: list of [label, amount_str]
+    rows where the LAST row (saldo pendiente) is highlighted. Replaces the single
+    TOTAL box so the receipt shows what the client paid and what remains owed —
+    needed for the client's own records when the receipt goes to WhatsApp."""
+    last = len(rows) - 1
+    t = Table(rows, colWidths=[page_w * 0.55, page_w * 0.45])
+    t.setStyle(TableStyle([
+        ('BACKGROUND',    (0, 0), (-1, -1), _PDF_LGRAY),
+        ('BACKGROUND',    (0, last), (-1, last), colors.HexColor('#eef3ff')),
+        ('FONTNAME',      (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME',      (1, 0), (1, -1), 'Helvetica'),
+        ('FONTNAME',      (0, last), (-1, last), 'Helvetica-Bold'),
+        ('FONTSIZE',      (0, 0), (-1, -1), 10),
+        ('FONTSIZE',      (1, last), (1, last), 13),
+        ('TEXTCOLOR',     (1, last), (1, last), _PDF_NAVY),
+        ('ALIGN',         (0, 0), (0, -1), 'LEFT'),
+        ('ALIGN',         (1, 0), (1, -1), 'RIGHT'),
+        ('TOPPADDING',    (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 8),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 8),
+        ('BOX',           (0, 0), (-1, -1), 1, _PDF_GOLD),
+        ('LINEBELOW',     (0, last - 1), (-1, last - 1), 0.5, colors.HexColor('#cccccc')),
+    ]))
+    return t
+
+
 def _pdf_sig_tbl(st, page_w):
     t = Table(
         [
@@ -1821,7 +1849,11 @@ def exportar_recibo_reparacion_pdf(request, id):
         [
             _pdf_body(left_tbl, right_tbl, L_W, R_W),
             Spacer(1, 0.5*cm),
-            _pdf_total_tbl('TOTAL A PAGAR', f"Bs.  {reparacion.total:.2f}", W_PAGE),
+            _pdf_fin_tbl([
+                ['Precio total',    f"Bs.  {reparacion.total:.2f}"],
+                ['Pagado',          f"Bs.  {reparacion.total_pagado:.2f}"],
+                ['Saldo pendiente', f"Bs.  {reparacion.saldo_pendiente:.2f}"],
+            ], W_PAGE),
             Spacer(1, 0.8*cm),
             _pdf_sig_tbl(st, W_PAGE),
         ],
@@ -2286,7 +2318,11 @@ def exportar_recibo_pdf(request, id):
         [
             _pdf_body(left_tbl, right_tbl, L_W, R_W),
             Spacer(1, 0.5*cm),
-            _pdf_total_tbl('TOTAL A PAGAR', f"Bs.  {venta.total:.2f}", W_PAGE),
+            _pdf_fin_tbl([
+                ['Precio total',    f"Bs.  {venta.total:.2f}"],
+                ['Pagado',          f"Bs.  {venta.total_pagado:.2f}"],
+                ['Saldo pendiente', f"Bs.  {venta.saldo_pendiente:.2f}"],
+            ], W_PAGE),
             Spacer(1, 0.8*cm),
             _pdf_sig_tbl(st, W_PAGE),
         ],
@@ -3378,6 +3414,16 @@ def exportar_comprobante_alquiler_pdf(request, id):
         ('BOX',           (0, 0), (-1, -1), 0.5, colors.HexColor('#cccccc')),
     ]))
 
+    # Resumen financiero: total / pagado / garantía (si es monetaria) / saldo.
+    # El saldo va siempre al final para que quede resaltado.
+    fin_rows = [
+        ['Precio total', f"Bs.  {alquiler.total:.2f}"],
+        ['Pagado',       f"Bs.  {alquiler.total_pagado:.2f}"],
+    ]
+    if alquiler.garantia_tipo in ('efectivo', 'qr', 'transferencia') and alquiler.garantia_monto:
+        fin_rows.append(['Garantía (depósito)', f"Bs.  {alquiler.garantia_monto:.2f}"])
+    fin_rows.append(['Saldo pendiente', f"Bs.  {alquiler.saldo_pendiente:.2f}"])
+
     def on_page(c, doc):
         _pdf_page_reparacion(c, doc, 'DE ALQUILER DE PRENDAS', cod_str, fec_str, hora_hdr, est_str)
 
@@ -3388,7 +3434,7 @@ def exportar_comprobante_alquiler_pdf(request, id):
         [
             _pdf_body(left_tbl, right_tbl, L_W, R_W),
             Spacer(1, 0.4*cm),
-            _pdf_total_tbl('TOTAL A PAGAR', f"Bs.  {alquiler.total:.2f}", W_PAGE),
+            _pdf_fin_tbl(fin_rows, W_PAGE),
             Spacer(1, 0.4*cm),
             cond_tbl,
             Spacer(1, 0.6*cm),
