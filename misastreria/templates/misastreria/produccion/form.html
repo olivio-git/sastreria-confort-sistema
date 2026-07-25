@@ -51,7 +51,13 @@
           <div class="row g-3">
             <div class="col-md-6">
               <label class="form-label">{{ form.prenda_inventario.label }}{% if not form.prenda_inventario.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
-              {{ form.prenda_inventario }}
+              <div style="position:relative">
+                <input type="text" data-prenda-inventario-search="id_prenda_inventario"
+                       data-endpoint="{% url 'buscar_prenda_inventario' %}"
+                       class="form-control" placeholder="Buscar prenda…" autocomplete="off">
+                <input type="hidden" name="prenda_inventario" id="id_prenda_inventario"
+                       value="{{ form.prenda_inventario.value|default:'' }}">
+              </div>
               {% if form.prenda_inventario.errors %}<div class="invalid-feedback d-block">{{ form.prenda_inventario.errors }}</div>{% endif %}
             </div>
             <div class="col-md-6">

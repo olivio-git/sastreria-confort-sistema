@@ -185,12 +185,35 @@ function makeCombobox(input, hiddenId, endpoint) {
     dropdown.style.display = 'block';
   }
 
+  // Búsqueda contra el servidor (el endpoint filtra por ?q=), con debounce.
+  // Antes el combobox solo filtraba en el navegador la lista inicial, que el
+  // servidor recorta (ej: prendas a 200). Cualquier registro fuera de ese tope
+  // nunca aparecía por más que se escribiera. Ahora cada búsqueda va al servidor.
+  var searchSeq   = 0;
+  var searchTimer = null;
+
+  function renderServerResults(q) {
+    var seq = ++searchSeq;
+    var url = endpoint + (endpoint.indexOf('?') === -1 ? '?' : '&') + 'q=' + encodeURIComponent(q);
+    fetch(url)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (seq !== searchSeq) return;   // respuesta obsoleta (llegó fuera de orden)
+        renderList(data);
+      })
+      .catch(function() {});
+  }
+
   function filterAndShow() {
-    var q = input.value.trim().toLowerCase();
-    if (!q) { renderList(allItems); return; }
-    renderList(allItems.filter(function(c) {
-      return c.nombre.toLowerCase().includes(q) || c.ci.toLowerCase().includes(q);
-    }));
+    var q = input.value.trim();
+    // Sin texto: mostrar la lista inicial ya cargada (modo "explorar")
+    if (!q) {
+      if (searchTimer) { clearTimeout(searchTimer); searchTimer = null; }
+      renderList(allItems);
+      return;
+    }
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(function() { renderServerResults(q); }, 250);
   }
 
   fetch(endpoint)
