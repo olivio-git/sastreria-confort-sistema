@@ -93,7 +93,7 @@ def dashboard(request):
     ordenes_activas = OrdenProduccion.objects.exclude(estado='terminado').count()
 
     # Caja de hoy
-    hoy = django_tz.now().date()
+    hoy = django_tz.localdate()
     caja_hoy_qs = CajaMovimiento.objects.filter(
         fecha__date__gte=hoy,
         fecha__date__lte=hoy,
