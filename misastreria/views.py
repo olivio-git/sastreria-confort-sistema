@@ -196,13 +196,8 @@ def eliminar_empleado(request, id):
 
 def _calcular_saldo_comision_empleado(empleado):
     """Devengado (asignaciones en todos los estados, monto fijo o %) menos total pagado."""
-    dev_rep = empleado.asignaciones_reparacion.exclude(porcentaje_comision=0).aggregate(
-        s=Sum(
-            ExpressionWrapper(
-                F('reparacion__total') * F('porcentaje_comision') / Decimal('100'),
-                output_field=DecimalField(max_digits=12, decimal_places=2),
-            )
-        )
+    dev_rep = empleado.asignaciones_reparacion.exclude(monto_comision_fijo=0).aggregate(
+        s=Sum('monto_comision_fijo')
     )['s'] or Decimal('0')
 
     dev_conf = empleado.asignaciones_confeccion.exclude(monto_comision_fijo=0).aggregate(
@@ -233,12 +228,9 @@ def _devengaciones_empleado(empleado):
     """
     # Reparaciones con comision asignada (todos los estados)
     reparaciones_comision = empleado.asignaciones_reparacion.exclude(
-        porcentaje_comision=0
+        monto_comision_fijo=0
     ).select_related('reparacion__cliente').annotate(
-        monto_comision_calc=ExpressionWrapper(
-            F('reparacion__total') * F('porcentaje_comision') / Decimal('100'),
-            output_field=DecimalField(max_digits=12, decimal_places=2),
-        )
+        monto_comision_calc=F('monto_comision_fijo')
     ).order_by('-reparacion__fecha_entrega', '-id')
 
     # Confecciones con comision asignada (todos los estados, monto fijo)
@@ -305,7 +297,7 @@ def _devengaciones_empleado(empleado):
             'fecha': r.reparacion.fecha_entrega,
             'cliente': r.reparacion.cliente,
             'base': r.reparacion.total,
-            'porcentaje': r.porcentaje_comision,
+            'porcentaje': None,
             'detalle': '',
             'comision': r.monto_comision_calc,
         })
@@ -451,7 +443,7 @@ def exportar_devengaciones_empleado_excel(request, id):
     # Tabla de operaciones devengadas
     fila += 1
     encabezado_op = fila
-    headers_op = ['Tipo', 'Código', 'Fecha', 'Cliente', 'Base', '%', 'Comisión']
+    headers_op = ['Tipo', 'Código', 'Fecha', 'Cliente', 'Base', 'Comisión']
     for col, texto in enumerate(headers_op, 1):
         c = ws.cell(row=encabezado_op, column=col, value=texto)
         c.font = blanco_bold
@@ -467,21 +459,18 @@ def exportar_devengaciones_empleado_excel(request, id):
         cb = ws.cell(row=fila, column=5, value=float(o['base']) if o['base'] is not None else '—')
         if o['base'] is not None:
             cb.number_format = '#,##0.00'
-        cp = ws.cell(row=fila, column=6, value=float(o['porcentaje']) if o['porcentaje'] else '—')
-        if o['porcentaje']:
-            cp.number_format = '0.00'
-        cc = ws.cell(row=fila, column=7, value=float(o['comision']))
+        cc = ws.cell(row=fila, column=6, value=float(o['comision']))
         cc.number_format = '#,##0.00'
         fila += 1
 
     # Total devengado al pie
-    ws.cell(row=fila, column=6, value='Total').font = bold
-    ct = ws.cell(row=fila, column=7, value=float(datos['total_devengado']))
+    ws.cell(row=fila, column=5, value='Total').font = bold
+    ct = ws.cell(row=fila, column=6, value=float(datos['total_devengado']))
     ct.number_format = '#,##0.00'
     ct.font = bold
     ct.fill = gris
 
-    anchos_op = [16, 28, 13, 28, 14, 8, 14]
+    anchos_op = [16, 28, 13, 28, 14, 14]
     for col, ancho in enumerate(anchos_op, 1):
         ws.column_dimensions[get_column_letter(col)].width = ancho
 
@@ -1081,7 +1070,7 @@ def lista_reparaciones(request):
 def _parse_asignaciones(post, monto_key='pct'):
     """Lee las filas de empleados asignados del POST.
     Retorna lista de (empleado_id, monto_Decimal) válidas, en orden, sin duplicados.
-    monto_key: 'pct' para reparaciones (porcentaje), 'monto' para confecciones (Bs fijo)."""
+    monto_key: 'monto' (Bs fijo) para todos los servicios; 'pct' sólo si algún flujo legacy aún usa porcentaje."""
     try:
         count = int(post.get('asignaciones_count', '0'))
     except ValueError:
@@ -1263,7 +1252,8 @@ def crear_reparacion(request):
             from .models import ReparacionEmpleado
             reparacion = form.save()
             errores = _guardar_items_reparacion(reparacion, request.POST)
-            errores += _guardar_asignaciones(reparacion, request.POST, ReparacionEmpleado, 'reparacion')
+            errores += _guardar_asignaciones(reparacion, request.POST, ReparacionEmpleado, 'reparacion',
+                                             commission_field='monto_comision_fijo', monto_key='monto', sync_lead=False)
             if reparacion.estado == 'entregado':
                 from .caja_signals import registrar_reparacion_en_caja
                 registrar_reparacion_en_caja(reparacion)
@@ -1293,7 +1283,8 @@ def editar_reparacion(request, id):
             old_total = reparacion.total
             reparacion = form.save()
             errores = _guardar_items_reparacion(reparacion, request.POST)
-            errores += _guardar_asignaciones(reparacion, request.POST, ReparacionEmpleado, 'reparacion')
+            errores += _guardar_asignaciones(reparacion, request.POST, ReparacionEmpleado, 'reparacion',
+                                             commission_field='monto_comision_fijo', monto_key='monto', sync_lead=False)
             from .caja_signals import _ajustar_total_en_caja
             _ajustar_total_en_caja(
                 referencia_field='referencia_reparacion',
@@ -1321,7 +1312,7 @@ def editar_reparacion(request, id):
     return render(request, 'misastreria/reparaciones/editar.html', {
         'form': form, 'reparacion': reparacion,
         'items_existentes_json': json.dumps(items_existentes, default=str),
-        'asignaciones_json': _asignaciones_json(reparacion),
+        'asignaciones_json': _asignaciones_json(reparacion, 'monto_comision_fijo'),
         'tipos_prenda_json': json.dumps([{'id': t.id, 'nombre': t.nombre} for t in TipoPrenda.objects.order_by('nombre')]),
         'tipos_reparacion_json': json.dumps([{'id': t.id, 'nombre': t.nombre} for t in TipoReparacion.objects.order_by('nombre')]),
     })

@@ -246,7 +246,6 @@
             <th>Fecha</th>
             <th>Cliente</th>
             <th class="text-end">Base</th>
-            <th class="text-end">%</th>
             <th class="text-end">Comisión</th>
           </tr>
         </thead>
@@ -261,19 +260,18 @@
             <td>{{ o.fecha|default:"—" }}</td>
             <td>{{ o.cliente|default:"—" }}</td>
             <td class="text-end">{% if o.base is not None %}Bs. {{ o.base|floatformat:2 }}{% else %}—{% endif %}</td>
-            <td class="text-end">{% if o.porcentaje %}{{ o.porcentaje|floatformat:2 }}%{% else %}—{% endif %}</td>
             <td class="text-end fw-semibold">Bs. {{ o.comision|floatformat:2 }}</td>
           </tr>
           {% empty %}
           <tr>
-            <td colspan="7" class="text-center text-muted py-3">
+            <td colspan="6" class="text-center text-muted py-3">
               <i data-lucide="percent" style="width:1.5rem;height:1.5rem;opacity:.4" class="d-block mx-auto mb-1"></i>
               Sin comisiones devengadas.
             </td>
           </tr>
           {% endfor %}
           <tr class="d-none" data-row-filter-empty>
-            <td colspan="7" class="text-center text-muted py-3">Sin operaciones de este tipo.</td>
+            <td colspan="6" class="text-center text-muted py-3">Sin operaciones de este tipo.</td>
           </tr>
         </tbody>
       </table>

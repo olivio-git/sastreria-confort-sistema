@@ -297,8 +297,8 @@ class Reparacion(models.Model):
 
 
 class ReparacionEmpleado(models.Model):
-    """Empleado asignado a una reparación con su porcentaje de comisión.
-    Permite varios empleados por trabajo, cada uno con un % distinto."""
+    """Empleado asignado a una reparación con su monto fijo de comisión en Bs.
+    Permite varios empleados por trabajo, cada uno con un monto distinto."""
     reparacion = models.ForeignKey(
         Reparacion, on_delete=models.CASCADE, related_name='asignaciones',
         verbose_name="Reparación",
@@ -307,10 +307,12 @@ class ReparacionEmpleado(models.Model):
         Empleado, on_delete=models.CASCADE, related_name='asignaciones_reparacion',
         verbose_name="Empleado",
     )
-    porcentaje_comision = models.DecimalField(
-        max_digits=5, decimal_places=2,
-        validators=[MinValueValidator(Decimal('0.00')), MaxValueValidator(Decimal('100.00'))],
-        verbose_name="Porcentaje Comisión (%)",
+    monto_comision_fijo = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        default=Decimal('0'),
+        validators=[MinValueValidator(Decimal('0.00'))],
+        verbose_name="Comisión (Bs)",
+        help_text="Monto fijo en Bs que gana el empleado por esta reparación.",
     )
 
     class Meta:
@@ -323,11 +325,10 @@ class ReparacionEmpleado(models.Model):
 
     @property
     def monto_comision(self):
-        total = self.reparacion.total or Decimal('0')
-        return (total * (self.porcentaje_comision or Decimal('0')) / Decimal('100'))
+        return self.monto_comision_fijo or Decimal('0')
 
     def __str__(self):
-        return f"{self.empleado} — {self.porcentaje_comision}% de {self.reparacion.codigo}"
+        return f"{self.empleado} — Bs. {self.monto_comision_fijo} de {self.reparacion.codigo}"
 
 
 class ReparacionItem(models.Model):

@@ -3,7 +3,7 @@ test_asignaciones_empleado.py
 =============================
 Cubre el feature de múltiples empleados asignados por trabajo
 (reparación / confección), cada uno con su comisión:
-  - ReparacionEmpleado.monto_comision (porcentaje sobre total)
+  - ReparacionEmpleado.monto_comision (monto fijo en Bs)
   - ConfeccionEmpleado.monto_comision (monto fijo en Bs)
   - _calcular_saldo_comision_empleado (devengado vía asignaciones, sin filtro de estado)
   - _parse_asignaciones (parseo del POST: huecos, duplicados)
@@ -36,7 +36,7 @@ class MontoComisionTests(TestCase):
     def test_monto_reparacion(self):
         rep = make_reparacion(total=Decimal('1000'))
         emp = make_empleado()
-        a = ReparacionEmpleado.objects.create(reparacion=rep, empleado=emp, porcentaje_comision=Decimal('15'))
+        a = ReparacionEmpleado.objects.create(reparacion=rep, empleado=emp, monto_comision_fijo=Decimal('150'))
         self.assertEqual(a.monto_comision, Decimal('150.00'))
 
     def test_monto_confeccion(self):
@@ -52,8 +52,8 @@ class SaldoComisionMultiEmpleadoTests(TestCase):
         rep = make_reparacion(total=Decimal('1000'))
         e1 = make_empleado(ci='C-1')
         e2 = make_empleado(ci='C-2')
-        ReparacionEmpleado.objects.create(reparacion=rep, empleado=e1, porcentaje_comision=Decimal('50'))
-        ReparacionEmpleado.objects.create(reparacion=rep, empleado=e2, porcentaje_comision=Decimal('30'))
+        ReparacionEmpleado.objects.create(reparacion=rep, empleado=e1, monto_comision_fijo=Decimal('500'))
+        ReparacionEmpleado.objects.create(reparacion=rep, empleado=e2, monto_comision_fijo=Decimal('300'))
         self.assertEqual(_calcular_saldo_comision_empleado(e1), Decimal('500'))
         self.assertEqual(_calcular_saldo_comision_empleado(e2), Decimal('300'))
 
@@ -62,18 +62,18 @@ class SaldoComisionMultiEmpleadoTests(TestCase):
         e = make_empleado()
         pendiente = make_reparacion(total=Decimal('400'), estado='pendiente')
         en_proceso = make_reparacion(total=Decimal('400'), estado='en_proceso')
-        ReparacionEmpleado.objects.create(reparacion=pendiente, empleado=e, porcentaje_comision=Decimal('10'))
-        ReparacionEmpleado.objects.create(reparacion=en_proceso, empleado=e, porcentaje_comision=Decimal('10'))
-        # ambas deviengan: 400*10% + 400*10% = 80
+        ReparacionEmpleado.objects.create(reparacion=pendiente, empleado=e, monto_comision_fijo=Decimal('40'))
+        ReparacionEmpleado.objects.create(reparacion=en_proceso, empleado=e, monto_comision_fijo=Decimal('40'))
+        # ambas deviengan monto fijo: 40 + 40 = 80
         self.assertEqual(_calcular_saldo_comision_empleado(e), Decimal('80'))
 
     def test_devengado_suma_reparacion_y_confeccion(self):
         e = make_empleado()
         rep = make_reparacion(total=Decimal('1000'))
         conf = make_confeccion(precio=Decimal('500'))
-        ReparacionEmpleado.objects.create(reparacion=rep, empleado=e, porcentaje_comision=Decimal('10'))
+        ReparacionEmpleado.objects.create(reparacion=rep, empleado=e, monto_comision_fijo=Decimal('100'))
         ConfeccionEmpleado.objects.create(confeccion=conf, empleado=e, monto_comision_fijo=Decimal('100'))
-        # 100 (rep) + 100 (conf fijo) = 200
+        # 100 (rep fijo) + 100 (conf fijo) = 200
         self.assertEqual(_calcular_saldo_comision_empleado(e), Decimal('200'))
 
 
@@ -111,13 +111,15 @@ class GuardarAsignacionesTests(TestCase):
         rep = make_reparacion(total=Decimal('1000'))
         e1 = make_empleado(ci='L-1'); e2 = make_empleado(ci='L-2')
         qd = _qd({'asignaciones_count': '2',
-                  'asignacion[0][empleado]': str(e1.id), 'asignacion[0][pct]': '40',
-                  'asignacion[1][empleado]': str(e2.id), 'asignacion[1][pct]': '20'})
-        errores = _guardar_asignaciones(rep, qd, ReparacionEmpleado, 'reparacion')
+                  'asignacion[0][empleado]': str(e1.id), 'asignacion[0][monto]': '400',
+                  'asignacion[1][empleado]': str(e2.id), 'asignacion[1][monto]': '200'})
+        errores = _guardar_asignaciones(rep, qd, ReparacionEmpleado, 'reparacion',
+                                        commission_field='monto_comision_fijo',
+                                        monto_key='monto', sync_lead=False)
         self.assertEqual(errores, [])
         rep.refresh_from_db()
         self.assertEqual(rep.empleado_id, e1.id)            # lead = primera fila
-        self.assertEqual(rep.porcentaje_comision, Decimal('40'))
+        self.assertEqual(rep.asignaciones.get(empleado=e1).monto_comision_fijo, Decimal('400'))
         self.assertEqual(rep.asignaciones.count(), 2)
 
     def test_crea_filas_confeccion_monto_fijo(self):
@@ -137,19 +139,22 @@ class GuardarAsignacionesTests(TestCase):
         rep = make_reparacion(total=Decimal('1000'))
         e1 = make_empleado(ci='R-1'); e2 = make_empleado(ci='R-2')
         _guardar_asignaciones(rep, _qd({'asignaciones_count': '1',
-            'asignacion[0][empleado]': str(e1.id), 'asignacion[0][pct]': '50'}),
-            ReparacionEmpleado, 'reparacion')
+            'asignacion[0][empleado]': str(e1.id), 'asignacion[0][monto]': '500'}),
+            ReparacionEmpleado, 'reparacion',
+            commission_field='monto_comision_fijo', monto_key='monto', sync_lead=False)
         # re-guardar solo con e2
         _guardar_asignaciones(rep, _qd({'asignaciones_count': '1',
-            'asignacion[0][empleado]': str(e2.id), 'asignacion[0][pct]': '10'}),
-            ReparacionEmpleado, 'reparacion')
+            'asignacion[0][empleado]': str(e2.id), 'asignacion[0][monto]': '100'}),
+            ReparacionEmpleado, 'reparacion',
+            commission_field='monto_comision_fijo', monto_key='monto', sync_lead=False)
         rep.refresh_from_db()
         self.assertEqual(rep.asignaciones.count(), 1)
         self.assertEqual(rep.empleado_id, e2.id)
 
     def test_sin_asignaciones_deja_lead_nulo(self):
         rep = make_reparacion(total=Decimal('1000'))
-        _guardar_asignaciones(rep, _qd({'asignaciones_count': '0'}), ReparacionEmpleado, 'reparacion')
+        _guardar_asignaciones(rep, _qd({'asignaciones_count': '0'}), ReparacionEmpleado, 'reparacion',
+                              commission_field='monto_comision_fijo', monto_key='monto', sync_lead=False)
         rep.refresh_from_db()
         self.assertIsNone(rep.empleado_id)
         self.assertEqual(rep.asignaciones.count(), 0)
@@ -159,14 +164,14 @@ class EmpleadosExtraTests(TestCase):
 
     def test_extra_cero_con_un_empleado(self):
         rep = make_reparacion(total=Decimal('100'))
-        ReparacionEmpleado.objects.create(reparacion=rep, empleado=make_empleado(ci='X-1'), porcentaje_comision=Decimal('5'))
+        ReparacionEmpleado.objects.create(reparacion=rep, empleado=make_empleado(ci='X-1'), monto_comision_fijo=Decimal('5'))
         self.assertEqual(rep.empleados_extra, 0)
 
     def test_extra_cuenta_adicionales(self):
         rep = make_reparacion(total=Decimal('100'))
-        ReparacionEmpleado.objects.create(reparacion=rep, empleado=make_empleado(ci='Y-1'), porcentaje_comision=Decimal('5'))
-        ReparacionEmpleado.objects.create(reparacion=rep, empleado=make_empleado(ci='Y-2'), porcentaje_comision=Decimal('5'))
-        ReparacionEmpleado.objects.create(reparacion=rep, empleado=make_empleado(ci='Y-3'), porcentaje_comision=Decimal('5'))
+        ReparacionEmpleado.objects.create(reparacion=rep, empleado=make_empleado(ci='Y-1'), monto_comision_fijo=Decimal('5'))
+        ReparacionEmpleado.objects.create(reparacion=rep, empleado=make_empleado(ci='Y-2'), monto_comision_fijo=Decimal('5'))
+        ReparacionEmpleado.objects.create(reparacion=rep, empleado=make_empleado(ci='Y-3'), monto_comision_fijo=Decimal('5'))
         self.assertEqual(rep.empleados_extra, 2)
 
 
@@ -183,8 +188,8 @@ class NuevosTestsComisionFija(TestCase):
         """Reparacion en estado en_proceso contribuye al saldo devengado."""
         e = make_empleado()
         rep = make_reparacion(total=Decimal('1500'), estado='en_proceso')
-        ReparacionEmpleado.objects.create(reparacion=rep, empleado=e, porcentaje_comision=Decimal('10'))
-        # 1500 * 10% = 150
+        ReparacionEmpleado.objects.create(reparacion=rep, empleado=e, monto_comision_fijo=Decimal('150'))
+        # monto fijo = 150
         self.assertEqual(_calcular_saldo_comision_empleado(e), Decimal('150'))
 
     def test_saldo_suma_cuatro_fuentes(self):
@@ -196,7 +201,7 @@ class NuevosTestsComisionFija(TestCase):
 
         # reparacion = 100
         rep = make_reparacion(total=Decimal('1000'))
-        ReparacionEmpleado.objects.create(reparacion=rep, empleado=e, porcentaje_comision=Decimal('10'))
+        ReparacionEmpleado.objects.create(reparacion=rep, empleado=e, monto_comision_fijo=Decimal('100'))
 
         # confeccion = 80
         conf = make_confeccion()
