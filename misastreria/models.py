@@ -1353,7 +1353,9 @@ class CajaSesion(models.Model):
         ]
 
     def __str__(self):
-        fa = self.fecha_apertura.strftime('%Y-%m-%d %H:%M')
+        # localtime(): fecha_apertura se guarda en UTC, y este __str__ va a Excel
+        # y al admin, donde nadie convierte a la zona local por nosotros.
+        fa = timezone.localtime(self.fecha_apertura).strftime('%Y-%m-%d %H:%M')
         return f"Caja #{self.id} {fa} ({self.get_estado_display()})"
 
     _CONCEPTOS_GARANTIA = ('garantia_alquiler', 'garantia_devolucion')

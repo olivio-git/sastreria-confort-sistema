@@ -75,6 +75,22 @@ FECHA_MIGRACION_CAJA = date(2026, 5, 8)
 MESES_ES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
             'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 
+
+def _fmt_dt(dt, fmt='%d/%m/%Y %H:%M', vacio=''):
+    """Formatea un DateTimeField para PDF/Excel en la hora local (America/La_Paz).
+
+    Con USE_TZ=True los DateTimeField se guardan y se leen en UTC. Las plantillas
+    de Django convierten solas a la zona local, pero strftime() no: imprime el UTC
+    crudo y el documento sale 4 horas adelantado respecto a lo que ve el operador
+    en pantalla. Todo strftime sobre un DateTimeField debe pasar por acá.
+    """
+    if not dt:
+        return vacio
+    if django_tz.is_aware(dt):
+        dt = django_tz.localtime(dt)
+    return dt.strftime(fmt)
+
+
 @login_required
 def dashboard(request):
     prendas_alerta = PrendaInventario.objects.annotate(
@@ -1778,7 +1794,7 @@ def exportar_recibo_reparacion_pdf(request, id):
     fe_str   = reparacion.fecha_entrega.strftime('%d/%m/%Y') if reparacion.fecha_entrega else '—'
     est_str  = reparacion.get_estado_display()
     cod_str  = reparacion.codigo
-    fec_str  = reparacion.creado.strftime('%d/%m/%Y')
+    fec_str  = _fmt_dt(reparacion.creado, '%d/%m/%Y', '—')
 
     left_data = [
         [Paragraph('DATOS DEL CLIENTE', st['sec']), ''],
@@ -8565,7 +8581,7 @@ def export_detalle_sesion_excel(request, pk):
     ws.row_dimensions[1].height = 28
 
     # Fila 2: subtítulo
-    ws.append([f'Sesión #{sesion.pk}  ·  generado {date.today().strftime("%d/%m/%Y")}', '', '', ''])
+    ws.append([f'Sesión #{sesion.pk}  ·  generado {django_tz.localdate().strftime("%d/%m/%Y")}', '', '', ''])
     ws.merge_cells('A2:D2')
     c = ws['A2']
     c.font      = FONT_SUBTITLE
@@ -8582,8 +8598,8 @@ def export_detalle_sesion_excel(request, pk):
 
     info_rows = [
         ('Estado',              sesion.get_estado_display()),
-        ('Fecha apertura',      sesion.fecha_apertura.strftime('%d/%m/%Y %H:%M') if sesion.fecha_apertura else ''),
-        ('Fecha cierre',        sesion.fecha_cierre.strftime('%d/%m/%Y %H:%M') if sesion.fecha_cierre else '—'),
+        ('Fecha apertura',      _fmt_dt(sesion.fecha_apertura)),
+        ('Fecha cierre',        _fmt_dt(sesion.fecha_cierre, vacio='—')),
         ('Monto apertura (Bs)', float(sesion.monto_apertura or 0)),
         ('Total ingresos (Bs)', float(sesion.total_ingresos or 0)),
         ('Total egresos (Bs)',  float(sesion.total_egresos or 0)),
@@ -8687,7 +8703,7 @@ def export_detalle_sesion_excel(request, pk):
         monto = float(m.monto)
         ws2.append([
             m.codigo,
-            m.fecha.strftime('%d/%m/%Y %H:%M') if m.fecha else '',
+            _fmt_dt(m.fecha),
             m.get_tipo_display(),
             m.get_concepto_display(),
             monto,
@@ -8775,7 +8791,7 @@ def export_detalle_sesion_excel(request, pk):
             is_ing = (m.tipo == 'ingreso')
             ws3.append([
                 m.codigo,
-                m.fecha.strftime('%d/%m/%Y %H:%M') if m.fecha else '',
+                _fmt_dt(m.fecha),
                 m.get_concepto_display(),
                 monto,
                 m.get_forma_pago_display(),
@@ -8804,7 +8820,7 @@ def export_detalle_sesion_excel(request, pk):
     output = BytesIO()
     wb.save(output)
     output.seek(0)
-    filename = f"sesion_caja_{sesion.pk}_{sesion.fecha_apertura.strftime('%Y%m%d') if sesion.fecha_apertura else 'sin_fecha'}.xlsx"
+    filename = f"sesion_caja_{sesion.pk}_{_fmt_dt(sesion.fecha_apertura, '%Y%m%d', 'sin_fecha')}.xlsx"
     response = HttpResponse(
         output.read(),
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -9033,7 +9049,7 @@ def export_resumen_caja_excel(request):
     for mov in ctx['movimientos_detalle']:
         ws_detalle.append([
             mov.codigo,
-            mov.creado.strftime('%Y-%m-%d %H:%M'),
+            _fmt_dt(mov.creado, '%Y-%m-%d %H:%M'),
             mov.get_tipo_display(),
             mov.get_concepto_display(),
             mov.get_forma_pago_display(),
