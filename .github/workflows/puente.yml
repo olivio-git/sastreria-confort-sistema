@@ -1,0 +1,76 @@
+# Compila el puente de impresión como un .exe único para la PC del taller.
+#
+# Corre en Windows porque PyInstaller no compila cruzado: un .exe de Windows
+# sólo se puede armar desde Windows. Como el desarrollo es en Linux, lo hace
+# GitHub y nosotros descargamos el resultado ya listo.
+#
+# Dónde queda el archivo:
+#   · push a la rama  → pestaña Actions → el run → «Artifacts» → PuenteImpresion
+#   · tag vX.Y.Z      → pestaña Releases, con el .exe adjunto
+
+name: Puente de impresión
+
+# Sin `branches:` ni `tags:` explícitos, el filtro `paths` aplica a TODAS las
+# refs — ramas y tags por igual. Declarar sólo `tags:` sería un error clásico:
+# GitHub deja de disparar en los pushes a ramas apenas nombrás una sola ref.
+on:
+  push:
+    paths:
+      - 'puente_impresion/**'
+      - '.github/workflows/puente.yml'
+  workflow_dispatch:      # botón «Run workflow» a mano, siempre disponible
+
+jobs:
+  compilar:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias
+        run: pip install -r puente_impresion/requirements.txt
+
+      - name: Generar el ícono del ejecutable
+        # Se reutiliza el mismo dibujo que usa el programa en ejecución, para
+        # que el ícono del archivo y el del reloj sean el mismo.
+        run: |
+          python -c "import sys; sys.path.insert(0, 'puente_impresion'); from puente import _dibujar_icono; _dibujar_icono('#10b981').save('puente.ico', sizes=[(16,16),(32,32),(48,48),(64,64),(256,256)])"
+
+      - name: Compilar el .exe
+        # --onefile   : un solo archivo, nada que descomprimir
+        # --noconsole : sin ventana negra al abrirlo
+        run: >
+          pyinstaller --onefile --noconsole
+          --name PuenteImpresion
+          --icon puente.ico
+          puente_impresion/puente.py
+
+      - name: Verificar que arrancó bien el empaquetado
+        # No se puede ejecutar de verdad (no hay impresora ni escritorio en el
+        # runner), pero sí confirmar que el archivo existe y no quedó vacío.
+        shell: pwsh
+        run: |
+          $exe = "dist/PuenteImpresion.exe"
+          if (-not (Test-Path $exe)) { throw "No se generó el .exe" }
+          $mb = (Get-Item $exe).Length / 1MB
+          Write-Host ("Tamaño: {0:N1} MB" -f $mb)
+          if ($mb -lt 3) { throw "El .exe salió sospechosamente chico" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PuenteImpresion
+          path: dist/PuenteImpresion.exe
+
+      - name: Publicar en Releases
+        if: startsWith(github.ref, 'refs/tags/puente-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/PuenteImpresion.exe
+          body: |
+            Puente de impresión de etiquetas para la PC del taller.
+
+            Descargá `PuenteImpresion.exe` y hacé doble clic. No hay que instalar nada más.

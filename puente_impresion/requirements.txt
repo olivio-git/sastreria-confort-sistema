@@ -1,0 +1,8 @@
+# Dependencias del puente de impresión (sólo Windows).
+# El usuario final NO instala nada de esto: recibe el .exe ya compilado.
+# Esta lista es para compilar, y la usa .github/workflows/puente.yml.
+
+pywin32==306        # hablarle a la cola de impresión de Windows en modo RAW
+pystray==0.19.5     # el ícono al lado del reloj
+Pillow==10.4.0      # dibujar el ícono en memoria, sin archivos sueltos
+pyinstaller==6.10.0 # empaquetar todo en un solo .exe
