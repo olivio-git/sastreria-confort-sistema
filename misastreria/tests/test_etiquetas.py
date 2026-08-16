@@ -13,7 +13,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from misastreria import etiquetas, etiquetas_pdf, etiquetas_qr, etiquetas_zpl, simbolos
-from misastreria.models import PlantillaEtiqueta
+from misastreria.models import ConfiguracionImpresora, PlantillaEtiqueta
 from misastreria.tests.factories import (
     make_cliente, make_prenda, make_prenda_item, make_reparacion, make_user,
 )
@@ -233,13 +233,61 @@ class RendererZplTests(TestCase):
         self.assertIn('^PQ7', zpl)
 
     def test_qr_zpl_usa_la_misma_imagen_y_medida_que_pdf(self):
-        self.assertEqual(etiquetas_qr.imagen('PRN-001', 84).size, (84, 84))
         zpl = etiquetas_zpl.render([
             {'tipo': 'barcode', 'simbologia': 'qr', 'texto': 'PRN-001',
              'alto_barra': 84},
         ], 400, 240, {})
         self.assertIn('^GFA,', zpl)
         self.assertNotIn('^BQ', zpl)
+
+    def test_qr_deja_todos_los_modulos_del_mismo_ancho(self):
+        """El lado tiene que ser múltiplo exacto de la matriz.
+
+        Si no lo es, el resampleo reparte el resto de la división de forma
+        despareja y quedan módulos de 2 y de 3 puntos en el mismo código, que
+        es lo que hace que la pistola tenga que insistir para leerlo.
+        """
+        modulos = max(etiquetas_qr._matriz('PRN-001').size)
+        for pedido in (84, 100, 121, 145, 200):
+            lado = etiquetas_qr.imagen('PRN-001', pedido).size[0]
+            self.assertEqual(lado % modulos, 0,
+                             f"con {pedido} pedidos, el lado {lado} no es "
+                             f"múltiplo de {modulos}")
+
+    def test_qr_queda_cerca_del_tamano_pedido(self):
+        """Cuadrar los módulos no puede costar un QR notoriamente más chico."""
+        modulos = max(etiquetas_qr._matriz('PRN-001').size)
+        for pedido in (84, 100, 121, 145, 200):
+            lado = etiquetas_qr.imagen('PRN-001', pedido).size[0]
+            self.assertLessEqual(abs(lado - pedido), modulos / 2,
+                                 f"con {pedido} pedidos salió {lado}")
+
+    def test_sin_config_no_toca_los_ajustes_de_la_impresora(self):
+        """Sin config explícita se imprime como venía imprimiendo la máquina."""
+        zpl = etiquetas_zpl.render(self.elementos, 400, 240, self.datos)
+        for comando in ('^MT', '^MD', '^PR'):
+            self.assertNotIn(comando, zpl)
+
+    def test_config_emite_oscuridad_velocidad_y_tipo_de_papel(self):
+        config = ConfiguracionImpresora(oscuridad=12, velocidad=3, usa_ribbon=True)
+        zpl = etiquetas_zpl.render(self.elementos, 400, 240, self.datos,
+                                   config=config)
+        self.assertIn('^MTT', zpl)      # transferencia térmica (con cinta)
+        self.assertIn('^MD12', zpl)
+        self.assertIn('^PR3,3,3', zpl)
+
+    def test_config_sin_ribbon_pide_termica_directa(self):
+        config = ConfiguracionImpresora(oscuridad=0, velocidad=4, usa_ribbon=False)
+        zpl = etiquetas_zpl.render(self.elementos, 400, 240, self.datos,
+                                   config=config)
+        self.assertIn('^MTD', zpl)
+
+    def test_los_ajustes_van_antes_de_los_elementos(self):
+        """ZPL se interpreta en orden: si van después, la etiqueta ya se dibujó."""
+        config = ConfiguracionImpresora(oscuridad=5, velocidad=2, usa_ribbon=True)
+        zpl = etiquetas_zpl.render(
+            [{'tipo': 'texto', 'texto': 'HOLA'}], 400, 240, {}, config=config)
+        self.assertLess(zpl.index('^MD5'), zpl.index('^FDHOLA'))
 
     def test_negrita_imprime_dos_veces_desplazado(self):
         elementos = [{'tipo': 'texto', 'x': 10, 'y': 10, 'texto': 'X', 'negrita': True}]

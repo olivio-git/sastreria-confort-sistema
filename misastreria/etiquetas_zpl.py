@@ -197,12 +197,40 @@ def _elemento_a_zpl(el, ancho_etiqueta, datos):
     return ''
 
 
-def render(elementos, ancho=None, alto=None, datos=None, copias=1):
+def _ajustes_cabezal(config):
+    """Comandos de oscuridad, velocidad y tipo de papel.
+
+    Sin `config` no se emite ninguno: la impresora usa lo que tiene guardado,
+    que es exactamente el comportamiento anterior a que esto existiera.
+
+    `render()` no lee la base a propósito — recibe la config ya cargada — para
+    seguir siendo una función pura de texto, que es lo que permite generar y
+    testear ZPL sin impresora ni base de datos.
+    """
+    if config is None:
+        return []
+    return [
+        # ^MT define si el cabezal imprime contra cinta o contra papel térmico.
+        # En el modo equivocado sale casi invisible.
+        f"^MT{'T' if config.usa_ribbon else 'D'}",
+        # ^MD es un ajuste relativo a la oscuridad guardada en la impresora.
+        f'^MD{int(config.oscuridad)}',
+        # ^PR: velocidad de impresión, arrastre y retroceso, en pulgadas/segundo.
+        f'^PR{int(config.velocidad)},{int(config.velocidad)},{int(config.velocidad)}',
+    ]
+
+
+def render(elementos, ancho=None, alto=None, datos=None, copias=1, config=None):
     """Convierte una plantilla en el ZPL de UNA etiqueta.
 
     Deliberadamente no emite ^MM ni ^MN: la calibración del papel ya la tiene
     guardada la impresora, y pisarla desde acá es la forma más fácil de
     descalibrarla y que el rollo empiece a salir corrido.
+
+    Sí emite ^MT, ^MD y ^PR cuando se le pasa `config` (una
+    `ConfiguracionImpresora`). Esos tres no tocan el arrastre del papel — sólo
+    cuánto calienta el cabezal y a qué velocidad — así que ajustarlos no
+    descalibra nada.
     """
     ancho = int(ancho or etiquetas.ANCHO_DEFECTO)
     alto = int(alto or etiquetas.ALTO_DEFECTO)
@@ -210,6 +238,7 @@ def render(elementos, ancho=None, alto=None, datos=None, copias=1):
 
     partes = [
         '^XA',                  # arranca la etiqueta
+        *_ajustes_cabezal(config),
         f'^PW{max(1, ancho)}',  # ancho de impresión
         f'^LL{max(1, alto)}',   # largo de etiqueta
         '^LH0,0',               # origen arriba a la izquierda
@@ -224,13 +253,14 @@ def render(elementos, ancho=None, alto=None, datos=None, copias=1):
     return '\n'.join(partes)
 
 
-def render_lote(elementos, ancho=None, alto=None, lote=None, copias=1):
+def render_lote(elementos, ancho=None, alto=None, lote=None, copias=1, config=None):
     """El ZPL de varias etiquetas seguidas, una por juego de datos.
 
     Es lo que se manda al imprimir todas las unidades de un SKU de una sentada.
     """
     return '\n'.join(
-        render(elementos, ancho, alto, datos, copias) for datos in (lote or [])
+        render(elementos, ancho, alto, datos, copias, config)
+        for datos in (lote or [])
     )
 
 

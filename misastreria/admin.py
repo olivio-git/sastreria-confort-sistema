@@ -5,7 +5,7 @@ from .models import (
     Reparacion, Empleado, Permiso, Falta, Confeccion,
     OrdenProduccion, OrdenProduccionEmpleado, InsumoCortado,
     TipoGasto, CajaSesion, CajaMovimiento,
-    PlantillaEtiqueta,
+    PlantillaEtiqueta, ConfiguracionImpresora,
 )
 from .kardex_events import (
     emit_ingreso, emit_alquiler, emit_venta, emit_baja, emit_devolucion,
@@ -166,3 +166,16 @@ class PlantillaEtiquetaAdmin(admin.ModelAdmin):
     search_fields = ['nombre', 'descripcion']
     readonly_fields = ['creado', 'modificado']
     list_per_page = 20
+
+
+@admin.register(ConfiguracionImpresora)
+class ConfiguracionImpresoraAdmin(admin.ModelAdmin):
+    list_display = ['__str__', 'modificado']
+    readonly_fields = ['modificado']
+
+    def has_add_permission(self, request):
+        # Es una fila única: se edita la que existe, no se agregan más.
+        return not ConfiguracionImpresora.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False

@@ -1832,3 +1832,74 @@ class PlantillaEtiqueta(models.Model):
                 PlantillaEtiqueta.objects.exclude(pk=self.pk).filter(
                     es_predeterminada=True
                 ).update(es_predeterminada=False)
+
+
+class ConfiguracionImpresora(models.Model):
+    """Ajustes del cabezal térmico, separados del diseño de la etiqueta.
+
+    Estos tres valores no son parte del diseño: la misma plantilla impresa con
+    otro rollo o con otra cinta necesita otra oscuridad. Por eso viven acá y no
+    en `PlantillaEtiqueta` — se ajustan una vez por impresora, no por diseño.
+
+    Están en la base y no en `settings.py` a propósito: encontrar la oscuridad
+    correcta es prueba y error contra el rollo físico, y nadie va a hacer un
+    deploy por cada intento.
+
+    Es una fila única (se accede siempre por `cargar()`).
+    """
+
+    # ^MD es un ajuste RELATIVO a la oscuridad que ya tiene guardada la
+    # impresora, no un valor absoluto. Por eso el default es 0: sin tocar nada,
+    # se imprime exactamente como venía imprimiendo antes de este cambio.
+    oscuridad = models.SmallIntegerField(
+        default=0,
+        validators=[MinValueValidator(-30), MaxValueValidator(30)],
+        verbose_name="Ajuste de oscuridad",
+        help_text="De -30 a 30, relativo al ajuste de la impresora. "
+                  "Si las letras salen débiles, subilo de a 4 y volvé a probar.",
+    )
+
+    # Más lento = el cabezal calienta cada punto más tiempo = trazo más marcado.
+    # Bajar la velocidad suele arreglar la impresión débil mejor que forzar la
+    # oscuridad al máximo, que además desgasta el cabezal.
+    velocidad = models.PositiveSmallIntegerField(
+        default=4,
+        validators=[MinValueValidator(2), MaxValueValidator(6)],
+        verbose_name="Velocidad (pulgadas por segundo)",
+        help_text="De 2 a 6. Más lento imprime más marcado.",
+    )
+
+    # La TT460 es de transferencia térmica: imprime con cinta (ribbon). Si se le
+    # manda modo directo, el cabezal calienta contra una etiqueta que no tiene
+    # capa térmica y no sale prácticamente nada — el síntoma clásico de
+    # «se imprime pero no se ve».
+    usa_ribbon = models.BooleanField(
+        default=True,
+        verbose_name="Usa cinta (transferencia térmica)",
+        help_text="Desmarcá sólo si el rollo es térmico directo y no lleva cinta.",
+    )
+
+    modificado = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Configuración de Impresora"
+        verbose_name_plural = "Configuración de Impresora"
+
+    def __str__(self):
+        modo = "cinta" if self.usa_ribbon else "térmica directa"
+        return f"Oscuridad {self.oscuridad:+d}, {self.velocidad} ips, {modo}"
+
+    @classmethod
+    def cargar(cls):
+        """La única fila, creándola con los valores por defecto si no existe.
+
+        Devolver siempre un objeto (y no None) evita que cada llamador tenga que
+        acordarse de contemplar el caso «todavía nadie configuró la impresora».
+        """
+        config, _ = cls.objects.get_or_create(pk=1)
+        return config
+
+    def save(self, *args, **kwargs):
+        # Fija el pk para que no se pueda crear una segunda fila por descuido.
+        self.pk = 1
+        super().save(*args, **kwargs)

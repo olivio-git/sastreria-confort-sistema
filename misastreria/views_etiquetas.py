@@ -15,13 +15,16 @@ import json
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import ValidationError
 from django.db.models import Q
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from . import etiquetas, etiquetas_pdf, etiquetas_zpl, simbolos
-from .models import PlantillaEtiqueta, PrendaInventario, PrendaItem
+from .models import (
+    ConfiguracionImpresora, PlantillaEtiqueta, PrendaInventario, PrendaItem,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -367,6 +370,7 @@ def previsualizar_zpl(request):
         ancho=ancho, alto=alto,
         datos=valores,
         copias=_copias(datos),
+        config=ConfiguracionImpresora.cargar(),
     )
     return JsonResponse({'ok': True, 'zpl': zpl})
 
@@ -392,6 +396,7 @@ def descargar_zpl(request):
         ancho=ancho, alto=alto,
         datos=valores,
         copias=_copias(datos),
+        config=ConfiguracionImpresora.cargar(),
     )
     respuesta = HttpResponse(zpl, content_type='text/plain; charset=utf-8')
     respuesta['Content-Disposition'] = 'attachment; filename="etiqueta.zpl"'
@@ -421,6 +426,7 @@ def imprimir(request):
     zpl = etiquetas_zpl.render(
         datos.get('elementos') or [],
         ancho=ancho, alto=alto, datos=valores, copias=_copias(datos),
+        config=ConfiguracionImpresora.cargar(),
     )
 
     try:
@@ -561,7 +567,46 @@ def calibrar(request):
         'plantilla': plantilla,
         'tamanos': etiquetas.tamanos_para_selector(),
         'actual': plantilla and (plantilla.ancho_puntos, plantilla.alto_puntos),
+        'config': ConfiguracionImpresora.cargar(),
     })
+
+
+@login_required
+@require_POST
+def fijar_impresora(request):
+    """Guarda oscuridad, velocidad y tipo de papel del cabezal.
+
+    Vive en la pantalla de calibración porque encontrar estos valores es el
+    mismo trabajo que encontrar el tamaño: imprimir, mirar el resultado, y
+    corregir. Que haya que hacer un deploy para probar otra oscuridad sería
+    garantía de que nadie lo ajuste nunca.
+    """
+    config = ConfiguracionImpresora.cargar()
+
+    try:
+        config.oscuridad = int(request.POST.get('oscuridad') or 0)
+        config.velocidad = int(request.POST.get('velocidad') or 4)
+    except (TypeError, ValueError):
+        messages.error(request, "Oscuridad y velocidad tienen que ser números.")
+        return redirect('etiquetas_calibrar')
+
+    config.usa_ribbon = bool(request.POST.get('usa_ribbon'))
+
+    try:
+        config.full_clean()
+    except ValidationError as exc:
+        messages.error(request, ' '.join(
+            f"{campo}: {' '.join(errores)}"
+            for campo, errores in exc.message_dict.items()
+        ))
+        return redirect('etiquetas_calibrar')
+
+    config.save()
+    messages.success(
+        request,
+        f"Impresora ajustada: {config}. Imprimí una muestra para ver cómo quedó."
+    )
+    return redirect('etiquetas_calibrar')
 
 
 @login_required

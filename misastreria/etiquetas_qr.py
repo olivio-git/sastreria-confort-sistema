@@ -31,6 +31,23 @@ def _matriz(dato):
 
 
 def imagen(dato, tam):
+    """El QR rasterizado, con todos los módulos del mismo ancho.
+
+    El lado se recorta al múltiplo entero de la matriz más cercano por debajo
+    del pedido. Escalar a un tamaño arbitrario con NEAREST repartiría el resto
+    de la división de forma despareja — unos módulos de 2 puntos y otros de 3 —
+    y un QR con módulos de distinto ancho es justamente lo que hace que la
+    pistola tenga que insistir para leerlo.
+
+    Se redondea al múltiplo MÁS CERCANO, no al de abajo. Truncar hacia abajo
+    parece más prudente, pero con factores de escala chicos se come muchísimo:
+    pedir 84 puntos sobre una matriz de 29 daría 58, un 31% menos de lo
+    diseñado. Redondeando da 87 — se pasa por 3 puntos en vez de perder 26.
+
+    Es decir: el lado real puede diferir del pedido en menos de medio módulo.
+    A cambio, todos los módulos miden exactamente lo mismo, que es lo que
+    necesita la pistola para leerlo de una.
+    """
     tam = max(1, int(tam))
     base = _matriz(dato)
     minimo = max(base.size)
@@ -39,7 +56,8 @@ def imagen(dato, tam):
             f"El QR necesita al menos {minimo} puntos por lado para estos datos; "
             f"el diseño le asigna {tam}."
         )
-    return base.resize((tam, tam), Image.Resampling.NEAREST)
+    escala = max(1, round(tam / minimo))
+    return base.resize((escala * minimo, escala * minimo), Image.Resampling.NEAREST)
 
 
 def validar(dato, tam):
