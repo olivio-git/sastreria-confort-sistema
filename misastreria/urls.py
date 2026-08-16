@@ -1,5 +1,5 @@
 from django.urls import path
-from . import views
+from . import views, views_etiquetas
 from django.contrib.auth.views import LoginView, LogoutView
 from django.views.generic import RedirectView
 
@@ -58,6 +58,7 @@ urlpatterns = [
     path('reparaciones/editar/<int:id>/', views.editar_reparacion, name='editar_reparacion'),
     path('reparaciones/eliminar/<int:id>/', views.eliminar_reparacion, name='eliminar_reparacion'),
     path('reparaciones/recibo_reparacion/<int:id>/', views.exportar_recibo_reparacion_pdf, name='exportar_recibo_reparacion_pdf'),
+    path('reparaciones/etiqueta/<int:id>/', views_etiquetas.etiqueta_reparacion_pdf, name='exportar_etiqueta_reparacion_pdf'),
     path('reparaciones/detalle/<int:id>/', views.detalle_reparacion, name='detalle_reparacion'),
     path('reparaciones/en-proceso/<int:id>/', views.reparacion_en_proceso, name='reparacion_en_proceso'),
     path('reparaciones/entregado/<int:id>/', views.marcar_entregado, name='marcar_entregado'),
@@ -79,6 +80,7 @@ urlpatterns = [
     path('confecciones/en-proceso/<int:id>/', views.confeccion_en_proceso, name='confeccion_en_proceso'),
     path('confecciones/entregar/<int:id>/', views.entregar_confeccion, name='entregar_confeccion'),
     path('confecciones/recibo/<int:id>/', views.exportar_recibo_confeccion_pdf, name='exportar_recibo_confeccion_pdf'),
+    path('confecciones/etiqueta/<int:id>/', views_etiquetas.etiqueta_confeccion_pdf, name='exportar_etiqueta_confeccion_pdf'),
     path('confecciones/detalle/<int:id>/', views.detalle_confeccion, name='detalle_confeccion'),
     path('confecciones/<int:id>/pago/', views.agregar_pago_confeccion, name='agregar_pago_confeccion'),
     # Alquileres
@@ -103,6 +105,25 @@ urlpatterns = [
     path('prendas/items/buscar/', views.buscar_prenda_items, name='buscar_prenda_items'),
     path('prendas/<int:id>/agregar/', views.agregar_items_prenda, name='agregar_items_prenda'),
     path('prendas/<int:id>/detalle/', views.detalle_prenda, name='detalle_prenda'),
+    path('prendas/items/<int:id>/etiqueta/', views_etiquetas.etiqueta_item_pdf, name='exportar_etiqueta_item_pdf'),
+    path('prendas/<int:id>/etiquetas/', views_etiquetas.etiquetas_prenda_pdf, name='exportar_etiquetas_prenda_pdf'),
+    # Etiquetas — calibración contra el rollo físico
+    path('etiquetas/calibrar/', views_etiquetas.calibrar, name='etiquetas_calibrar'),
+    path('etiquetas/calibrar/muestra/', views_etiquetas.etiqueta_demo_pdf, name='exportar_etiqueta_demo_pdf'),
+    path('etiquetas/calibrar/fijar/', views_etiquetas.fijar_tamano, name='etiquetas_set_size'),
+    # Etiquetas — diseñador de plantillas
+    path('etiquetas/', views_etiquetas.lista_plantillas, name='lista_plantillas'),
+    path('etiquetas/disenador/', views_etiquetas.disenador, name='disenador_etiqueta'),
+    path('etiquetas/disenador/<int:id>/', views_etiquetas.disenador, name='editar_plantilla'),
+    path('etiquetas/guardar/', views_etiquetas.guardar_plantilla, name='guardar_plantilla'),
+    path('etiquetas/guardar/<int:id>/', views_etiquetas.guardar_plantilla, name='actualizar_plantilla'),
+    path('etiquetas/eliminar/<int:id>/', views_etiquetas.eliminar_plantilla, name='eliminar_plantilla'),
+    path('etiquetas/items/', views_etiquetas.buscar_items, name='buscar_items_etiqueta'),
+    path('etiquetas/simbolo/<str:clave>.png', views_etiquetas.simbolo_png, name='simbolo_etiqueta'),
+    path('etiquetas/previsualizar/', views_etiquetas.previsualizar_pdf, name='previsualizar_etiqueta'),
+    path('etiquetas/zpl/', views_etiquetas.previsualizar_zpl, name='zpl_etiqueta'),
+    path('etiquetas/zpl/descargar/', views_etiquetas.descargar_zpl, name='descargar_zpl_etiqueta'),
+    path('etiquetas/imprimir/', views_etiquetas.imprimir, name='imprimir_etiqueta'),
     # Insumos
     path('insumos/', views.lista_insumos, name='lista_insumos'),
     path('insumos/crear/', views.crear_insumo, name='crear_insumo'),

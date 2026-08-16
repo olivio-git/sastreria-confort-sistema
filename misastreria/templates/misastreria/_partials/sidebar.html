@@ -65,6 +65,10 @@
         <span class="sc-nav-icon"><i data-lucide="package"></i></span>
         <span class="sc-nav-label">Insumos</span>
       </a>
+      <a class="sc-nav-item {% if 'etiqueta' in request.resolver_match.url_name or 'plantilla' in request.resolver_match.url_name or 'disenador' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'lista_plantillas' %}">
+        <span class="sc-nav-icon"><i data-lucide="tag"></i></span>
+        <span class="sc-nav-label">Etiquetas</span>
+      </a>
 
       <!-- Gestión -->
       <div class="sc-section-label">Gestión</div>

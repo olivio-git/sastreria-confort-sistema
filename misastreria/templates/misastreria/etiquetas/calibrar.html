@@ -1,0 +1,112 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Etiquetas — Calibrar{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'lista_plantillas' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left"></i>Volver
+      </a>
+    </div>
+    <div class="col">
+      <div class="page-pretitle">Etiquetas</div>
+      <h2 class="page-title">
+        <i data-lucide="ruler" class="me-2 text-muted"></i>
+        Tamaño del rollo
+      </h2>
+    </div>
+    {% if plantilla %}
+    <div class="col-auto">
+      <a href="{% url 'editar_plantilla' plantilla.pk %}" class="btn btn-outline-primary">
+        <i data-lucide="pencil-ruler"></i>Abrir diseñador
+      </a>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+
+{% if not plantilla %}
+<div class="empty-state text-center py-5">
+  <i data-lucide="tags" class="d-block mx-auto mb-2 text-muted"></i>
+  <p class="text-muted">No hay ninguna plantilla de etiqueta cargada.</p>
+  <a href="{% url 'disenador_etiqueta' %}?nueva=1" class="btn btn-success">
+    <i data-lucide="plus"></i>Crear una plantilla
+  </a>
+</div>
+{% else %}
+
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <div class="d-flex flex-wrap align-items-center gap-2 small">
+      <span class="text-muted">
+        <i data-lucide="info" style="width:1rem;height:1rem" class="me-1"></i>
+        Imprimí la <strong>muestra</strong> a <strong>tamaño real (100%)</strong> y superponela al
+        sticker. Si no calza, elegí la medida que coincida y guardá.
+      </span>
+      <span class="ms-auto text-muted">
+        Plantilla: <strong>{{ plantilla.nombre }}</strong>
+        <span class="badge-estado badge-entregado ms-1">{{ plantilla.ancho_mm }} × {{ plantilla.alto_mm }} mm</span>
+      </span>
+    </div>
+  </div>
+</div>
+
+<div class="alert alert-warning">
+  <i data-lucide="triangle-alert" class="me-1"></i>
+  Cambiar el tamaño <strong>reescala el diseño completo</strong> de forma proporcional.
+  Es un buen punto de partida, pero conviene revisarlo después en el diseñador:
+  un código de barras puede necesitar otro ancho de barra para seguir siendo legible.
+</div>
+
+<form method="post" action="{% url 'etiquetas_set_size' %}">
+  {% csrf_token %}
+  <div class="card">
+    <div class="table-responsive">
+      <table class="table table-hover table-vcenter card-table mb-0">
+        <thead>
+          <tr>
+            <th style="width:140px">Medida</th>
+            <th style="width:140px">Proporción</th>
+            <th>Prueba</th>
+            <th class="text-center" style="width:120px">Usar esta</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in tamanos %}
+          <tr>
+            <td class="fw-semibold">{{ t.nombre }}</td>
+            <td>
+              <div style="width:{{ t.ancho }}px;height:{{ t.alto }}px;
+                          max-width:100px;max-height:60px;
+                          border:1.5px solid var(--text);border-radius:3px;background:var(--surface)"></div>
+            </td>
+            <td>
+              <a href="{% url 'exportar_etiqueta_demo_pdf' %}" target="_blank"
+                 class="btn btn-outline-primary btn-sm">
+                <i data-lucide="printer" class="me-1"></i>Ver muestra actual
+              </a>
+            </td>
+            <td class="text-center">
+              <input class="form-check-input" type="radio" name="tamano" value="{{ t.clave }}"
+                     {% if t.ancho == plantilla.ancho_puntos and t.alto == plantilla.alto_puntos %}checked{% endif %}
+                     style="cursor:pointer">
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="card-footer d-flex justify-content-end">
+      <button type="submit" class="btn btn-success btn-sm">
+        <i data-lucide="check" class="me-1"></i>Aplicar tamaño
+      </button>
+    </div>
+  </div>
+</form>
+
+{% endif %}
+{% endblock %}

@@ -24,6 +24,9 @@
       <a href="{% url 'exportar_recibo_reparacion_pdf' reparacion.id %}" class="btn btn-outline-secondary">
         <i data-lucide="file-text" class="me-1"></i>PDF
       </a>
+      <a href="{% url 'exportar_etiqueta_reparacion_pdf' reparacion.id %}" class="btn btn-outline-secondary" target="_blank" title="Imprimir etiqueta con código de barras">
+        <i data-lucide="tag" class="me-1"></i>Etiqueta
+      </a>
       {% if reparacion.estado == 'pendiente' %}
       <form method="post" action="{% url 'reparacion_en_proceso' reparacion.id %}">
         {% csrf_token %}

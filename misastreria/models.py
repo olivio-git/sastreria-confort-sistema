@@ -1763,3 +1763,72 @@ class ConjuntoSlot(models.Model):
 
     def __str__(self):
         return f"{self.prenda_item} (orden {self.orden})" if self.prenda_item else f"(sin asignar, orden {self.orden})"
+
+
+class PlantillaEtiqueta(models.Model):
+    """Un diseño de etiqueta hecho en el diseñador del navegador.
+
+    Los elementos (textos, códigos de barras, símbolos de cuidado, cajas) se
+    guardan como JSON y no en tablas propias: son una lista corta que siempre se
+    lee y se escribe entera, nunca se consulta por partes. Una tabla por elemento
+    sólo agregaría joins sin dar nada a cambio.
+
+    Lo que NO se guarda es el resultado: ni el ZPL ni el PDF. Ambos se generan
+    desde los elementos cada vez que se imprime, así que si mañana se corrige un
+    renderer, las plantillas viejas mejoran solas sin tener que regenerarlas.
+
+    Las medidas están en puntos de cabezal a 203 dpi — ver `etiquetas.py` para
+    por qué esa unidad y no milímetros.
+    """
+
+    nombre = models.CharField(max_length=100, unique=True, verbose_name="Nombre")
+    descripcion = models.CharField(max_length=200, blank=True, verbose_name="Descripción")
+
+    ancho_puntos = models.PositiveIntegerField(default=400, verbose_name="Ancho (puntos)")
+    alto_puntos = models.PositiveIntegerField(default=240, verbose_name="Alto (puntos)")
+
+    elementos = models.JSONField(default=list, blank=True, verbose_name="Elementos")
+
+    es_predeterminada = models.BooleanField(
+        default=False,
+        verbose_name="Predeterminada",
+        help_text="La que usan las etiquetas de inventario, reparaciones y confecciones.",
+    )
+    creado = models.DateTimeField(auto_now_add=True)
+    modificado = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Plantilla de Etiqueta"
+        verbose_name_plural = "Plantillas de Etiquetas"
+        ordering = ['-es_predeterminada', 'nombre']
+
+    def __str__(self):
+        return self.nombre
+
+    @property
+    def ancho_mm(self):
+        return round(self.ancho_puntos * 25.4 / 203, 1)
+
+    @property
+    def alto_mm(self):
+        return round(self.alto_puntos * 25.4 / 203, 1)
+
+    @classmethod
+    def predeterminada(cls):
+        """La plantilla que usan las etiquetas del sistema.
+
+        Si nadie marcó ninguna, cae en la primera que exista para no dejar al
+        usuario sin poder imprimir por un descuido de configuración. Devuelve
+        None sólo si no hay ninguna plantilla cargada.
+        """
+        return (cls.objects.filter(es_predeterminada=True).first()
+                or cls.objects.first())
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            # Una sola predeterminada a la vez: marcar ésta desmarca la anterior.
+            if self.es_predeterminada:
+                PlantillaEtiqueta.objects.exclude(pk=self.pk).filter(
+                    es_predeterminada=True
+                ).update(es_predeterminada=False)

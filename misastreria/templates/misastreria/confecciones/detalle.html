@@ -29,6 +29,9 @@
       <a href="{% url 'exportar_recibo_confeccion_pdf' confeccion.id %}" class="btn btn-outline-secondary">
         <i data-lucide="file-text" class="me-1"></i>PDF
       </a>
+      <a href="{% url 'exportar_etiqueta_confeccion_pdf' confeccion.id %}" class="btn btn-outline-secondary" target="_blank" title="Imprimir etiqueta con código de barras">
+        <i data-lucide="tag" class="me-1"></i>Etiqueta
+      </a>
       {% if confeccion.estado == 'pendiente' %}
       <form method="post" action="{% url 'confeccion_en_proceso' confeccion.id %}">
         {% csrf_token %}

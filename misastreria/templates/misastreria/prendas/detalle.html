@@ -18,6 +18,10 @@
       </h2>
     </div>
     <div class="col-auto ms-auto d-flex gap-2">
+      <a href="{% url 'exportar_etiquetas_prenda_pdf' prenda.id %}" class="btn btn-outline-secondary" target="_blank"
+         title="Imprimir una etiqueta por cada unidad activa de este SKU">
+        <i data-lucide="tags" class="me-1"></i>Etiquetas
+      </a>
       <a href="{% url 'kardex_inventario' prenda.id %}" class="btn btn-outline-info">
         <i class="bi bi-clock-history me-1"></i>Kardex
       </a>
@@ -186,6 +190,11 @@
                  class="btn btn-sm btn-icon btn-ghost-info"
                  title="Ver kardex del item">
                 <i class="bi bi-clock-history"></i>
+              </a>
+              <a href="{% url 'exportar_etiqueta_item_pdf' item.id %}"
+                 class="btn btn-sm btn-icon btn-ghost-secondary" target="_blank"
+                 title="Imprimir etiqueta de esta unidad">
+                <i data-lucide="tag"></i>
               </a>
               <button type="button"
                 class="btn btn-sm btn-icon btn-ghost-primary"

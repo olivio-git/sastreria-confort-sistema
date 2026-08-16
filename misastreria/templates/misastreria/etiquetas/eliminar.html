@@ -1,0 +1,39 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Eliminar plantilla{% endblock %}
+{% block contenido %}
+<div class="row justify-content-center">
+  <div class="col-12 col-sm-8 col-md-5 col-lg-4">
+    <div class="card card-md">
+      <div class="card-status-top bg-danger"></div>
+      <div class="card-body text-center py-4">
+        <div class="mb-3 text-danger">
+          <i data-lucide="tags" style="width:3rem;height:3rem;opacity:.7"></i>
+        </div>
+        <h3 class="card-title mb-1">¿Eliminar plantilla?</h3>
+        <p class="text-muted mb-0">
+          <strong>{{ plantilla.nombre }}</strong>
+          ({{ plantilla.ancho_mm }} × {{ plantilla.alto_mm }} mm)<br>
+          <small>Esta acción no se puede deshacer.</small>
+        </p>
+        {% if plantilla.es_predeterminada %}
+        <div class="alert alert-warning mt-3 mb-0 text-start small">
+          Es la plantilla predeterminada: la usan las etiquetas de inventario,
+          reparaciones y confecciones. Al borrarla, otra ocupará su lugar.
+        </div>
+        {% endif %}
+      </div>
+      <div class="card-footer d-flex justify-content-center gap-3">
+        <a href="{% url 'lista_plantillas' %}" class="btn btn-outline-secondary">
+          <i data-lucide="x"></i>Cancelar
+        </a>
+        <form method="post" class="d-inline">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-danger">
+            <i data-lucide="trash-2"></i>Eliminar
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

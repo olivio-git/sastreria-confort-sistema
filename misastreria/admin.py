@@ -5,6 +5,7 @@ from .models import (
     Reparacion, Empleado, Permiso, Falta, Confeccion,
     OrdenProduccion, OrdenProduccionEmpleado, InsumoCortado,
     TipoGasto, CajaSesion, CajaMovimiento,
+    PlantillaEtiqueta,
 )
 from .kardex_events import (
     emit_ingreso, emit_alquiler, emit_venta, emit_baja, emit_devolucion,
@@ -155,4 +156,13 @@ class CajaMovimientoAdmin(admin.ModelAdmin):
     list_filter = ['tipo', 'concepto', 'origen', 'forma_pago']
     search_fields = ['codigo', 'descripcion']
     readonly_fields = ['codigo', 'creado', 'tipo']
+    list_per_page = 20
+
+
+@admin.register(PlantillaEtiqueta)
+class PlantillaEtiquetaAdmin(admin.ModelAdmin):
+    list_display = ['nombre', 'descripcion', 'ancho_mm', 'alto_mm', 'es_predeterminada', 'modificado']
+    list_filter = ['es_predeterminada']
+    search_fields = ['nombre', 'descripcion']
+    readonly_fields = ['creado', 'modificado']
     list_per_page = 20

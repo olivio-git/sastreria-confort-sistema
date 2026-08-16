@@ -9283,3 +9283,9 @@ def buscar_prenda_items(request):
             'estado': pi.estado,
         })
     return JsonResponse(results, safe=False)
+
+
+# ─── Etiquetas ───────────────────────────────────────────────────────────────
+# El diseño de las etiquetas dejó de estar clavado acá: ahora es una plantilla
+# editable (`PlantillaEtiqueta`) que se dibuja desde `etiquetas_pdf.py` y
+# `etiquetas_zpl.py`. Las vistas viven en `views_etiquetas.py`.

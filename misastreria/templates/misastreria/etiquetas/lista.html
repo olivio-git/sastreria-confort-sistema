@@ -1,0 +1,158 @@
+{% extends 'misastreria/base.html' %}
+{% load static %}
+{% block titulo %}Plantillas de etiqueta{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <div class="page-pretitle">Etiquetas</div>
+      <h2 class="page-title">
+        <i data-lucide="tags" class="me-2 text-muted"></i>
+        Plantillas
+      </h2>
+    </div>
+    <div class="col-auto">
+      <div class="btn-list">
+        <a href="{% url 'etiquetas_calibrar' %}" class="btn btn-outline-secondary">
+          <i data-lucide="ruler"></i>Calibrar
+        </a>
+        <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modalNuevaPlantilla">
+          <i data-lucide="plus"></i>Nueva plantilla
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <div class="d-flex flex-wrap align-items-center gap-2 small text-muted">
+      <span>
+        <i data-lucide="info" style="width:1rem;height:1rem" class="me-1"></i>
+        La plantilla <strong>predeterminada</strong> es la que sale al imprimir etiquetas
+        de inventario, reparaciones y confecciones.
+      </span>
+      <span class="ms-auto">
+        Impresora térmica: <span class="badge-estado badge-en_proceso">{{ impresora }}</span>
+      </span>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-hover table-vcenter card-table mb-0">
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th>Descripción</th>
+          <th style="width:120px">Tamaño</th>
+          <th class="text-center" style="width:100px">Elementos</th>
+          <th class="text-center" style="width:140px">Predeterminada</th>
+          <th style="width:150px"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in page_obj %}
+        <tr>
+          <td class="fw-semibold">{{ p.nombre }}</td>
+          <td class="text-muted">{{ p.descripcion|default:"—" }}</td>
+          <td>{{ p.ancho_mm }} × {{ p.alto_mm }} <span class="text-muted">mm</span></td>
+          <td class="text-center">{{ p.elementos|length }}</td>
+          <td class="text-center">
+            {% if p.es_predeterminada %}
+              <span class="badge-estado badge-entregado">Sí</span>
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            <div class="btn-actions">
+              <a href="{% url 'editar_plantilla' p.pk %}" class="btn btn-sm btn-outline-primary" title="Editar">
+                <i data-lucide="pencil"></i>
+              </a>
+              <a href="{% url 'exportar_etiqueta_demo_pdf' %}" target="_blank"
+                 class="btn btn-sm btn-outline-secondary" title="Ver muestra en PDF">
+                <i data-lucide="file-text"></i>
+              </a>
+              <a href="{% url 'eliminar_plantilla' p.pk %}" class="btn btn-sm btn-outline-danger" title="Eliminar">
+                <i data-lucide="trash-2"></i>
+              </a>
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="6">
+            <div class="empty-state text-center py-4">
+              <i data-lucide="tags" class="d-block mx-auto mb-2 text-muted"></i>
+              Todavía no hay plantillas. Creá una para poder imprimir etiquetas.
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer d-flex align-items-center">
+    <span class="text-muted">{{ total }} plantilla{{ total|pluralize }}</span>
+  </div>
+</div>
+
+<div class="modal modal-blur fade" id="modalNuevaPlantilla" tabindex="-1" aria-labelledby="tituloNuevaPlantilla" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form class="modal-content" method="get" action="{% url 'disenador_etiqueta' %}">
+      <input type="hidden" name="nueva" value="1">
+      <div class="modal-header">
+        <h3 class="modal-title" id="tituloNuevaPlantilla">Preparar nueva plantilla</h3>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label" for="nueva-origen">Punto de partida</label>
+          <select class="form-select" id="nueva-origen" name="origen">
+            <option value="vacia">Lienzo vacío</option>
+            <option value="textil">Modelo textil vertical</option>
+            <option value="predeterminada">Copiar plantilla predeterminada</option>
+          </select>
+          <div class="form-hint">La copia crea otra plantilla; no modifica la original.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="nueva-tamano">Tamaño de etiqueta</label>
+          <select class="form-select" id="nueva-tamano" name="tamano">
+            {% for t in tamanos %}
+            <option value="{{ t.clave }}" {% if t.clave == tamano_defecto %}selected{% endif %}>{{ t.nombre }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <fieldset>
+          <legend class="form-label">Orientación</legend>
+          <div class="form-selectgroup">
+            <label class="form-selectgroup-item flex-fill">
+              <input type="radio" name="orientacion" value="horizontal" class="form-selectgroup-input" checked>
+              <span class="form-selectgroup-label text-center"><i data-lucide="rectangle-horizontal" class="me-1"></i>Horizontal</span>
+            </label>
+            <label class="form-selectgroup-item flex-fill">
+              <input type="radio" name="orientacion" value="vertical" class="form-selectgroup-input">
+              <span class="form-selectgroup-label text-center"><i data-lucide="rectangle-vertical" class="me-1"></i>Vertical</span>
+            </label>
+          </div>
+        </fieldset>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="submit" class="btn btn-success"><i data-lucide="arrow-right"></i>Abrir diseñador</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/etiquetas_lista.js' %}"></script>
+{% endblock %}
