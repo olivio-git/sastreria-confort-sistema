@@ -2019,11 +2019,62 @@
     URL.revokeObjectURL(enlace.href);
   });
 
+  // El puente de impresión corre en la PC del taller y es el único que puede
+  // tocar el USB de la impresora. Ver puente_impresion/README.md.
+  const PUENTE = 'http://127.0.0.1:9101';
+
+  async function imprimirPorPuente(zpl) {
+    // El timeout corto es a propósito: si el puente no está levantado, el
+    // fetch a una dirección local falla enseguida, y no tiene sentido dejar al
+    // usuario esperando antes de pasar al plan B.
+    const corte = AbortSignal.timeout(4000);
+    const respuesta = await fetch(`${PUENTE}/imprimir`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      body: zpl,
+      signal: corte,
+    });
+    return respuesta.json();
+  }
+
   document.getElementById('et-imprimir').addEventListener('click', async () => {
-    const respuesta = await fetch(app.dataset.urlImprimir,
+    // Paso 1: el ZPL siempre lo arma el servidor, que es donde vive la plantilla
+    // y la configuración del cabezal. El puente sólo lo reenvía al USB.
+    const respuesta = await fetch(app.dataset.urlZpl,
       { method: 'POST', headers: cabeceras, body: cuerpo() });
     const datos = await respuesta.json();
-    avisar(datos.ok ? datos.mensaje : datos.error, datos.ok ? 'success' : 'danger');
+    if (!respuesta.ok || !datos.ok) {
+      avisar(datos.error || 'No se pudo generar el ZPL.', 'danger');
+      return;
+    }
+
+    // Paso 2: el puente en la PC del taller.
+    try {
+      const salida = await imprimirPorPuente(datos.zpl);
+      avisar(salida.ok ? salida.mensaje : salida.error,
+             salida.ok ? 'success' : 'danger');
+      return;
+    } catch (error) {
+      // No hay puente escuchando. Se sigue con el plan B en vez de cortar acá.
+    }
+
+    // Paso 3: plan B — que imprima el propio servidor. Sólo funciona cuando
+    // Django corre en la misma PC que la impresora (desarrollo, o instalación
+    // local sin hosting). En producción esto falla y se cae al aviso final.
+    try {
+      const local = await fetch(app.dataset.urlImprimir,
+        { method: 'POST', headers: cabeceras, body: cuerpo() });
+      const resultado = await local.json();
+      if (resultado.ok) {
+        avisar(resultado.mensaje, 'success');
+        return;
+      }
+    } catch (error) {
+      // Sin conexión con el servidor: cae al aviso de abajo igual.
+    }
+
+    avisar('No se encontró el puente de impresión. Verificá que esté corriendo '
+           + 'en esta PC, o usá «Descargar ZPL» para imprimir a mano.', 'warning');
   });
 
   window.addEventListener('beforeunload', (evento) => {
