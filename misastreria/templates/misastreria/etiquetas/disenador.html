@@ -215,6 +215,47 @@
     overflow: auto;
   }
 
+  .et-medida-mm {
+    display: inline-flex;
+    align-items: center;
+    gap: .25rem;
+    font-size: .75rem;
+  }
+
+  /* ── Buscador de prendas ─────────────────────────────────────────────────
+     El fondo va explícito y no heredado: sin esto el desplegable se ve
+     transparente y las prendas quedan encima del lienzo, ilegibles.
+     El alto máximo es lo que evita que 40 resultados tapen media pantalla. */
+  #et-resultados {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    max-height: 15rem;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  #et-resultados .list-group-item {
+    background: var(--surface);
+    border-left: 0;
+    border-right: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #et-resultados .list-group-item:first-child { border-top: 0; }
+  #et-resultados .list-group-item:last-child { border-bottom: 0; }
+  #et-resultados .list-group-item-action:hover,
+  #et-resultados .list-group-item-action:focus {
+    background: var(--primary-light);
+  }
+  /* Aviso de «hay más resultados», pegado abajo mientras se scrollea. */
+  #et-resultados .et-mas-resultados {
+    position: sticky;
+    bottom: 0;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+  }
+
   @media (max-width: 992px) {
     .et-editor { height: auto; margin: -1rem; }
     .et-cuerpo { flex-direction: column; }
@@ -351,10 +392,19 @@
         </select>
         <button type="button" class="et-tool" id="et-orientacion"
                 title="Cambiar orientación y adaptar el diseño"><i data-lucide="rotate-cw-square"></i></button>
-        <input type="number" class="form-control form-control-sm" id="et-ancho"
-               value="{{ ancho }}" min="8" max="4000" style="width:4.5rem" title="Ancho en puntos" hidden>
-        <input type="number" class="form-control form-control-sm" id="et-alto"
-               value="{{ alto }}" min="8" max="4000" style="width:4.5rem" title="Alto en puntos" hidden>
+        <!-- Las medidas se piden en MILÍMETROS, que es lo que el usuario puede
+             medir con una regla contra el rollo. Los puntos de cabezal son una
+             unidad interna: se convierten en el JS y no se muestran nunca. -->
+        <span class="et-medida-mm" id="et-custom" hidden>
+          <input type="number" class="form-control form-control-sm" id="et-ancho"
+                 step="0.5" min="10" max="300" style="width:4.5rem"
+                 title="Ancho del rollo en milímetros">
+          <span class="text-muted">×</span>
+          <input type="number" class="form-control form-control-sm" id="et-alto"
+                 step="0.5" min="10" max="300" style="width:4.5rem"
+                 title="Alto del rollo en milímetros">
+          <span class="text-muted">mm</span>
+        </span>
       </div>
 
       <div class="et-grupo">

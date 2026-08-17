@@ -31,6 +31,12 @@
   const PUNTOS_POR_MM = 203 / 25.4;
   const QR_TAM_MIN = 58;
 
+  // El diseño se guarda en puntos de cabezal, pero al usuario se le habla
+  // siempre en milímetros: es lo que puede medir con una regla contra el rollo.
+  // Los puntos no aparecen en ninguna parte de la interfaz.
+  const aMm = (puntos) => puntos / PUNTOS_POR_MM;
+  const aPuntos = (mm) => Math.round(mm * PUNTOS_POR_MM);
+
   // ── Constantes del editor ──────────────────────────────────────────────────
   const REGLA = 20;          // ancho de las reglas, en píxeles de pantalla
   const IMAN = 5;            // distancia de enganche, en píxeles de pantalla
@@ -1056,7 +1062,7 @@
       return;
     }
     document.getElementById('et-posicion-estado').textContent =
-      `x ${Math.round(punto.x)} · y ${Math.round(punto.y)} pt`;
+      `x ${(punto.x / PUNTOS_POR_MM).toFixed(1)} · y ${(punto.y / PUNTOS_POR_MM).toFixed(1)} mm`;
   }
 
   function mostrarTamano(c) {
@@ -1664,34 +1670,42 @@
   const selectorTamano = document.getElementById('et-tamano');
   const campoAncho = document.getElementById('et-ancho');
   const campoAlto = document.getElementById('et-alto');
+  const grupoCustom = document.getElementById('et-custom');
   let ultimoCambioOrientacion = null;
 
   function aplicarMedidas(ancho, alto, opciones = {}) {
     estado.ancho = Math.max(8, Math.min(4000, Math.round(ancho)));
     estado.alto = Math.max(8, Math.min(4000, Math.round(alto)));
     anchoActual = estado.ancho;      // lo usa normalizar() al crear elementos
-    campoAncho.value = estado.ancho;
-    campoAlto.value = estado.alto;
 
-    const enMm = `${(estado.ancho * 25.4 / 203).toFixed(1)} × ${(estado.alto * 25.4 / 203).toFixed(1)} mm`;
+    // Los campos se escriben en mm, pero sólo si no los está tipeando el
+    // usuario: reescribirlos mientras escribe le movería el cursor.
+    if (document.activeElement !== campoAncho) {
+      campoAncho.value = aMm(estado.ancho).toFixed(1);
+    }
+    if (document.activeElement !== campoAlto) {
+      campoAlto.value = aMm(estado.alto).toFixed(1);
+    }
+
     const orientacion = estado.ancho >= estado.alto ? 'horizontal' : 'vertical';
     document.getElementById('et-medidas-estado').textContent =
-      `${enMm} · ${estado.ancho} × ${estado.alto} pt · ${orientacion}`;
+      `${aMm(estado.ancho).toFixed(1)} × ${aMm(estado.alto).toFixed(1)} mm · ${orientacion}`;
 
     // El selector se sincroniza para que no quede mostrando una medida que ya
     // no es la del papel (pasa al girar la orientación).
     const clave = `${estado.ancho}x${estado.alto}`;
     const existe = [...selectorTamano.options].some((o) => o.value === clave);
     selectorTamano.value = existe ? clave : 'custom';
-    const custom = selectorTamano.value === 'custom';
-    campoAncho.hidden = campoAlto.hidden = !custom;
+    grupoCustom.hidden = selectorTamano.value !== 'custom';
 
     if (!opciones.silencioso) dibujar();
   }
 
   selectorTamano.addEventListener('change', () => {
     if (selectorTamano.value === 'custom') {
-      campoAncho.hidden = campoAlto.hidden = false;
+      grupoCustom.hidden = false;
+      campoAncho.focus();
+      campoAncho.select();
       return;
     }
     const [ancho, alto] = selectorTamano.value.split('x').map(Number);
@@ -1700,7 +1714,14 @@
   });
 
   [campoAncho, campoAlto].forEach((control) => {
-    control.addEventListener('input', () => aplicarMedidas(+campoAncho.value, +campoAlto.value));
+    control.addEventListener('input', () => {
+      // Un campo vacío o a medio tipear no debe reventar el lienzo: se ignora
+      // hasta que sea un número usable.
+      const anchoMm = parseFloat(campoAncho.value);
+      const altoMm = parseFloat(campoAlto.value);
+      if (!(anchoMm > 0) || !(altoMm > 0)) return;
+      aplicarMedidas(aPuntos(anchoMm), aPuntos(altoMm));
+    });
     control.addEventListener('change', registrar);
   });
 
@@ -1899,13 +1920,24 @@
     try {
       const respuesta = await fetch(`${app.dataset.urlItems}?q=${encodeURIComponent(consulta)}`);
       const datos = await respuesta.json();
-      resultados.innerHTML = datos.items.map((it) =>
+      const filas = datos.items.map((it) =>
         `<button type="button" class="list-group-item list-group-item-action py-1 small"
-           data-item="${it.id}">
+           data-item="${it.id}" title="${escaparHtml(it.codigo)} — ${escaparHtml(it.nombre)}">
            <strong>${escaparHtml(it.codigo)}</strong>
            <span class="text-muted"> — ${escaparHtml(it.nombre)} · ${escaparHtml(it.detalle)}</span>
-         </button>`).join('')
-        || '<div class="list-group-item py-1 text-muted small">Sin resultados.</div>';
+         </button>`).join('');
+
+      // El servidor corta en 40. Si vinieron 40 justos es casi seguro que hay
+      // más, y sin avisarlo el usuario cree que la prenda que busca no existe.
+      const hayMas = datos.items.length >= 40
+        ? `<div class="list-group-item et-mas-resultados py-1 text-muted small">
+             Hay más resultados. Escribí un poco más para achicar la lista.
+           </div>`
+        : '';
+
+      resultados.innerHTML = filas
+        ? filas + hayMas
+        : '<div class="list-group-item py-1 text-muted small">Ninguna prenda coincide.</div>';
       resultados.hidden = false;
       resultados.querySelectorAll('[data-item]').forEach((boton) => {
         const item = datos.items.find((i) => String(i.id) === boton.dataset.item);
