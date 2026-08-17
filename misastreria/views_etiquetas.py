@@ -566,8 +566,6 @@ def calibrar(request):
     plantilla = PlantillaEtiqueta.predeterminada()
     return render(request, 'misastreria/etiquetas/calibrar.html', {
         'plantilla': plantilla,
-        'tamanos': etiquetas.tamanos_para_selector(),
-        'actual': plantilla and (plantilla.ancho_puntos, plantilla.alto_puntos),
         'config': ConfiguracionImpresora.cargar(),
     })
 
@@ -619,42 +617,5 @@ def fijar_impresora(request):
     messages.success(
         request,
         f"Impresora ajustada: {config}. Imprimí una muestra para ver cómo quedó."
-    )
-    return redirect('etiquetas_calibrar')
-
-
-@login_required
-@require_POST
-def fijar_tamano(request):
-    """Cambia el tamaño de la plantilla predeterminada, reescalando el diseño.
-
-    Se reescala en vez de sólo cambiar el lienzo porque un diseño armado para
-    50 × 30 mm en una etiqueta de 100 × 50 quedaría amontonado en una esquina.
-    El factor es único (el menor de los dos ejes) para no deformar los símbolos
-    de cuidado, que por norma son cuadrados.
-    """
-    plantilla = PlantillaEtiqueta.predeterminada()
-    if plantilla is None:
-        return _sin_plantilla(request)
-
-    clave = (request.POST.get('tamano') or '').strip()
-    if clave not in etiquetas.TAMANOS_MM:
-        messages.error(request, "Tamaño de etiqueta no válido.")
-        return redirect('etiquetas_calibrar')
-
-    ancho_mm, alto_mm = etiquetas.TAMANOS_MM[clave]
-    ancho = etiquetas.mm_a_puntos(ancho_mm)
-    alto = etiquetas.mm_a_puntos(alto_mm)
-
-    factor = min(ancho / plantilla.ancho_puntos, alto / plantilla.alto_puntos)
-    plantilla.elementos = etiquetas.escalar(plantilla.elementos, factor)
-    plantilla.ancho_puntos = ancho
-    plantilla.alto_puntos = alto
-    plantilla.save()
-
-    messages.success(
-        request,
-        f"«{plantilla.nombre}» quedó en {ancho_mm:g} × {alto_mm:g} mm. "
-        f"Revisá el diseño: el reescalado es proporcional y puede necesitar retoques."
     )
     return redirect('etiquetas_calibrar')

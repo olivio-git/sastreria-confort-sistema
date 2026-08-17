@@ -1,6 +1,6 @@
 {% extends 'misastreria/base.html' %}
 {% load static %}
-{% block titulo %}Etiquetas — Calibrar{% endblock %}
+{% block titulo %}Etiquetas — Impresora{% endblock %}
 
 {% block page_header %}
 <div class="container-xl">
@@ -13,8 +13,8 @@
     <div class="col">
       <div class="page-pretitle">Etiquetas</div>
       <h2 class="page-title">
-        <i data-lucide="ruler" class="me-2 text-muted"></i>
-        Tamaño del rollo
+        <i data-lucide="printer" class="me-2 text-muted"></i>
+        Ajustes de la impresora
       </h2>
     </div>
     {% if plantilla %}
@@ -45,8 +45,8 @@
     <div class="d-flex flex-wrap align-items-center gap-2 small">
       <span class="text-muted">
         <i data-lucide="info" style="width:1rem;height:1rem" class="me-1"></i>
-        Imprimí la <strong>muestra</strong> a <strong>tamaño real (100%)</strong> y superponela al
-        sticker. Si no calza, elegí la medida que coincida y guardá.
+        Estos ajustes son de la <strong>impresora</strong>, no del diseño.
+        El tamaño de la etiqueta se cambia en el diseñador.
       </span>
       <span class="ms-auto text-muted">
         Plantilla: <strong>{{ plantilla.nombre }}</strong>
@@ -55,59 +55,6 @@
     </div>
   </div>
 </div>
-
-<div class="alert alert-warning">
-  <i data-lucide="triangle-alert" class="me-1"></i>
-  Cambiar el tamaño <strong>reescala el diseño completo</strong> de forma proporcional.
-  Es un buen punto de partida, pero conviene revisarlo después en el diseñador:
-  un código de barras puede necesitar otro ancho de barra para seguir siendo legible.
-</div>
-
-<form method="post" action="{% url 'etiquetas_set_size' %}">
-  {% csrf_token %}
-  <div class="card">
-    <div class="table-responsive">
-      <table class="table table-hover table-vcenter card-table mb-0">
-        <thead>
-          <tr>
-            <th style="width:140px">Medida</th>
-            <th style="width:140px">Proporción</th>
-            <th>Prueba</th>
-            <th class="text-center" style="width:120px">Usar esta</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for t in tamanos %}
-          <tr>
-            <td class="fw-semibold">{{ t.nombre }}</td>
-            <td>
-              <div style="width:{{ t.ancho }}px;height:{{ t.alto }}px;
-                          max-width:100px;max-height:60px;
-                          border:1.5px solid var(--text);border-radius:3px;background:var(--surface)"></div>
-            </td>
-            <td>
-              <a href="{% url 'exportar_etiqueta_demo_pdf' %}" target="_blank"
-                 class="btn btn-outline-primary btn-sm">
-                <i data-lucide="printer" class="me-1"></i>Ver muestra actual
-              </a>
-            </td>
-            <td class="text-center">
-              <input class="form-check-input" type="radio" name="tamano" value="{{ t.clave }}"
-                     {% if t.ancho == plantilla.ancho_puntos and t.alto == plantilla.alto_puntos %}checked{% endif %}
-                     style="cursor:pointer">
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    <div class="card-footer d-flex justify-content-end">
-      <button type="submit" class="btn btn-success btn-sm">
-        <i data-lucide="check" class="me-1"></i>Aplicar tamaño
-      </button>
-    </div>
-  </div>
-</form>
 
 <h3 class="mt-4 mb-2 d-flex align-items-center">
   <i data-lucide="contrast" class="me-2 text-muted"></i>Calidad de impresión

@@ -110,7 +110,6 @@ urlpatterns = [
     # Etiquetas — calibración contra el rollo físico
     path('etiquetas/calibrar/', views_etiquetas.calibrar, name='etiquetas_calibrar'),
     path('etiquetas/calibrar/muestra/', views_etiquetas.etiqueta_demo_pdf, name='exportar_etiqueta_demo_pdf'),
-    path('etiquetas/calibrar/fijar/', views_etiquetas.fijar_tamano, name='etiquetas_set_size'),
     path('etiquetas/calibrar/impresora/', views_etiquetas.fijar_impresora, name='etiquetas_set_impresora'),
     path('etiquetas/calibrar/zpl/', views_etiquetas.zpl_calibracion, name='etiquetas_zpl_calibracion'),
     # Etiquetas — diseñador de plantillas

@@ -877,23 +877,6 @@ class VistasEtiquetasTests(TestCase):
         respuesta = self.client.get(reverse('exportar_etiqueta_item_pdf', args=[item.pk]))
         self.assertEqual(respuesta.status_code, 302)
 
-    # ── Calibración ──────────────────────────────────────────────────────────
-
-    def test_fijar_tamano_reescala_el_diseno(self):
-        antes = self.plantilla.elementos[0]['x']
-        respuesta = self.client.post(reverse('etiquetas_set_size'), {'tamano': '100x50'})
-        self.assertEqual(respuesta.status_code, 302)
-
-        self.plantilla.refresh_from_db()
-        self.assertEqual(self.plantilla.ancho_puntos, etiquetas.mm_a_puntos(100))
-        # 50→100 mm de ancho y 30→50 mm de alto: manda el menor factor (1,66).
-        self.assertGreater(self.plantilla.elementos[0]['x'], antes)
-
-    def test_fijar_un_tamano_invalido_no_toca_nada(self):
-        self.client.post(reverse('etiquetas_set_size'), {'tamano': 'gigante'})
-        self.plantilla.refresh_from_db()
-        self.assertEqual(self.plantilla.ancho_puntos, 400)
-
     # ── Borrado ──────────────────────────────────────────────────────────────
 
     def test_no_se_puede_borrar_la_unica_plantilla(self):
