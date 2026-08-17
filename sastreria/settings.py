@@ -143,7 +143,28 @@ FORCE_SCRIPT_NAME = '/sistema'
 STATIC_URL = '/sistema/static/'
 STATICFILES_DIRS = []
 STATIC_ROOT = os.path.join(BASE_DIR, 'static')
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
+# Django 5.1 eliminó STATICFILES_STORAGE en favor de STORAGES. Mientras estuvo
+# como STATICFILES_STORAGE, esta línea no hacía nada y se servían los archivos
+# sin comprimir y sin hash: cada cambio en un .js o .css quedaba tapado por el
+# caché del navegador, porque la URL seguía siendo la misma.
+#
+# Con el backend de whitenoise, el nombre del archivo lleva un hash de su
+# contenido (etiquetas.c529a151fca0.js). Al cambiar el archivo cambia la URL, y
+# el navegador se ve obligado a pedirlo de nuevo. También deja los .gz y .br
+# pregenerados al momento de recolectar, en vez de comprimir en cada request.
+#
+# A cambio, `collectstatic` pasa a ser obligatorio en cada despliegue que toque
+# algo de static/: hasta que corra, las plantillas siguen apuntando al hash
+# anterior.
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
 STATICFILES_FINDERS = [
     'django.contrib.staticfiles.finders.FileSystemFinder',
     'django.contrib.staticfiles.finders.AppDirectoriesFinder',
