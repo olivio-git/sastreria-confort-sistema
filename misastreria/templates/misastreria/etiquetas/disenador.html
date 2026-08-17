@@ -238,17 +238,28 @@
      dejaba el texto oscuro sobre fondo oscuro cuando el sistema está en modo
      noche: `--surface` sí cambia con el tema, pero el color heredado de
      .list-group-item no. */
+  /* El tamaño va en rem y no en em, y pisa a la clase `small` de Bootstrap.
+     `small` es 0.875em: al ser relativo se MULTIPLICA por lo que herede el
+     desplegable, y terminaba con una letra mucho más chica que el resto de la
+     interfaz. En rem el tamaño es el mismo mire donde mire. */
   #et-resultados .list-group-item {
     background: var(--surface);
     color: var(--text);
     border-color: var(--border);
     border-left: 0;
     border-right: 0;
+    font-size: .875rem;
+    line-height: 1.4;
+    padding: .45rem .7rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  #et-resultados .list-group-item .text-muted { color: var(--text-muted) !important; }
+  #et-resultados .list-group-item strong { font-weight: 600; }
+  #et-resultados .list-group-item .text-muted {
+    color: var(--text-muted) !important;
+    font-size: .8125rem;
+  }
   #et-resultados .list-group-item:first-child { border-top: 0; }
   #et-resultados .list-group-item:last-child { border-bottom: 0; }
 
@@ -269,7 +280,13 @@
     background: var(--surface);
     color: var(--text-muted);
     border-top: 1px solid var(--border);
+    font-size: .8125rem;
   }
+
+  /* El campo de búsqueda vive dentro de .et-estado, que achica todo a .75rem.
+     Se fija en rem para que el texto que se tipea y el de los resultados se
+     lean igual. */
+  #et-buscar-item { font-size: .875rem; }
 
   @media (max-width: 992px) {
     .et-editor { height: auto; margin: -1rem; }

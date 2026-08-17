@@ -1920,8 +1920,11 @@
     try {
       const respuesta = await fetch(`${app.dataset.urlItems}?q=${encodeURIComponent(consulta)}`);
       const datos = await respuesta.json();
+      // Sin `small` ni `py-*`: el tamaño y el espaciado los fija el CSS del
+      // diseñador en rem, porque las clases de Bootstrap son relativas y acá
+      // se multiplicaban con lo heredado hasta dejar la letra ilegible.
       const filas = datos.items.map((it) =>
-        `<button type="button" class="list-group-item list-group-item-action py-1 small"
+        `<button type="button" class="list-group-item list-group-item-action"
            data-item="${it.id}" title="${escaparHtml(it.codigo)} — ${escaparHtml(it.nombre)}">
            <strong>${escaparHtml(it.codigo)}</strong>
            <span class="text-muted"> — ${escaparHtml(it.nombre)} · ${escaparHtml(it.detalle)}</span>
@@ -1930,14 +1933,14 @@
       // El servidor corta en 40. Si vinieron 40 justos es casi seguro que hay
       // más, y sin avisarlo el usuario cree que la prenda que busca no existe.
       const hayMas = datos.items.length >= 40
-        ? `<div class="list-group-item et-mas-resultados py-1 text-muted small">
+        ? `<div class="list-group-item et-mas-resultados text-muted">
              Hay más resultados. Escribí un poco más para achicar la lista.
            </div>`
         : '';
 
       resultados.innerHTML = filas
         ? filas + hayMas
-        : '<div class="list-group-item py-1 text-muted small">Ninguna prenda coincide.</div>';
+        : '<div class="list-group-item text-muted">Ninguna prenda coincide.</div>';
       resultados.hidden = false;
       resultados.querySelectorAll('[data-item]').forEach((boton) => {
         const item = datos.items.find((i) => String(i.id) === boton.dataset.item);
