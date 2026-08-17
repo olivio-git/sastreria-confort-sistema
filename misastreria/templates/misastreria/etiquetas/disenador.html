@@ -234,25 +234,40 @@
     overflow-y: auto;
     overflow-x: hidden;
   }
+  /* El color va explícito junto con el fondo. Poner uno sin el otro es lo que
+     dejaba el texto oscuro sobre fondo oscuro cuando el sistema está en modo
+     noche: `--surface` sí cambia con el tema, pero el color heredado de
+     .list-group-item no. */
   #et-resultados .list-group-item {
     background: var(--surface);
+    color: var(--text);
+    border-color: var(--border);
     border-left: 0;
     border-right: 0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  #et-resultados .list-group-item .text-muted { color: var(--text-muted) !important; }
   #et-resultados .list-group-item:first-child { border-top: 0; }
   #et-resultados .list-group-item:last-child { border-bottom: 0; }
+
+  /* El resaltado es un velo semitransparente del color primario y no
+     `--primary-light`: esa variable no se redefine en modo noche, así que
+     pintaba celeste claro debajo de un texto claro. Con alfa funciona sobre
+     cualquier fondo, sea claro u oscuro. */
   #et-resultados .list-group-item-action:hover,
   #et-resultados .list-group-item-action:focus {
-    background: var(--primary-light);
+    background: rgba(37, 99, 235, .18);
+    color: var(--text);
   }
+
   /* Aviso de «hay más resultados», pegado abajo mientras se scrollea. */
   #et-resultados .et-mas-resultados {
     position: sticky;
     bottom: 0;
     background: var(--surface);
+    color: var(--text-muted);
     border-top: 1px solid var(--border);
   }
 
