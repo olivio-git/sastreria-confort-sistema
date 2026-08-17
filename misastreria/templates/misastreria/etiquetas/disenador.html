@@ -230,6 +230,14 @@
   #et-tabla-items td { color: var(--text); }
   #et-tabla-items .et-item-codigo { font-weight: 600; white-space: nowrap; }
   #et-tabla-items .et-item-detalle { color: var(--text-muted); font-size: .8125rem; }
+  /* La cabecera queda a la vista mientras se baja por la lista: sin esto, a
+     partir de la fila diez ya no se sabe qué columna es cuál. */
+  #et-tabla-items thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--surface);
+  }
 
   @media (max-width: 992px) {
     .et-editor { height: auto; margin: -1rem; }
@@ -484,13 +492,12 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
 
-      <div class="modal-body pb-0">
-        <p class="text-muted small">
-          Los datos de la prenda que elijas reemplazan a los de muestra en la
-          vista previa. No cambia el diseño: sirve para ver cómo queda con
-          textos de largo real.
-        </p>
-        <div class="input-icon mb-2">
+      <!-- El buscador va en una fila de cabecera y no en el cuerpo: con
+           modal-dialog-scrollable, Bootstrap le da overflow-y a CADA
+           .modal-body, así que un segundo cuerpo crea una segunda barra de
+           scroll y el buscador se va de la vista al bajar la lista. -->
+      <div class="modal-header py-2">
+        <div class="input-icon w-100">
           <span class="input-icon-addon"><i data-lucide="search"></i></span>
           <input type="text" class="form-control" id="et-buscar-item"
                  placeholder="Buscar por código, nombre, talla o color…"
@@ -498,23 +505,21 @@
         </div>
       </div>
 
-      <div class="modal-body pt-2">
-        <div class="table-responsive">
-          <table class="table table-hover table-vcenter card-table mb-0" id="et-tabla-items">
-            <thead>
-              <tr>
-                <th style="width:9rem">Código</th>
-                <th>Prenda</th>
-                <th style="width:11rem">Detalle</th>
-              </tr>
-            </thead>
-            <tbody id="et-items-cuerpo"></tbody>
-          </table>
-        </div>
-        <div class="text-muted small mt-2" id="et-items-aviso"></div>
+      <div class="modal-body p-0">
+        <table class="table table-hover table-vcenter card-table mb-0" id="et-tabla-items">
+          <thead>
+            <tr>
+              <th style="width:9rem">Código</th>
+              <th>Prenda</th>
+              <th style="width:11rem">Detalle</th>
+            </tr>
+          </thead>
+          <tbody id="et-items-cuerpo"></tbody>
+        </table>
       </div>
 
       <div class="modal-footer">
+        <span class="text-muted small me-auto" id="et-items-aviso"></span>
         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
           Cancelar
         </button>
