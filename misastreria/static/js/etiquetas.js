@@ -1902,58 +1902,83 @@
   // ═══════════════════════════════════════════════════════════════════════════
 
   const buscador = document.getElementById('et-buscar-item');
-  const resultados = document.getElementById('et-resultados');
+  const cuerpoItems = document.getElementById('et-items-cuerpo');
+  const avisoItems = document.getElementById('et-items-aviso');
   const cartel = document.getElementById('et-datos-estado');
   let temporizador = null;
+
+  // El modal se instancia al primer uso y no al arrancar: así el diseñador no
+  // depende de que el bundle de Bootstrap haya llegado antes que este archivo.
+  let modalItems = null;
+  const abrirModalItems = () => {
+    if (!modalItems) {
+      modalItems = new bootstrap.Modal(document.getElementById('et-modal-items'));
+    }
+    modalItems.show();
+  };
+
+  document.getElementById('et-abrir-items').addEventListener('click', () => {
+    abrirModalItems();
+    buscarItems();          // se abre con las primeras prendas ya listadas
+  });
+
+  // El foco al buscador se pide cuando el modal terminó de aparecer: hacerlo
+  // antes no tiene efecto porque el elemento todavía no es visible.
+  document.getElementById('et-modal-items').addEventListener('shown.bs.modal', () => {
+    buscador.focus();
+    buscador.select();
+  });
 
   buscador.addEventListener('input', () => {
     clearTimeout(temporizador);
     temporizador = setTimeout(buscarItems, 300);
   });
-  document.addEventListener('click', (evento) => {
-    if (!resultados.contains(evento.target) && evento.target !== buscador) resultados.hidden = true;
-  });
+
+  function filaItem(it) {
+    return `<tr data-item="${it.id}">
+      <td class="et-item-codigo">${escaparHtml(it.codigo)}</td>
+      <td>${escaparHtml(it.nombre)}</td>
+      <td class="et-item-detalle">${escaparHtml(it.detalle)}</td>
+    </tr>`;
+  }
 
   async function buscarItems() {
     const consulta = buscador.value.trim();
-    if (!consulta) { resultados.hidden = true; return; }
     try {
       const respuesta = await fetch(`${app.dataset.urlItems}?q=${encodeURIComponent(consulta)}`);
       const datos = await respuesta.json();
-      // Sin `small` ni `py-*`: el tamaño y el espaciado los fija el CSS del
-      // diseñador en rem, porque las clases de Bootstrap son relativas y acá
-      // se multiplicaban con lo heredado hasta dejar la letra ilegible.
-      const filas = datos.items.map((it) =>
-        `<button type="button" class="list-group-item list-group-item-action"
-           data-item="${it.id}" title="${escaparHtml(it.codigo)} — ${escaparHtml(it.nombre)}">
-           <strong>${escaparHtml(it.codigo)}</strong>
-           <span class="text-muted"> — ${escaparHtml(it.nombre)} · ${escaparHtml(it.detalle)}</span>
-         </button>`).join('');
+
+      if (!datos.items.length) {
+        cuerpoItems.innerHTML =
+          '<tr><td colspan="3" class="text-muted py-4 text-center">'
+          + 'Ninguna prenda coincide con la búsqueda.</td></tr>';
+        avisoItems.textContent = '';
+        return;
+      }
+
+      cuerpoItems.innerHTML = datos.items.map(filaItem).join('');
 
       // El servidor corta en 40. Si vinieron 40 justos es casi seguro que hay
       // más, y sin avisarlo el usuario cree que la prenda que busca no existe.
-      const hayMas = datos.items.length >= 40
-        ? `<div class="list-group-item et-mas-resultados text-muted">
-             Hay más resultados. Escribí un poco más para achicar la lista.
-           </div>`
-        : '';
+      avisoItems.textContent = datos.items.length >= 40
+        ? 'Se muestran las primeras 40. Escribí un poco más para achicar la lista.'
+        : `${datos.items.length} prenda${datos.items.length === 1 ? '' : 's'}.`;
 
-      resultados.innerHTML = filas
-        ? filas + hayMas
-        : '<div class="list-group-item text-muted">Ninguna prenda coincide.</div>';
-      resultados.hidden = false;
-      resultados.querySelectorAll('[data-item]').forEach((boton) => {
-        const item = datos.items.find((i) => String(i.id) === boton.dataset.item);
-        boton.addEventListener('click', () => elegirItem(item));
+      cuerpoItems.querySelectorAll('[data-item]').forEach((fila) => {
+        const item = datos.items.find((i) => String(i.id) === fila.dataset.item);
+        fila.addEventListener('click', () => elegirItem(item));
       });
     } catch (error) {
-      resultados.hidden = true;
+      cuerpoItems.innerHTML =
+        '<tr><td colspan="3" class="text-muted py-4 text-center">'
+        + 'No se pudo consultar el inventario.</td></tr>';
+      avisoItems.textContent = '';
     }
   }
 
   function elegirItem(item) {
     estado.itemId = item.id;
-    resultados.hidden = true;
+    if (modalItems) modalItems.hide();
     buscador.value = '';
     datosActuales = Object.assign({}, MUESTRA, item.datos || {
       codigo: item.codigo, prenda: item.nombre, subtitulo: item.detalle,

@@ -15,7 +15,7 @@
     height: calc(100vh - 4.5rem);
     min-height: 34rem;
     background: var(--surface);
-    position: relative;   /* ancla del desplegable de búsqueda de prendas */
+    position: relative;   /* ancla de las guías y overlays del lienzo */
   }
 
   /* ── Barra de herramientas ───────────────────────────────────────────────── */
@@ -222,71 +222,14 @@
     font-size: .75rem;
   }
 
-  /* ── Buscador de prendas ─────────────────────────────────────────────────
-     El fondo va explícito y no heredado: sin esto el desplegable se ve
-     transparente y las prendas quedan encima del lienzo, ilegibles.
-     El alto máximo es lo que evita que 40 resultados tapen media pantalla. */
-  #et-resultados {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    max-height: 15rem;
-    overflow-y: auto;
-    overflow-x: hidden;
-  }
-  /* El color va explícito junto con el fondo. Poner uno sin el otro es lo que
-     dejaba el texto oscuro sobre fondo oscuro cuando el sistema está en modo
-     noche: `--surface` sí cambia con el tema, pero el color heredado de
-     .list-group-item no. */
-  /* El tamaño va en rem y no en em, y pisa a la clase `small` de Bootstrap.
-     `small` es 0.875em: al ser relativo se MULTIPLICA por lo que herede el
-     desplegable, y terminaba con una letra mucho más chica que el resto de la
-     interfaz. En rem el tamaño es el mismo mire donde mire. */
-  #et-resultados .list-group-item {
-    background: var(--surface);
-    color: var(--text);
-    border-color: var(--border);
-    border-left: 0;
-    border-right: 0;
-    font-size: .875rem;
-    line-height: 1.4;
-    padding: .45rem .7rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  #et-resultados .list-group-item strong { font-weight: 600; }
-  #et-resultados .list-group-item .text-muted {
-    color: var(--text-muted) !important;
-    font-size: .8125rem;
-  }
-  #et-resultados .list-group-item:first-child { border-top: 0; }
-  #et-resultados .list-group-item:last-child { border-bottom: 0; }
-
-  /* El resaltado es un velo semitransparente del color primario y no
-     `--primary-light`: esa variable no se redefine en modo noche, así que
-     pintaba celeste claro debajo de un texto claro. Con alfa funciona sobre
-     cualquier fondo, sea claro u oscuro. */
-  #et-resultados .list-group-item-action:hover,
-  #et-resultados .list-group-item-action:focus {
-    background: rgba(37, 99, 235, .18);
-    color: var(--text);
-  }
-
-  /* Aviso de «hay más resultados», pegado abajo mientras se scrollea. */
-  #et-resultados .et-mas-resultados {
-    position: sticky;
-    bottom: 0;
-    background: var(--surface);
-    color: var(--text-muted);
-    border-top: 1px solid var(--border);
-    font-size: .8125rem;
-  }
-
-  /* El campo de búsqueda vive dentro de .et-estado, que achica todo a .75rem.
-     Se fija en rem para que el texto que se tipea y el de los resultados se
-     lean igual. */
-  #et-buscar-item { font-size: .875rem; }
+  /* ── Selector de prendas (modal) ─────────────────────────────────────────
+     Las filas son clicables enteras: apuntar a un enlace chico dentro de la
+     celda obliga a una puntería que acá no aporta nada. */
+  #et-tabla-items tbody tr { cursor: pointer; }
+  #et-tabla-items tbody tr:hover { background: rgba(37, 99, 235, .18); }
+  #et-tabla-items td { color: var(--text); }
+  #et-tabla-items .et-item-codigo { font-weight: 600; white-space: nowrap; }
+  #et-tabla-items .et-item-detalle { color: var(--text-muted); font-size: .8125rem; }
 
   @media (max-width: 992px) {
     .et-editor { height: auto; margin: -1rem; }
@@ -488,8 +431,9 @@
     <span id="et-posicion-estado"></span>
     <span class="ms-auto d-flex align-items-center gap-2">
       <span id="et-datos-estado">Datos de muestra</span>
-      <input type="text" class="form-control form-control-sm" id="et-buscar-item"
-             placeholder="Probar con una prenda real…" autocomplete="off" style="width:15rem">
+      <button type="button" class="btn btn-outline-secondary btn-sm" id="et-abrir-items">
+        <i data-lucide="search" style="width:.85rem;height:.85rem"></i>Elegir prenda…
+      </button>
       <label class="mb-0 d-flex align-items-center gap-1">
         Copias
         <input type="number" class="form-control form-control-sm" id="et-copias"
@@ -499,8 +443,6 @@
     </span>
   </div>
 
-  <div class="list-group position-absolute shadow" id="et-resultados"
-       style="z-index:1050;max-width:26rem;right:9rem;bottom:2.5rem" hidden></div>
 
 </div>
 
@@ -524,6 +466,57 @@
         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
         <button type="button" class="btn btn-primary" id="et-descargar-zpl">
           <i data-lucide="download"></i>Descargar .zpl
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Selector de prenda real para la vista previa.
+     Es un modal y no un desplegable flotante porque elegir entre decenas de
+     prendas es una tarea de lectura: necesita columnas alineadas y espacio.
+     Encima del lienzo, en una esquina, no se podía comparar una fila con otra. -->
+<div class="modal modal-blur fade" id="et-modal-items" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Probar el diseño con una prenda real</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+
+      <div class="modal-body pb-0">
+        <p class="text-muted small">
+          Los datos de la prenda que elijas reemplazan a los de muestra en la
+          vista previa. No cambia el diseño: sirve para ver cómo queda con
+          textos de largo real.
+        </p>
+        <div class="input-icon mb-2">
+          <span class="input-icon-addon"><i data-lucide="search"></i></span>
+          <input type="text" class="form-control" id="et-buscar-item"
+                 placeholder="Buscar por código, nombre, talla o color…"
+                 autocomplete="off">
+        </div>
+      </div>
+
+      <div class="modal-body pt-2">
+        <div class="table-responsive">
+          <table class="table table-hover table-vcenter card-table mb-0" id="et-tabla-items">
+            <thead>
+              <tr>
+                <th style="width:9rem">Código</th>
+                <th>Prenda</th>
+                <th style="width:11rem">Detalle</th>
+              </tr>
+            </thead>
+            <tbody id="et-items-cuerpo"></tbody>
+          </table>
+        </div>
+        <div class="text-muted small mt-2" id="et-items-aviso"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+          Cancelar
         </button>
       </div>
     </div>
