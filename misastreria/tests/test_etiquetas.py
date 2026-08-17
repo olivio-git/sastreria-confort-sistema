@@ -289,6 +289,62 @@ class RendererZplTests(TestCase):
             [{'tipo': 'texto', 'texto': 'HOLA'}], 400, 240, {}, config=config)
         self.assertLess(zpl.index('^MD5'), zpl.index('^FDHOLA'))
 
+    def test_sin_corrimiento_las_coordenadas_no_se_tocan(self):
+        config = ConfiguracionImpresora(desplazamiento_x=0, desplazamiento_y=0)
+        zpl = etiquetas_zpl.render(
+            [{'tipo': 'texto', 'x': 40, 'y': 60, 'texto': 'X'}],
+            400, 240, {}, config=config)
+        self.assertIn('^FO40,60', zpl)
+
+    def test_corrimiento_positivo_mueve_a_la_derecha_y_abajo(self):
+        """1 mm son ~8 puntos a 203 dpi, así que 2 mm mueven unos 16."""
+        config = ConfiguracionImpresora(
+            desplazamiento_x=Decimal('2'), desplazamiento_y=Decimal('2'))
+        self.assertEqual(config.desplazamiento_x_puntos, 16)
+        zpl = etiquetas_zpl.render(
+            [{'tipo': 'texto', 'x': 40, 'y': 60, 'texto': 'X'}],
+            400, 240, {}, config=config)
+        self.assertIn('^FO56,76', zpl)
+
+    def test_corrimiento_negativo_mueve_a_la_izquierda_y_arriba(self):
+        config = ConfiguracionImpresora(
+            desplazamiento_x=Decimal('-1'), desplazamiento_y=Decimal('-1'))
+        zpl = etiquetas_zpl.render(
+            [{'tipo': 'texto', 'x': 40, 'y': 60, 'texto': 'X'}],
+            400, 240, {}, config=config)
+        self.assertIn('^FO32,52', zpl)
+
+    def test_el_corrimiento_nunca_genera_coordenadas_negativas(self):
+        """^FO no admite negativos: la impresora descartaría el elemento."""
+        config = ConfiguracionImpresora(
+            desplazamiento_x=Decimal('-20'), desplazamiento_y=Decimal('-20'))
+        zpl = etiquetas_zpl.render(
+            [{'tipo': 'texto', 'x': 10, 'y': 10, 'texto': 'X'}],
+            400, 240, {}, config=config)
+        self.assertIn('^FO0,0', zpl)
+        self.assertNotIn('^FO-', zpl)
+
+    def test_tipo_de_papel_vacio_no_emite_mn(self):
+        """El default no toca la calibración que la impresora ya tiene."""
+        config = ConfiguracionImpresora(tipo_papel='')
+        zpl = etiquetas_zpl.render(self.elementos, 400, 240, self.datos,
+                                   config=config)
+        self.assertNotIn('^MN', zpl)
+
+    def test_tipo_de_papel_se_traduce_al_comando_correcto(self):
+        for tipo, esperado in (('gap', '^MNY'), ('continuo', '^MNN'),
+                               ('marca', '^MNM')):
+            with self.subTest(tipo=tipo):
+                config = ConfiguracionImpresora(tipo_papel=tipo)
+                zpl = etiquetas_zpl.render(self.elementos, 400, 240, self.datos,
+                                           config=config)
+                self.assertIn(esperado, zpl)
+
+    def test_el_comando_de_calibracion_es_de_control(self):
+        """Empieza con ~ y no va entre ^XA y ^XZ: se ejecuta al llegar."""
+        self.assertTrue(etiquetas_zpl.ZPL_CALIBRAR.startswith('~'))
+        self.assertNotIn('^XA', etiquetas_zpl.ZPL_CALIBRAR)
+
     def test_negrita_imprime_dos_veces_desplazado(self):
         elementos = [{'tipo': 'texto', 'x': 10, 'y': 10, 'texto': 'X', 'negrita': True}]
         zpl = etiquetas_zpl.render(elementos, 400, 240, {})

@@ -322,7 +322,10 @@ class Manejador(BaseHTTPRequestHandler):
             return
 
         zpl = self.rfile.read(largo).decode('utf-8', errors='replace')
-        if '^XA' not in zpl:
+        # Una etiqueta empieza con ^XA. Los comandos de control (calibrar el
+        # papel, por ejemplo) empiezan con ~ y no van entre ^XA y ^XZ, así que
+        # exigir ^XA los dejaría afuera.
+        if '^XA' not in zpl and not zpl.lstrip().startswith('~'):
             self._json(400, {'ok': False, 'error': 'Esto no parece una etiqueta.'})
             return
 
@@ -350,7 +353,8 @@ class Manejador(BaseHTTPRequestHandler):
         Estado.ultimo_error = ''
         self._json(200, {
             'ok': True,
-            'mensaje': f"{cuantas} etiqueta(s) enviada(s) a la impresora.",
+            'mensaje': (f"{cuantas} etiqueta(s) enviada(s) a la impresora."
+                        if cuantas else "Comando enviado a la impresora."),
         })
 
     def log_message(self, formato, *args):

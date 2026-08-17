@@ -112,6 +112,7 @@ urlpatterns = [
     path('etiquetas/calibrar/muestra/', views_etiquetas.etiqueta_demo_pdf, name='exportar_etiqueta_demo_pdf'),
     path('etiquetas/calibrar/fijar/', views_etiquetas.fijar_tamano, name='etiquetas_set_size'),
     path('etiquetas/calibrar/impresora/', views_etiquetas.fijar_impresora, name='etiquetas_set_impresora'),
+    path('etiquetas/calibrar/zpl/', views_etiquetas.zpl_calibracion, name='etiquetas_zpl_calibracion'),
     # Etiquetas — diseñador de plantillas
     path('etiquetas/', views_etiquetas.lista_plantillas, name='lista_plantillas'),
     path('etiquetas/disenador/', views_etiquetas.disenador, name='disenador_etiqueta'),

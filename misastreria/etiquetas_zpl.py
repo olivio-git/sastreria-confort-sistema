@@ -29,6 +29,15 @@ from . import etiquetas, etiquetas_qr, simbolos
 
 IMPRESORA = "SAT TT460 UE (203 dpi) (ZPL)"
 
+# Calibración del sensor de papel. La impresora hace avanzar un par de etiquetas
+# midiendo dónde está el espacio entre una y otra, y guarda el resultado. Es lo
+# mismo que se logra con la secuencia de botones del manual, pero sin tener que
+# acertarle a cuántos segundos hay que mantener apretado.
+#
+# `~` en vez de `^`: es un comando de control, se ejecuta al llegar y no forma
+# parte de una etiqueta, así que no va entre ^XA y ^XZ.
+ZPL_CALIBRAR = '~JC'
+
 _ALINEACION = {'izquierda': 'L', 'centro': 'C', 'derecha': 'R'}
 
 # Ancho medio de carácter de la fuente escalable ^A0, como fracción del ancho
@@ -209,7 +218,7 @@ def _ajustes_cabezal(config):
     """
     if config is None:
         return []
-    return [
+    partes = [
         # ^MT define si el cabezal imprime contra cinta o contra papel térmico.
         # En el modo equivocado sale casi invisible.
         f"^MT{'T' if config.usa_ribbon else 'D'}",
@@ -218,6 +227,24 @@ def _ajustes_cabezal(config):
         # ^PR: velocidad de impresión, arrastre y retroceso, en pulgadas/segundo.
         f'^PR{int(config.velocidad)},{int(config.velocidad)},{int(config.velocidad)}',
     ]
+
+    # ^MN le dice a la impresora cómo reconocer dónde termina cada etiqueta.
+    # Sólo se manda si el usuario lo eligió: declarar el tipo equivocado
+    # descalibra el arrastre y el rollo empieza a salir corrido.
+    tracking = {'gap': 'Y', 'continuo': 'N', 'marca': 'M'}.get(
+        getattr(config, 'tipo_papel', '') or '')
+    if tracking:
+        partes.append(f'^MN{tracking}')
+
+    return partes
+
+
+def _corrimiento(config):
+    """Cuánto correr el diseño, en puntos, para encuadrarlo con el rollo."""
+    if config is None:
+        return 0, 0
+    return (getattr(config, 'desplazamiento_x_puntos', 0) or 0,
+            getattr(config, 'desplazamiento_y_puntos', 0) or 0)
 
 
 def render(elementos, ancho=None, alto=None, datos=None, copias=1, config=None):
@@ -244,7 +271,19 @@ def render(elementos, ancho=None, alto=None, datos=None, copias=1, config=None):
         '^LH0,0',               # origen arriba a la izquierda
         '^CI28',                # entrada en UTF-8
     ]
+    dx, dy = _corrimiento(config)
     for el in etiquetas.normalizar(elementos, ancho):
+        if dx or dy:
+            # ^FO no admite coordenadas negativas: el borde de la etiqueta es el
+            # cero y no hay nada a la izquierda de eso. Un corrimiento hacia la
+            # izquierda mayor que el margen del elemento lo deja pegado al borde
+            # en vez de generar un ^FO inválido que la impresora descarta.
+            #
+            # Se corre una copia: `el` viene de normalizar() y no hay que asumir
+            # que sea descartable para el que llamó.
+            el = dict(el,
+                      x=max(0, el['x'] + dx),
+                      y=max(0, el['y'] + dy))
         comando = _elemento_a_zpl(el, ancho, datos)
         if comando:
             partes.append(comando)

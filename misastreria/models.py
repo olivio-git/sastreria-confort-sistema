@@ -1879,6 +1879,49 @@ class ConfiguracionImpresora(models.Model):
         help_text="Desmarcá sólo si el rollo es térmico directo y no lleva cinta.",
     )
 
+    # ── Encuadre ────────────────────────────────────────────────────────────
+    # Corregir el encuadre moviendo el rollo a mano es una pelea que se pierde:
+    # se desacomoda con cada cambio de rollo. Estos dos valores desplazan el
+    # diseño desde el software y quedan guardados.
+    #
+    # El desplazamiento se aplica a las coordenadas que generamos, y NO con los
+    # comandos ^LS/^LT de la impresora: el signo de esos comandos cambia entre
+    # firmwares, y acá hace falta que «2 mm a la derecha» sea siempre 2 mm a la
+    # derecha, sin que dependa del modelo.
+    desplazamiento_x = models.DecimalField(
+        max_digits=4, decimal_places=1, default=0,
+        validators=[MinValueValidator(-20), MaxValueValidator(20)],
+        verbose_name="Corrimiento horizontal (mm)",
+        help_text="Positivo mueve el diseño a la derecha; negativo, a la izquierda.",
+    )
+    desplazamiento_y = models.DecimalField(
+        max_digits=4, decimal_places=1, default=0,
+        validators=[MinValueValidator(-20), MaxValueValidator(20)],
+        verbose_name="Corrimiento vertical (mm)",
+        help_text="Positivo baja el diseño; negativo lo sube.",
+    )
+
+    # ── Tipo de papel ───────────────────────────────────────────────────────
+    # Vacío significa «no mandar ^MN y usar lo que la impresora tenga guardado»,
+    # que es como venía funcionando. Se declara sólo si el usuario lo elige,
+    # porque mandar el tipo equivocado descalibra el arrastre del rollo.
+    PAPEL_SIN_TOCAR = ''
+    PAPEL_SEPARADAS = 'gap'
+    PAPEL_CONTINUO = 'continuo'
+    PAPEL_MARCA = 'marca'
+    PAPEL_CHOICES = [
+        (PAPEL_SIN_TOCAR, 'No tocar (usar lo que tiene la impresora)'),
+        (PAPEL_SEPARADAS, 'Etiquetas separadas, con espacio entre una y otra'),
+        (PAPEL_CONTINUO, 'Papel continuo, sin cortes'),
+        (PAPEL_MARCA, 'Con marca negra en el reverso'),
+    ]
+    tipo_papel = models.CharField(
+        max_length=10, choices=PAPEL_CHOICES, blank=True, default=PAPEL_SIN_TOCAR,
+        verbose_name="Tipo de papel",
+        help_text="Sólo cambialo si la impresora no encuentra dónde termina "
+                  "cada etiqueta.",
+    )
+
     modificado = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -1887,7 +1930,18 @@ class ConfiguracionImpresora(models.Model):
 
     def __str__(self):
         modo = "cinta" if self.usa_ribbon else "térmica directa"
-        return f"Oscuridad {self.oscuridad:+d}, {self.velocidad} ips, {modo}"
+        texto = f"Oscuridad {self.oscuridad:+d}, {self.velocidad} ips, {modo}"
+        if self.desplazamiento_x or self.desplazamiento_y:
+            texto += f", corrido {self.desplazamiento_x:+g}/{self.desplazamiento_y:+g} mm"
+        return texto
+
+    @property
+    def desplazamiento_x_puntos(self):
+        return round(float(self.desplazamiento_x) * 203 / 25.4)
+
+    @property
+    def desplazamiento_y_puntos(self):
+        return round(float(self.desplazamiento_y) * 203 / 25.4)
 
     @classmethod
     def cargar(cls):

@@ -12,6 +12,7 @@ Las tres salidas que ofrece la pantalla, y por qué son tres:
 """
 
 import json
+from decimal import Decimal, InvalidOperation
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -572,6 +573,16 @@ def calibrar(request):
 
 
 @login_required
+def zpl_calibracion(request):
+    """El comando de calibración, para que el puente se lo mande a la impresora.
+
+    Va por acá y no escrito en el JavaScript para que el conocimiento de ZPL
+    siga viviendo en un solo lugar del código.
+    """
+    return JsonResponse({'ok': True, 'zpl': etiquetas_zpl.ZPL_CALIBRAR})
+
+
+@login_required
 @require_POST
 def fijar_impresora(request):
     """Guarda oscuridad, velocidad y tipo de papel del cabezal.
@@ -586,11 +597,14 @@ def fijar_impresora(request):
     try:
         config.oscuridad = int(request.POST.get('oscuridad') or 0)
         config.velocidad = int(request.POST.get('velocidad') or 4)
-    except (TypeError, ValueError):
-        messages.error(request, "Oscuridad y velocidad tienen que ser números.")
+        config.desplazamiento_x = Decimal(request.POST.get('desplazamiento_x') or '0')
+        config.desplazamiento_y = Decimal(request.POST.get('desplazamiento_y') or '0')
+    except (TypeError, ValueError, InvalidOperation):
+        messages.error(request, "Los ajustes tienen que ser números.")
         return redirect('etiquetas_calibrar')
 
     config.usa_ribbon = bool(request.POST.get('usa_ribbon'))
+    config.tipo_papel = (request.POST.get('tipo_papel') or '').strip()
 
     try:
         config.full_clean()
