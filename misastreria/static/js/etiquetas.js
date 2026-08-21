@@ -2080,24 +2080,16 @@
   });
 
   // El puente de impresión corre en la PC del taller y es el único que puede
-  // tocar el USB de la impresora. Ver puente_impresion/README.md.
-  const PUENTE = 'http://127.0.0.1:9101';
+  // tocar el USB de la impresora. El cliente vive en etiquetas_puente.js porque
+  // también lo usa la pantalla suelta de ajustes. Ver puente_impresion/README.md.
+  const imprimirPorPuente = window.PuenteImpresion.imprimir;
 
-  async function imprimirPorPuente(zpl) {
-    // El timeout corto es a propósito: si el puente no está levantado, el
-    // fetch a una dirección local falla enseguida, y no tiene sentido dejar al
-    // usuario esperando antes de pasar al plan B.
-    const corte = AbortSignal.timeout(4000);
-    const respuesta = await fetch(`${PUENTE}/imprimir`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-      body: zpl,
-      signal: corte,
-    });
-    return respuesta.json();
-  }
-
-  document.getElementById('et-imprimir').addEventListener('click', async () => {
+  /* Manda a imprimir lo que hay AHORA en el lienzo, guardado o no.
+   *
+   * Tres intentos en orden: el servidor arma el ZPL, el puente lo tira al USB
+   * y, si no hay puente, se prueba que imprima el propio Django (sólo sirve
+   * cuando corre en la misma PC que la impresora). */
+  async function imprimirLienzo() {
     // Paso 1: el ZPL siempre lo arma el servidor, que es donde vive la plantilla
     // y la configuración del cabezal. El puente sólo lo reenvía al USB.
     const respuesta = await fetch(app.dataset.urlZpl,
@@ -2135,6 +2127,86 @@
 
     avisar('No se encontró el puente de impresión. Verificá que esté corriendo '
            + 'en esta PC, o usá «Descargar ZPL» para imprimir a mano.', 'warning');
+  }
+
+  document.getElementById('et-imprimir').addEventListener('click', imprimirLienzo);
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Ajustes de la impresora
+  //
+  // Encontrar la oscuridad y el encuadre correctos es prueba y error contra el
+  // rollo: tocar un número, imprimir, mirar, corregir. Por eso el modal guarda
+  // por fetch y NO recarga: una recarga acá se llevaría puesto el diseño sin
+  // guardar, y con eso el ciclo entero deja de valer la pena.
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const modalImpresora = document.getElementById('et-modal-impresora');
+  const estadoImpresora = document.getElementById('et-impresora-estado');
+
+  function avisarImpresora(texto, clase) {
+    estadoImpresora.textContent = texto;
+    estadoImpresora.className = `small text-${clase}`;
+  }
+
+  document.getElementById('et-abrir-impresora').addEventListener('click', () => {
+    avisarImpresora('', 'muted');
+    new bootstrap.Modal(modalImpresora).show();
+  });
+
+  /* Guarda los ajustes del cabezal. Devuelve si salió bien, para que
+     «Guardar e imprimir» no imprima con valores que no llegaron a guardarse. */
+  async function guardarImpresora() {
+    const campos = new FormData();
+    campos.append('oscuridad', document.getElementById('et-oscuridad').value);
+    campos.append('velocidad', document.getElementById('et-velocidad').value);
+    campos.append('desplazamiento_x', document.getElementById('et-desp-x').value);
+    campos.append('desplazamiento_y', document.getElementById('et-desp-y').value);
+    campos.append('tipo_papel', document.getElementById('et-tipo-papel').value);
+    // Un checkbox destildado no viaja: el servidor lee la ausencia como «no».
+    if (document.getElementById('et-usa-ribbon').checked) {
+      campos.append('usa_ribbon', 'on');
+    }
+
+    let datos;
+    try {
+      const respuesta = await fetch(app.dataset.urlImpresora, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrf, 'X-Requested-With': 'XMLHttpRequest' },
+        body: campos,
+      });
+      datos = await respuesta.json();
+    } catch (error) {
+      avisarImpresora('No se pudo hablar con el servidor.', 'danger');
+      return false;
+    }
+
+    avisarImpresora(datos.ok ? 'Ajustes guardados.' : datos.error,
+                    datos.ok ? 'success' : 'danger');
+    return !!datos.ok;
+  }
+
+  document.getElementById('et-guardar-impresora')
+    .addEventListener('click', guardarImpresora);
+
+  document.getElementById('et-probar-impresora').addEventListener('click', async (evento) => {
+    const boton = evento.currentTarget;
+    boton.disabled = true;
+    avisarImpresora('Guardando e imprimiendo…', 'muted');
+    // El modal queda abierto a propósito: el usuario mira la etiqueta que sale
+    // y corrige el número ahí mismo, sin volver a abrir nada.
+    if (await guardarImpresora()) await imprimirLienzo();
+    boton.disabled = false;
+  });
+
+  document.getElementById('et-calibrar-impresora').addEventListener('click', async (evento) => {
+    const boton = evento.currentTarget;
+    boton.disabled = true;
+    avisarImpresora('Calibrando…', 'muted');
+
+    const salida = await window.PuenteImpresion.calibrar(app.dataset.urlCalibrar);
+    avisarImpresora(salida.mensaje, salida.ok ? 'success' : 'danger');
+
+    boton.disabled = false;
   });
 
   window.addEventListener('beforeunload', (evento) => {

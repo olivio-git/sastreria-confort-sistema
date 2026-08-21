@@ -40,14 +40,7 @@
           </span>
         </div>
         {% endif %}
-        {% if messages %}
-          {% for message in messages %}
-          <div class="alert alert-{% if message.tags == 'success' %}success{% elif message.tags == 'error' %}danger{% else %}{{ message.tags }}{% endif %} alert-dismissible fade show mb-3" role="alert">
-            {{ message }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-          </div>
-          {% endfor %}
-        {% endif %}
+        {% include 'misastreria/_partials/mensajes.html' %}
         {% block contenido %}{% endblock %}
       </div>
     </div>

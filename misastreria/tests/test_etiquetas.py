@@ -7,6 +7,7 @@ a la prenda y la pistola que no la lee.
 """
 
 import json
+import re
 from decimal import Decimal
 
 from django.test import TestCase
@@ -891,3 +892,153 @@ class VistasEtiquetasTests(TestCase):
         otra.refresh_from_db()
         self.assertTrue(otra.es_predeterminada)
         self.assertFalse(PlantillaEtiqueta.objects.filter(pk=self.plantilla.pk).exists())
+
+    # ── Ajustes de impresora ─────────────────────────────────────────────────
+
+    AJUSTES_VALIDOS = {
+        'oscuridad': '8',
+        'velocidad': '3',
+        'usa_ribbon': 'on',
+        'desplazamiento_x': '1.5',
+        'desplazamiento_y': '-2',
+        'tipo_papel': '',
+    }
+
+    def test_el_disenador_trae_los_ajustes_de_impresora(self):
+        """El modal se pinta con los valores guardados, no con los del modelo."""
+        config = ConfiguracionImpresora.cargar()
+        config.oscuridad = 17
+        config.save()
+
+        respuesta = self.client.get(
+            reverse('editar_plantilla', args=[self.plantilla.pk])
+        )
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertContains(respuesta, 'et-modal-impresora')
+        self.assertContains(
+            respuesta,
+            '<input type="number" class="form-control" id="et-oscuridad" '
+            'name="oscuridad" min="-30" max="30" step="1" value="17">',
+            html=True,
+        )
+
+    def test_guardar_ajustes_por_formulario_sigue_redirigiendo(self):
+        respuesta = self.client.post(
+            reverse('etiquetas_set_impresora'), self.AJUSTES_VALIDOS
+        )
+        self.assertRedirects(respuesta, reverse('etiquetas_calibrar'))
+        self.assertEqual(ConfiguracionImpresora.cargar().oscuridad, 8)
+
+    def test_guardar_ajustes_por_ajax_responde_json_y_no_redirige(self):
+        """El modal del diseñador no puede recargar: se llevaría el diseño."""
+        respuesta = self.client.post(
+            reverse('etiquetas_set_impresora'), self.AJUSTES_VALIDOS,
+            headers={'x-requested-with': 'XMLHttpRequest'},
+        )
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertTrue(respuesta.json()['ok'])
+
+        config = ConfiguracionImpresora.cargar()
+        self.assertEqual(config.oscuridad, 8)
+        self.assertEqual(config.velocidad, 3)
+        self.assertEqual(float(config.desplazamiento_y), -2.0)
+
+    def test_ajustes_invalidos_por_ajax_devuelven_error_sin_guardar(self):
+        datos = dict(self.AJUSTES_VALIDOS, oscuridad='999')
+        respuesta = self.client.post(
+            reverse('etiquetas_set_impresora'), datos,
+            headers={'x-requested-with': 'XMLHttpRequest'},
+        )
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertFalse(respuesta.json()['ok'])
+        self.assertEqual(ConfiguracionImpresora.cargar().oscuridad, 0)
+
+    def test_ajustes_no_numericos_por_ajax_no_revientan(self):
+        datos = dict(self.AJUSTES_VALIDOS, velocidad='rapido')
+        respuesta = self.client.post(
+            reverse('etiquetas_set_impresora'), datos,
+            headers={'x-requested-with': 'XMLHttpRequest'},
+        )
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertIn('números', respuesta.json()['error'])
+
+    def test_destildar_la_cinta_por_ajax_la_apaga(self):
+        """El checkbox destildado no viaja: la ausencia tiene que leerse como no."""
+        datos = dict(self.AJUSTES_VALIDOS)
+        del datos['usa_ribbon']
+        self.client.post(
+            reverse('etiquetas_set_impresora'), datos,
+            headers={'x-requested-with': 'XMLHttpRequest'},
+        )
+        self.assertFalse(ConfiguracionImpresora.cargar().usa_ribbon)
+
+
+class MuestraPorPlantillaTests(TestCase):
+    """El botón «Ver muestra en PDF» de cada fila del listado.
+
+    Estuvo roto en dos capas a la vez: el enlace no mandaba el id de la fila, y
+    `_pdf` renderizaba siempre con `PlantillaEtiqueta.predeterminada()`. El
+    resultado era que las tres filas abrían la misma etiqueta, y el usuario veía
+    el diseño de ejemplo del sistema en vez del que acababa de editar.
+    """
+
+    def setUp(self):
+        self.usuario = make_user()
+        self.client.force_login(self.usuario)
+        self.predeterminada = PlantillaEtiqueta.predeterminada()
+        self.predeterminada.es_predeterminada = True
+        self.predeterminada.ancho_puntos = 400
+        self.predeterminada.alto_puntos = 240
+        self.predeterminada.save()
+        # Medidas bien distintas: es lo que hace visible en el PDF si se
+        # renderizó la plantilla equivocada.
+        self.otra = PlantillaEtiqueta.objects.create(
+            nombre='Etiqueta angosta',
+            elementos=[],
+            ancho_puntos=200,
+            alto_puntos=800,
+        )
+
+    def _media_box(self, respuesta):
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta['Content-Type'], 'application/pdf')
+        caja = re.search(rb'/MediaBox\s*\[([^\]]*)\]', respuesta.content)
+        self.assertIsNotNone(caja, 'el PDF no declara MediaBox')
+        return caja.group(1).split()
+
+    def test_cada_fila_del_listado_enlaza_a_su_propia_plantilla(self):
+        html = self.client.get(reverse('lista_plantillas')).content.decode()
+        for plantilla in (self.predeterminada, self.otra):
+            self.assertIn(
+                reverse('muestra_plantilla_pdf', kwargs={'id': plantilla.pk}),
+                html,
+            )
+
+    def test_la_muestra_usa_la_plantilla_pedida_y_no_la_predeterminada(self):
+        propia = self._media_box(
+            self.client.get(reverse('muestra_plantilla_pdf', kwargs={'id': self.otra.pk}))
+        )
+        defecto = self._media_box(
+            self.client.get(reverse('muestra_plantilla_pdf', kwargs={'id': self.predeterminada.pk}))
+        )
+        self.assertNotEqual(propia, defecto)
+
+    def test_la_calibracion_sigue_usando_la_predeterminada(self):
+        # Sin id el comportamiento no cambia: la pantalla de calibración compara
+        # el diseño ACTIVO contra el rollo, no uno elegido a mano.
+        sin_id = self._media_box(self.client.get(reverse('exportar_etiqueta_demo_pdf')))
+        con_id = self._media_box(
+            self.client.get(reverse('muestra_plantilla_pdf', kwargs={'id': self.predeterminada.pk}))
+        )
+        self.assertEqual(sin_id, con_id)
+
+    def test_plantilla_inexistente_da_404(self):
+        respuesta = self.client.get(reverse('muestra_plantilla_pdf', kwargs={'id': 999999}))
+        self.assertEqual(respuesta.status_code, 404)
+
+    def test_pide_login(self):
+        self.client.logout()
+        respuesta = self.client.get(
+            reverse('muestra_plantilla_pdf', kwargs={'id': self.otra.pk})
+        )
+        self.assertEqual(respuesta.status_code, 302)

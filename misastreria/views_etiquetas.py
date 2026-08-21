@@ -235,6 +235,7 @@ def disenador(request, id=None):
         'ancho': ancho,
         'alto': alto,
         'impresora': etiquetas_zpl.IMPRESORA,
+        'config': ConfiguracionImpresora.cargar(),
     })
 
 
@@ -466,9 +467,16 @@ def _plantilla_activa():
     return plantilla
 
 
-def _pdf(lote, nombre_archivo):
-    """Genera el PDF de un lote con la plantilla predeterminada."""
-    plantilla = _plantilla_activa()
+def _pdf(lote, nombre_archivo, plantilla=None):
+    """Genera el PDF de un lote.
+
+    Sin `plantilla` usa la predeterminada, que es lo correcto para las
+    etiquetas reales del sistema: se imprimen con el diseño activo, no con uno
+    elegido a mano. Se pasa explícita solo para previsualizar UNA plantilla
+    concreta desde el listado.
+    """
+    if plantilla is None:
+        plantilla = _plantilla_activa()
     pdf = etiquetas_pdf.render(
         plantilla.elementos,
         ancho=plantilla.ancho_puntos,
@@ -547,10 +555,19 @@ def etiqueta_confeccion_pdf(request, id):
 
 
 @login_required
-def etiqueta_demo_pdf(request):
-    """Etiqueta de muestra con datos ficticios, para calibrar contra el rollo."""
+def etiqueta_demo_pdf(request, id=None):
+    """Etiqueta de muestra con datos ficticios.
+
+    Con `id` previsualiza ESA plantilla — es el botón "Ver muestra" de cada
+    fila del listado, donde lo que se quiere ver es el diseño de esa fila.
+    Sin `id` usa la predeterminada, que es lo que necesita la pantalla de
+    calibración: ahí se compara el diseño activo contra el rollo físico.
+    """
+    plantilla = None
+    if id is not None:
+        plantilla = get_object_or_404(PlantillaEtiqueta, pk=id)
     try:
-        return _pdf([etiquetas.datos_muestra()], "etiqueta_muestra.pdf")
+        return _pdf([etiquetas.datos_muestra()], "etiqueta_muestra.pdf", plantilla)
     except SinPlantilla:
         return _sin_plantilla(request)
 
@@ -583,13 +600,22 @@ def zpl_calibracion(request):
 @login_required
 @require_POST
 def fijar_impresora(request):
-    """Guarda oscuridad, velocidad y tipo de papel del cabezal.
+    """Guarda oscuridad, velocidad, encuadre y tipo de papel del cabezal.
 
-    Vive en la pantalla de calibración porque encontrar estos valores es el
-    mismo trabajo que encontrar el tamaño: imprimir, mirar el resultado, y
-    corregir. Que haya que hacer un deploy para probar otra oscuridad sería
-    garantía de que nadie lo ajuste nunca.
+    Se llama desde dos lados: la pantalla suelta de impresora, que postea un
+    formulario normal y espera un redirect, y el modal del diseñador, que
+    postea por fetch. El modal NO puede recargar la página: se llevaría puesto
+    el diseño que el usuario todavía no guardó. Por eso, cuando el pedido viene
+    por AJAX, se contesta JSON y la pantalla se queda donde está.
     """
+    ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+
+    def fallar(mensaje):
+        if ajax:
+            return JsonResponse({'ok': False, 'error': mensaje}, status=400)
+        messages.error(request, mensaje)
+        return redirect('etiquetas_calibrar')
+
     config = ConfiguracionImpresora.cargar()
 
     try:
@@ -598,8 +624,7 @@ def fijar_impresora(request):
         config.desplazamiento_x = Decimal(request.POST.get('desplazamiento_x') or '0')
         config.desplazamiento_y = Decimal(request.POST.get('desplazamiento_y') or '0')
     except (TypeError, ValueError, InvalidOperation):
-        messages.error(request, "Los ajustes tienen que ser números.")
-        return redirect('etiquetas_calibrar')
+        return fallar("Los ajustes tienen que ser números.")
 
     config.usa_ribbon = bool(request.POST.get('usa_ribbon'))
     config.tipo_papel = (request.POST.get('tipo_papel') or '').strip()
@@ -607,15 +632,16 @@ def fijar_impresora(request):
     try:
         config.full_clean()
     except ValidationError as exc:
-        messages.error(request, ' '.join(
+        return fallar(' '.join(
             f"{campo}: {' '.join(errores)}"
             for campo, errores in exc.message_dict.items()
         ))
-        return redirect('etiquetas_calibrar')
 
     config.save()
-    messages.success(
-        request,
-        f"Impresora ajustada: {config}. Imprimí una muestra para ver cómo quedó."
-    )
+    mensaje = f"Impresora ajustada: {config}. Imprimí una muestra para ver cómo quedó."
+
+    if ajax:
+        return JsonResponse({'ok': True, 'mensaje': mensaje})
+
+    messages.success(request, mensaje)
     return redirect('etiquetas_calibrar')

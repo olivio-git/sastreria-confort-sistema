@@ -551,3 +551,87 @@ svg.lucide { flex-shrink: 0; vertical-align: middle; }
 .topbar-moon { display: inline; }
 [data-bs-theme="dark"] .topbar-sun  { display: inline; }
 [data-bs-theme="dark"] .topbar-moon { display: none; }
+
+/* ============================================================
+   Alertas — parche a un typo de Tabler 1.0.0-beta20
+   ============================================================ */
+
+/* Tabler redeclara `.alert` al final de su hoja, DESPUÉS de todas las
+   variantes, y ahí escribe:
+
+       --tblr-alert-bg: var(--tblr-surface);
+
+   Ese token no existe: el suyo se llama `--tblr-bg-surface`. Una `var()` sin
+   definir invalida la propiedad entera, `background-color` cae a su valor
+   inicial —transparent— y toda alerta del sistema queda sin fondo.
+
+   La misma regla pisa `--tblr-alert-color` con `var(--tblr-secondary)`, así
+   que además todas las alertas salían del mismo gris: ni el rojo del danger
+   ni el verde del success llegaban al texto ni al borde izquierdo.
+
+   Se arregla en dos pasos, sin tocar la hoja de Tabler:                     */
+
+/* 1. Definir el token que le falta. Apunta al que Tabler sí define, que ya
+      cambia solo entre claro y oscuro. */
+:root { --tblr-surface: var(--tblr-bg-surface); }
+
+/* 2. Devolverle a cada variante su color. main.css carga después de Tabler,
+      así que estas reglas ganan sobre la `.alert` tardía. El color viaja al
+      texto y al borde izquierdo de 4px, que es el diseño que Tabler quería. */
+.alert-primary   { --tblr-alert-color: var(--tblr-primary-text-emphasis); }
+.alert-secondary { --tblr-alert-color: var(--tblr-secondary-text-emphasis); }
+.alert-success   { --tblr-alert-color: var(--tblr-success-text-emphasis); }
+.alert-info      { --tblr-alert-color: var(--tblr-info-text-emphasis); }
+.alert-warning   { --tblr-alert-color: var(--tblr-warning-text-emphasis); }
+.alert-danger    { --tblr-alert-color: var(--tblr-danger-text-emphasis); }
+
+/* Un toque de tinte para que la alerta se despegue del fondo de la página:
+   sobre una card blanca, un fondo blanco con sólo el borde izquierdo pasa
+   desapercibido. */
+.alert-primary   { background-color: var(--tblr-primary-bg-subtle); }
+.alert-secondary { background-color: var(--tblr-secondary-bg-subtle); }
+.alert-success   { background-color: var(--tblr-success-bg-subtle); }
+.alert-info      { background-color: var(--tblr-info-bg-subtle); }
+.alert-warning   { background-color: var(--tblr-warning-bg-subtle); }
+.alert-danger    { background-color: var(--tblr-danger-bg-subtle); }
+
+/* ============================================================
+   Escaneo de etiquetas (pistola HID)
+   ============================================================ */
+
+/* Un input normal con un ícono de escaneo. El ícono ya dice qué es; el
+   placeholder dice qué hacer. Nada más hace falta. */
+.scan-bar .input-group { max-width: 380px; }
+.scan-bar input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 .2rem rgba(37, 99, 235, .18);
+}
+.scan-bar .input-group-text svg.lucide { width: 1rem; height: 1rem; }
+
+/* El renglón de resultado: qué prenda entró, o por qué no entró. Esto sí es
+   información, y es lo único que el operador necesita leer. */
+.scan-msg {
+  font-size: .82rem;
+  font-weight: 600;
+  min-height: 1.2em;
+  margin-top: .35rem;
+}
+.scan-msg-ok    { color: #059669; }
+.scan-msg-error { color: #dc2626; }
+
+/* Destello de la fila recién escaneada: dura poco y se apaga sola, para que
+   quede claro CUÁL fila entró cuando la tabla ya tiene diez. */
+@keyframes scan-hit-flash {
+  from { background-color: rgba(16, 185, 129, .35); }
+  to   { background-color: transparent; }
+}
+.scan-hit > td { animation: scan-hit-flash 1.2s ease-out; }
+
+/* Fila ya verificada en salida/devolución de alquiler. */
+.scan-verificada > td { background-color: rgba(16, 185, 129, .10); }
+.scan-check { width: 2rem; text-align: center; }
+.scan-check svg.lucide { width: 1.05rem; height: 1.05rem; }
+
+[data-bs-theme="dark"] .scan-msg-ok    { color: #34d399; }
+[data-bs-theme="dark"] .scan-msg-error { color: #f87171; }
+[data-bs-theme="dark"] .scan-verificada > td { background-color: rgba(16, 185, 129, .16); }

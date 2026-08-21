@@ -18,7 +18,7 @@
 
 {% block contenido %}
 <div class="row justify-content-center">
-  <div class="col-12 col-sm-9 col-md-6 col-lg-5">
+  <div class="col-12 col-sm-11 col-md-9 col-lg-7">
     <div class="card card-md">
       <div class="card-status-top bg-success"></div>
       <div class="card-header">
@@ -29,10 +29,14 @@
       </div>
       <div class="card-body">
         <p class="text-muted mb-3">Se restaurarán las siguientes prendas a disponible:</p>
+
+        {% include 'misastreria/_partials/scan_bar.html' with scan_placeholder='Escaneá cada prenda que vuelve…' scan_contador=True %}
+
         <div class="table-responsive">
           <table class="table table-vcenter card-table table-sm mb-0">
             <thead>
               <tr>
+                <th class="scan-check"></th>
                 <th>Código item</th>
                 <th>Prenda</th>
                 <th>Condición actual</th>
@@ -41,7 +45,8 @@
             </thead>
             <tbody>
               {% for item in alquiler.items.all %}
-              <tr>
+              <tr class="scan-fila" data-codigo="{{ item.prenda_item.codigo_item }}">
+                <td class="scan-check"></td>
                 <td><code>{{ item.prenda_item.codigo_item }}</code></td>
                 <td>{{ item.prenda_item.prenda.nombre }}</td>
                 <td>{{ item.prenda_item.get_condicion_display }}</td>
@@ -49,7 +54,7 @@
               </tr>
               {% empty %}
               <tr>
-                <td colspan="4" class="text-muted text-center py-2">Sin prendas registradas.</td>
+                <td colspan="5" class="text-muted text-center py-2">Sin prendas registradas.</td>
               </tr>
               {% endfor %}
             </tbody>
@@ -100,4 +105,18 @@
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Escaneo de verificación en la ENTRADA. Escanear cada prenda que vuelve es lo
+// que evita cerrar el alquiler con una prenda todavía en la casa del cliente.
+window.initScanVerify({
+  input:    document.getElementById('scanInput'),
+  msg:      document.getElementById('scanMsg'),
+  contador: document.getElementById('scanContador'),
+  filas:    document.querySelectorAll('tr.scan-fila'),
+  form:     document.getElementById('form-devolver'),
+});
+</script>
 {% endblock %}

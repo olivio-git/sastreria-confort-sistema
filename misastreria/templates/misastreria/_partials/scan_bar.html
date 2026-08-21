@@ -1,0 +1,14 @@
+{% comment %}
+Barra de escaneo. IDs fijos (scanInput / scanMsg / scanContador): nunca hay más
+de una por pantalla. Parámetros: scan_placeholder, scan_contador (bool).
+{% endcomment %}
+<div class="scan-bar mb-3">
+  <div class="input-group">
+    <span class="input-group-text"><i data-lucide="scan-line"></i></span>
+    <input type="text" id="scanInput" class="form-control"
+           placeholder="{{ scan_placeholder|default:'Escaneá la etiqueta…' }}"
+           autocomplete="off" spellcheck="false" autocapitalize="off">
+    {% if scan_contador %}<span class="input-group-text" id="scanContador"></span>{% endif %}
+  </div>
+  <div class="scan-msg" id="scanMsg"></div>
+</div>

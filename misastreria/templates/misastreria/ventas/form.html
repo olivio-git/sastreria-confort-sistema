@@ -84,6 +84,8 @@
       </div>
     </div>
     <div class="card-body">
+      {% include 'misastreria/_partials/scan_bar.html' with scan_placeholder='Escaneá la etiqueta de la prenda…' %}
+
       <div class="table-responsive">
         <table class="table" id="tablaItems">
           <thead>
@@ -175,6 +177,8 @@
       <div style="position:relative">
         <input type="text" class="form-control item-articulo-text" placeholder="Buscar item por código…" autocomplete="off">
         <input type="hidden" name="item_prenda_item" class="item-articulo">
+        {# Conjunto que trajo la fila. Vacío = prenda suelta. Alimenta el badge "Conjunto N". #}
+        <input type="hidden" name="item_grupo_conjunto" class="item-grupo">
       </div>
     </td>
     <td><input type="number" name="item_precio" class="form-control item-precio" step="0.01" min="0" placeholder="0.00"></td>
@@ -288,7 +292,11 @@ function addPagoRow() {
   recalcPago();
 }
 
-function addRow(prendaItemId, precio, tipoRepId, tipoRepNombre, precioRep, empleadoId, montoComision) {
+// opts = { grupo, tipoRepId, tipoRepNombre, precioRep, empleadoId, montoComision }
+// Objeto y no posicionales: eran siete, y pasar el grupo en la posición
+// equivocada — la de tipoRepId — es exactamente cómo se rompió esto antes.
+function addRow(prendaItemId, precio, opts) {
+  opts = opts || {};
   const tmpl      = document.getElementById('itemRowTemplate');
   const row       = tmpl.content.cloneNode(true).querySelector('tr');
   const textInput = row.querySelector('.item-articulo-text');
@@ -297,6 +305,7 @@ function addRow(prendaItemId, precio, tipoRepId, tipoRepNombre, precioRep, emple
   const repId     = row.querySelector('.item-rep-id');
   const empSelect = row.querySelector('.item-empleado');
   const montoInput = row.querySelector('.item-monto-comision');
+  const grupoInput = row.querySelector('.item-grupo');
 
   EMPLEADOS.forEach(function(e) {
     const opt = document.createElement('option');
@@ -305,12 +314,15 @@ function addRow(prendaItemId, precio, tipoRepId, tipoRepNombre, precioRep, emple
     empSelect.appendChild(opt);
   });
 
-  if (prendaItemId) hiddenInput.value = prendaItemId;
-  if (precio)       row.querySelector('.item-precio').value = parseFloat(precio).toFixed(2);
-  if (tipoRepId)    { repId.value = tipoRepId; repText.value = tipoRepNombre || ''; }
-  if (precioRep)    row.querySelector('.item-precio-rep').value = parseFloat(precioRep).toFixed(2);
-  if (empleadoId)   empSelect.value = empleadoId;
-  if (montoComision != null && montoComision !== '') montoInput.value = parseFloat(montoComision).toFixed(2);
+  if (prendaItemId)   hiddenInput.value = prendaItemId;
+  if (precio)         row.querySelector('.item-precio').value = parseFloat(precio).toFixed(2);
+  if (opts.grupo)     grupoInput.value = opts.grupo;
+  if (opts.tipoRepId) { repId.value = opts.tipoRepId; repText.value = opts.tipoRepNombre || ''; }
+  if (opts.precioRep) row.querySelector('.item-precio-rep').value = parseFloat(opts.precioRep).toFixed(2);
+  if (opts.empleadoId) empSelect.value = opts.empleadoId;
+  if (opts.montoComision != null && opts.montoComision !== '') {
+    montoInput.value = parseFloat(opts.montoComision).toFixed(2);
+  }
 
   window.makePrendaFlyoutCombobox(textInput, hiddenInput, PRENDAS);
   window.makeLocalCombobox(repText, repId, TIPOS_REPARACION);
@@ -344,7 +356,14 @@ function addRow(prendaItemId, precio, tipoRepId, tipoRepNombre, precioRep, emple
 if (ITEMS_INICIALES.length > 0) {
   ITEMS_INICIALES.forEach(function(item) {
     const tr = TIPOS_REPARACION.find(t => t.id === item.tipo_reparacion_id);
-    addRow(item.prenda_item_id, item.precio_unitario, item.tipo_reparacion_id, tr ? tr.nombre : '', item.precio_reparacion, item.empleado_id, item.monto_comision);
+    addRow(item.prenda_item_id, item.precio_unitario, {
+      grupo:         item.grupo_conjunto,
+      tipoRepId:     item.tipo_reparacion_id,
+      tipoRepNombre: tr ? tr.nombre : '',
+      precioRep:     item.precio_reparacion,
+      empleadoId:    item.empleado_id,
+      montoComision: item.monto_comision,
+    });
   });
 } else {
   addRow();
@@ -353,15 +372,41 @@ if (ITEMS_INICIALES.length > 0) {
 document.getElementById('btnAgregarItem').addEventListener('click', () => addRow());
 descInput.addEventListener('input', calcTotales);
 
+// Escaneo con pistola. La carga manual de arriba sigue intacta: esto solo
+// agrega otra forma de llenar la misma tabla.
+window.initScanToAdd({
+  input:     document.getElementById('scanInput'),
+  msg:       document.getElementById('scanMsg'),
+  tbody:     tbody,
+  addRow:    addRow,
+  PRENDAS:   PRENDAS,
+  endpoint:  '{% url "escanear_prenda_item" %}',
+  contexto:  'venta',
+  precioDe:  function(p) { return p.precio; },
+});
+
 const addPagoBtn = document.getElementById('add-pago-btn');
 if (addPagoBtn) {
   addPagoBtn.addEventListener('click', addPagoRow);
   addPagoRow();  // una fila por defecto
 }
 
+
+// Número para la próxima tanda de conjunto. Se calcula sobre la tabla y no con
+// un contador en memoria: al editar, las filas ya vienen con grupos asignados
+// desde el servidor, y un contador que arranca en 0 los pisaría.
+function nextGrupo() {
+  var max = 0;
+  tbody.querySelectorAll('[name="item_grupo_conjunto"]').forEach(function(h) {
+    var n = parseInt(h.value, 10);
+    if (!isNaN(n) && n > max) max = n;
+  });
+  return max + 1;
+}
+
 window.initConjuntoModal('modalConjuntos', CONJUNTOS, function(conjunto, slotsIncluidos) {
   const result = window.addConjuntoToForm(conjunto, slotsIncluidos, {
-    PRENDAS: PRENDAS, tbody: tbody, addRow: addRow,
+    PRENDAS: PRENDAS, tbody: tbody, addRow: addRow, nextGrupo: nextGrupo,
   });
   if (result.faltantes.length > 0) {
     alert('Conjunto agregado. Sin existencias: ' + result.faltantes.join(', '));

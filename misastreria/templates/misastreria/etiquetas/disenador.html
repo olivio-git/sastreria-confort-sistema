@@ -260,6 +260,9 @@
      data-url-zpl-descargar="{% url 'descargar_zpl_etiqueta' %}"
      data-url-imprimir="{% url 'imprimir_etiqueta' %}"
      data-url-items="{% url 'buscar_items_etiqueta' %}"
+     data-url-impresora="{% url 'etiquetas_set_impresora' %}"
+     data-url-calibrar="{% url 'etiquetas_zpl_calibracion' %}"
+     data-url-muestra="{% url 'exportar_etiqueta_demo_pdf' %}"
      data-url-simbolo="{% url 'simbolo_etiqueta' 'CLAVE' %}">
   {% csrf_token %}
 
@@ -290,6 +293,10 @@
         </button>
         <button type="button" class="btn btn-sm btn-outline-secondary" id="et-ver-zpl">
           <i data-lucide="code"></i>ZPL
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="et-abrir-impresora"
+                title="Oscuridad, encuadre y calibración del rollo">
+          <i data-lucide="settings-2"></i>Impresora
         </button>
         <button type="button" class="btn btn-sm btn-outline-primary" id="et-imprimir">
           <i data-lucide="printer"></i>Imprimir
@@ -528,6 +535,63 @@
   </div>
 </div>
 
+<!-- Ajustes de la impresora, dentro del editor.
+     Ajustar el cabezal es prueba y error contra el rollo: subir la oscuridad,
+     imprimir, mirar, corregir. Mandar al usuario a otra pantalla para cada
+     intento —perdiendo de paso el diseño sin guardar— hacía que el ciclo
+     costara tanto que nadie lo usara. La pantalla suelta sigue existiendo para
+     quien entra sólo a tocar la impresora. -->
+<div class="modal modal-blur fade" id="et-modal-impresora" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i data-lucide="settings-2" class="me-2 text-muted"></i>Ajustes de la impresora
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+
+      <div class="modal-body">
+        <p class="text-muted small">
+          Ajustes de la <strong>impresora</strong>, no del diseño. Cambiá un
+          valor, imprimí una prueba y repetí hasta que se lea bien.
+        </p>
+
+        {% include "misastreria/etiquetas/_ajustes_impresora.html" %}
+      </div>
+
+      <div class="modal-footer justify-content-between flex-wrap gap-2">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <button type="button" class="btn btn-outline-secondary" id="et-calibrar-impresora"
+                  title="La impresora mide sola dónde termina cada etiqueta: avanza un par en blanco y guarda la medida. Usalo al cambiar de rollo, o si la impresión sale cortada. Necesita el puente de impresión andando en esta computadora.">
+            <i data-lucide="ruler"></i>Calibrar
+          </button>
+          {% comment %}
+          Con plantilla abierta, la muestra es la que se está editando. Sin
+          plantilla (diseño nuevo sin guardar) no hay qué renderizar todavía:
+          cae en la predeterminada.
+          {% endcomment %}
+          <a href="{% if plantilla %}{% url 'muestra_plantilla_pdf' plantilla.pk %}{% else %}{% url 'exportar_etiqueta_demo_pdf' %}{% endif %}"
+             target="_blank" class="btn btn-outline-secondary">
+            <i data-lucide="file-text"></i>Ver muestra
+          </a>
+          <span class="small" id="et-impresora-estado"></span>
+        </div>
+        <div class="btn-list">
+          <button type="button" class="btn btn-outline-secondary" id="et-guardar-impresora">
+            <i data-lucide="check"></i>Guardar ajustes
+          </button>
+          <!-- El atajo que hace que valga la pena tener esto acá: guarda y tira
+               la etiqueta que está en el lienzo, sin cerrar el modal. -->
+          <button type="button" class="btn btn-primary" id="et-probar-impresora">
+            <i data-lucide="printer"></i>Guardar e imprimir prueba
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 {{ elementos|json_script:"et-datos-elementos" }}
 {{ simbolos|json_script:"et-datos-simbolos" }}
 {{ campos|json_script:"et-datos-campos" }}
@@ -535,5 +599,6 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="{% static 'js/etiquetas_puente.js' %}"></script>
 <script src="{% static 'js/etiquetas.js' %}"></script>
 {% endblock %}

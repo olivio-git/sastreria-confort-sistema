@@ -75,87 +75,7 @@
   {% csrf_token %}
   <div class="card">
     <div class="card-body">
-      <div class="row g-3">
-
-        <div class="col-md-4">
-          <label class="form-label" for="et-oscuridad">Oscuridad</label>
-          <input type="number" class="form-control" id="et-oscuridad"
-                 name="oscuridad" min="-30" max="30" step="1"
-                 value="{{ config.oscuridad }}">
-          <small class="form-hint">
-            De −30 a 30. Si no se lee, subilo de a 4.
-          </small>
-        </div>
-
-        <div class="col-md-4">
-          <label class="form-label" for="et-velocidad">Velocidad</label>
-          <input type="number" class="form-control" id="et-velocidad"
-                 name="velocidad" min="2" max="6" step="1"
-                 value="{{ config.velocidad }}">
-          <small class="form-hint">
-            De 2 a 6 pulgadas por segundo. Más lento imprime más marcado.
-          </small>
-        </div>
-
-        <div class="col-md-4">
-          <label class="form-label">Tipo de rollo</label>
-          <label class="form-check form-switch mt-1">
-            <input class="form-check-input" type="checkbox" name="usa_ribbon"
-                   {% if config.usa_ribbon %}checked{% endif %}>
-            <span class="form-check-label">Usa cinta (transferencia térmica)</span>
-          </label>
-          <small class="form-hint">
-            Destildá sólo si el rollo es térmico directo y no lleva cinta.
-            En el modo equivocado casi no se imprime.
-          </small>
-        </div>
-
-      </div>
-
-      <hr class="my-3">
-
-      <h4 class="mb-1">Encuadre</h4>
-      <p class="text-muted small">
-        Si la etiqueta sale corrida, movela desde acá en vez de tocar el rollo.
-        Mirá hacia dónde está corrida y compensá con el número contrario.
-      </p>
-
-      <div class="row g-3">
-
-        <div class="col-md-4">
-          <label class="form-label" for="et-desp-x">Mover en horizontal (mm)</label>
-          <input type="number" class="form-control" id="et-desp-x"
-                 name="desplazamiento_x" min="-20" max="20" step="0.5"
-                 value="{{ config.desplazamiento_x|floatformat:1 }}">
-          <small class="form-hint">
-            Positivo la mueve a la derecha; negativo, a la izquierda.
-          </small>
-        </div>
-
-        <div class="col-md-4">
-          <label class="form-label" for="et-desp-y">Mover en vertical (mm)</label>
-          <input type="number" class="form-control" id="et-desp-y"
-                 name="desplazamiento_y" min="-20" max="20" step="0.5"
-                 value="{{ config.desplazamiento_y|floatformat:1 }}">
-          <small class="form-hint">
-            Positivo la baja; negativo la sube.
-          </small>
-        </div>
-
-        <div class="col-md-4">
-          <label class="form-label" for="et-tipo-papel">Tipo de papel</label>
-          <select class="form-select" id="et-tipo-papel" name="tipo_papel">
-            {% for valor, etiqueta in config.PAPEL_CHOICES %}
-            <option value="{{ valor }}"
-                    {% if config.tipo_papel == valor %}selected{% endif %}>{{ etiqueta }}</option>
-            {% endfor %}
-          </select>
-          <small class="form-hint">
-            Cambialo sólo si la impresora no encuentra dónde termina cada etiqueta.
-          </small>
-        </div>
-
-      </div>
+      {% include "misastreria/etiquetas/_ajustes_impresora.html" %}
     </div>
     <div class="card-footer d-flex justify-content-between align-items-center flex-wrap gap-2">
       <div class="d-flex gap-2">
@@ -189,5 +109,6 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="{% static 'js/etiquetas_puente.js' %}"></script>
 <script src="{% static 'js/etiquetas_calibrar.js' %}"></script>
 {% endblock %}

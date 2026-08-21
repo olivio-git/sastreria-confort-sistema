@@ -103,6 +103,7 @@ urlpatterns = [
     path('prendas/items/<int:id>/editar/', views.editar_prenda_item, name='editar_prenda_item'),
     path('prendas/items/<int:id>/baja/', views.baja_prenda_item, name='baja_prenda_item'),
     path('prendas/items/buscar/', views.buscar_prenda_items, name='buscar_prenda_items'),
+    path('prendas/items/escanear/', views.escanear_prenda_item, name='escanear_prenda_item'),
     path('prendas/<int:id>/agregar/', views.agregar_items_prenda, name='agregar_items_prenda'),
     path('prendas/<int:id>/detalle/', views.detalle_prenda, name='detalle_prenda'),
     path('prendas/items/<int:id>/etiqueta/', views_etiquetas.etiqueta_item_pdf, name='exportar_etiqueta_item_pdf'),
@@ -110,6 +111,7 @@ urlpatterns = [
     # Etiquetas — calibración contra el rollo físico
     path('etiquetas/calibrar/', views_etiquetas.calibrar, name='etiquetas_calibrar'),
     path('etiquetas/calibrar/muestra/', views_etiquetas.etiqueta_demo_pdf, name='exportar_etiqueta_demo_pdf'),
+    path('etiquetas/<int:id>/muestra/', views_etiquetas.etiqueta_demo_pdf, name='muestra_plantilla_pdf'),
     path('etiquetas/calibrar/impresora/', views_etiquetas.fijar_impresora, name='etiquetas_set_impresora'),
     path('etiquetas/calibrar/zpl/', views_etiquetas.zpl_calibracion, name='etiquetas_zpl_calibracion'),
     # Etiquetas — diseñador de plantillas

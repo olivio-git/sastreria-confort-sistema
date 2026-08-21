@@ -9285,6 +9285,118 @@ def buscar_prenda_items(request):
     return JsonResponse(results, safe=False)
 
 
+@login_required
+def escanear_prenda_item(request):
+    """Resuelve un código escaneado con la pistola a un PrendaItem concreto.
+
+    El formulario ya recibe `_prenda_items_json()` embebido, así que el 95% de
+    los escaneos se resuelven en el navegador sin tocar el servidor: la pistola
+    tipea el código, el JS lo busca en esa lista y agrega la fila. Instantáneo.
+
+    Esta vista existe para el 5% restante — cuando el código NO está en esa
+    lista. Ahí el front no puede distinguir "no existe" de "existe pero está
+    alquilado", y un "no encontrado" a secas deja al empleado adivinando con la
+    prenda en la mano. Lo que devuelve acá es el motivo concreto.
+
+    `contexto` es 'venta' o 'alquiler' (o vacío para no filtrar por tipo).
+    """
+    codigo = request.GET.get('codigo', '').strip()
+    contexto = request.GET.get('contexto', '').strip()
+
+    def fallo(motivo, mensaje):
+        return JsonResponse({'ok': False, 'motivo': motivo, 'mensaje': mensaje})
+
+    if not codigo:
+        return fallo('vacio', 'No se leyó ningún código.')
+
+    pi = (
+        PrendaItem.objects
+        .select_related('prenda', 'ubicacion')
+        .filter(codigo_item__iexact=codigo)
+        .first()
+    )
+
+    if pi is None:
+        # La etiqueta de SKU (PRN-010) también se imprime desde el sistema, y es
+        # fácil pegarle una a la prenda por error. Identifica el modelo, no la
+        # unidad, así que no alcanza para cargar una venta: hay que decirlo con
+        # todas las letras en vez de tratarlo como código desconocido.
+        prenda = PrendaInventario.objects.filter(codigo__iexact=codigo).first()
+        if prenda is not None:
+            disponibles = prenda.items.filter(estado='disponible').count()
+            return fallo(
+                'sku',
+                f"{codigo} es el código del modelo «{prenda.nombre}», no de una "
+                f"prenda concreta ({disponibles} disponible"
+                f"{'s' if disponibles != 1 else ''}). Escaneá la etiqueta de la "
+                f"prenda o elegila de la lista."
+            )
+        return fallo('no_existe', f"No hay ninguna prenda con el código {codigo}.")
+
+    if pi.estado == 'baja':
+        return fallo('baja', f"{pi.codigo_item} está dado de baja.")
+
+    if pi.prenda.estado != 'ACT':
+        return fallo('sku_baja', f"El modelo de {pi.codigo_item} está dado de baja.")
+
+    if contexto and pi.tipo != contexto:
+        destino = pi.get_tipo_display().lower()
+        return fallo(
+            'tipo',
+            f"{pi.codigo_item} está marcado como «{destino}» y esto es "
+            f"un{'a' if contexto == 'venta' else ''} {contexto}."
+        )
+
+    if pi.estado != 'disponible':
+        return fallo(
+            'ocupado',
+            f"{pi.codigo_item} no está disponible: figura como "
+            f"{pi.get_estado_display().lower()}."
+        )
+
+    if pi.conjunto_slots.exists():
+        nombres = ', '.join(
+            pi.conjunto_slots.select_related('conjunto')
+            .values_list('conjunto__nombre', flat=True).distinct()
+        )
+        return fallo(
+            'conjunto',
+            f"{pi.codigo_item} forma parte del conjunto «{nombres}». "
+            f"Agregalo con el botón «Agregar conjunto»."
+        )
+
+    # Llegó hasta acá disponible y del tipo correcto, o sea que debería haber
+    # estado en el JSON embebido. Pasa cuando la página quedó abierta un rato y
+    # el item se dio de alta después: devolvemos la fila para poder agregarla
+    # igual, sin obligar a recargar.
+    p = pi.prenda
+    ubic = f" [{pi.ubicacion}]" if pi.ubicacion else ""
+    return JsonResponse({
+        'ok': True,
+        'item': {
+            'prenda_item_id': pi.id,
+            'codigo_item':    pi.codigo_item,
+            'sku_codigo':     p.codigo,
+            'sku_nombre':     p.nombre,
+            'talla':          p.talla,
+            'color':          p.color,
+            'condicion':      pi.condicion,
+            'condicion_label': pi.get_condicion_display(),
+            'ubicacion':      str(pi.ubicacion) if pi.ubicacion else '',
+            'precio':         float(p.precio),
+            'precio_alquiler_base': float(p.precio_alquiler_base) if p.precio_alquiler_base else None,
+            'label': (
+                f"{pi.codigo_item} — {p.nombre}"
+                f"{f' T{p.talla}' if p.talla else ''}"
+                f"{f' {p.color}' if p.color else ''}"
+                f" ({pi.get_condicion_display()}){ubic}"
+            ),
+            'tipo_prenda_id': p.tipo_prenda_id,
+            'prenda_inventario_id': pi.prenda_id,
+        },
+    })
+
+
 # ─── Etiquetas ───────────────────────────────────────────────────────────────
 # El diseño de las etiquetas dejó de estar clavado acá: ahora es una plantilla
 # editable (`PlantillaEtiqueta`) que se dibuja desde `etiquetas_pdf.py` y

@@ -609,9 +609,35 @@ document.addEventListener('click', function(e) {
   modal.show();
 });
 
+// ── Filas vacías de las tablas de items ───────────────────────────────────────
+// No todas las filas sin prenda son basura. El formulario arranca con una fila
+// vacía y el botón "Agregar prenda" deja más: eso es andamiaje, y si sobrevive
+// la tabla termina con huecos entre las prendas cargadas.
+//
+// Pero cuando un conjunto trae una prenda sin existencias, addConjuntoToForm
+// deja a propósito una fila vacía CON número de grupo: es un marcador que le
+// dice al operador "acá falta elegir algo". Borrarlo lo deja sin ese aviso y
+// además achica el conjunto en silencio.
+//
+// La diferencia entre una y otra es el grupo.
+window.limpiarFilasVacias = function(tbody) {
+  tbody.querySelectorAll('.item-row').forEach(function(row) {
+    var prenda = row.querySelector('[name="item_prenda_item"]');
+    if (!prenda || prenda.value) return;
+    var grupo = row.querySelector('[name="item_grupo_conjunto"]');
+    if (grupo && grupo.value) return;  // marcador de conjunto: se respeta
+    row.remove();
+  });
+};
+
 // ── Conjuntos — addConjuntoToForm ─────────────────────────────────────────────
 // Devuelve { agregadas: N, faltantes: [prenda_item_nombre, ...] }
 // ctx = { PRENDAS, tbody, addRow, nextGrupo }
+//
+// `nextGrupo()` devuelve el número de grupo para esta tanda. Todas las filas
+// que salen de un mismo conjunto lo comparten, y eso es lo que después deja
+// mostrar el badge "Conjunto 2" en la lista y el detalle: sin él, tres prendas
+// agregadas juntas quedan indistinguibles de tres cargadas sueltas.
 window.addConjuntoToForm = function(conjunto, slotsIncluidos, ctx) {
   var slotsActivos = conjunto.slots
     .filter(function(s) { return slotsIncluidos.has(s.id); })
@@ -626,10 +652,7 @@ window.addConjuntoToForm = function(conjunto, slotsIncluidos, ctx) {
 
   var grupoNum = (typeof ctx.nextGrupo === 'function') ? ctx.nextGrupo() : null;
 
-  ctx.tbody.querySelectorAll('.item-row').forEach(function(row) {
-    var h = row.querySelector('[name="item_prenda_item"]');
-    if (h && !h.value) row.remove();
-  });
+  window.limpiarFilasVacias(ctx.tbody);
 
   var usados = new Set(
     Array.from(ctx.tbody.querySelectorAll('[name="item_prenda_item"]'))
@@ -654,10 +677,10 @@ window.addConjuntoToForm = function(conjunto, slotsIncluidos, ctx) {
     // Disponibilidad: usar slot.disponible (el backend ya sabe si está libre, incluso si es slot de conjunto)
     if (idStr && slot.disponible && !usados.has(idStr)) {
       usados.add(idStr);
-      ctx.addRow(slot.prenda_item_id, precio, grupoNum);
+      ctx.addRow(slot.prenda_item_id, precio, { grupo: grupoNum });
     } else {
       faltantes.push(slot.prenda_item_nombre || 'Sin asignar');
-      ctx.addRow(null, precioFallback, grupoNum);
+      ctx.addRow(null, precioFallback, { grupo: grupoNum });
     }
   });
 
@@ -834,3 +857,278 @@ document.querySelectorAll('[data-row-filter]').forEach(function(group) {
     if (btn) apply(btn.dataset.value);
   });
 });
+
+// ── Escaneo de etiquetas (pistola HID) ────────────────────────────────────────
+// La pistola se comporta como un teclado: tipea el código de la etiqueta y
+// manda Enter. No hay API de dispositivo ni permisos que pedir — todo lo que
+// hace falta es un input enfocado y atajar ese Enter antes de que el navegador
+// mande el formulario. Acá vive todo el soporte de escaneo del sistema.
+
+var _scanAudioCtx = null;
+
+// Un pitido corto por escaneo. No es decoración: el empleado está mirando la
+// prenda que tiene en la mano, no la pantalla. El sonido es lo que le dice si
+// el escaneo entró; el color de la fila lo confirma después, cuando levanta la
+// vista. Agudo = entró, grave y largo = algo falló.
+window.scanBeep = function(ok) {
+  try {
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!_scanAudioCtx) _scanAudioCtx = new AC();
+    var ctx = _scanAudioCtx;
+    // Chrome suspende el contexto hasta que hay un gesto del usuario. El
+    // escaneo ES un gesto (llega como teclas), así que reanudarlo alcanza.
+    if (ctx.state === 'suspended') ctx.resume();
+    var osc = ctx.createOscillator();
+    var gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = ok ? 1180 : 240;
+    var dur = ok ? 0.08 : 0.28;
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(ok ? 0.08 : 0.12, ctx.currentTime + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(); osc.stop(ctx.currentTime + dur);
+  } catch (e) {
+    // Sin audio se sigue trabajando: el feedback visual alcanza.
+  }
+};
+
+// Convierte un input en receptor de escaneos. `onScan(codigo)` corre una vez
+// por lectura, con el input ya limpio y listo para la siguiente.
+//
+// El disparador natural es el Enter que la pistola manda al final — es el
+// sufijo por defecto de casi todas. Pero "casi" no es "todas": vienen de
+// fábrica configurables y hay unidades con sufijo Tab, o sin sufijo. Con esas,
+// esperar el Enter deja la pantalla muerta sin ningún error visible, y el
+// usuario no tiene cómo saber que el problema es la config del lector.
+//
+// Por eso hay una segunda salida: si las teclas llegaron a velocidad de
+// máquina, el código se emite solo al terminar la ráfaga. La velocidad es lo
+// que separa un caso del otro — nadie tipea a 30 ms por carácter — así que a
+// alguien cargando el código a mano el formulario nunca se le adelanta.
+var SCAN_MS_ENTRE_TECLAS = 45;   // más lento que esto es una persona
+var SCAN_MIN_RAFAGA      = 5;    // teclas de máquina seguidas antes de confiar
+var SCAN_MS_FIN_RAFAGA   = 120;  // silencio que da la lectura por terminada
+
+window.makeScanner = function(input, onScan) {
+  if (!input) return;
+  var ultimaTecla = 0;
+  var rafaga = 0;
+  var timer = null;
+
+  function emitir() {
+    if (timer) { clearTimeout(timer); timer = null; }
+    rafaga = 0;
+    var codigo = input.value.trim();
+    input.value = '';
+    if (codigo) onScan(codigo);
+    // La pistola escribe donde esté el foco. Devolverlo acá es lo que permite
+    // escanear una prenda atrás de otra sin tocar nada.
+    input.focus();
+  }
+
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      // Sin esto la pistola manda Enter, el navegador toma el submit implícito
+      // del formulario y la venta se guarda con una sola prenda cargada.
+      e.preventDefault();
+      e.stopPropagation();
+      emitir();
+      return;
+    }
+
+    var ahora = Date.now();
+    rafaga = (ahora - ultimaTecla < SCAN_MS_ENTRE_TECLAS) ? rafaga + 1 : 0;
+    ultimaTecla = ahora;
+
+    if (timer) { clearTimeout(timer); timer = null; }
+    if (rafaga >= SCAN_MIN_RAFAGA) {
+      timer = setTimeout(function() {
+        if (input.value.trim()) emitir();
+      }, SCAN_MS_FIN_RAFAGA);
+    }
+  });
+};
+
+// Pinta el cartelito de resultado debajo del input de escaneo.
+function scanMensaje(el, texto, ok) {
+  if (!el) return;
+  el.textContent = texto || '';
+  el.className = 'scan-msg' + (texto ? (ok ? ' scan-msg-ok' : ' scan-msg-error') : '');
+}
+
+function scanDestacar(row) {
+  if (!row) return;
+  row.classList.remove('scan-hit');
+  void row.offsetWidth;  // reinicia la animación si se escanea rápido dos veces
+  row.classList.add('scan-hit');
+  row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+// ── Escaneo que AGREGA prendas (formularios de venta y alquiler) ──────────────
+// Convive con la carga manual: el combobox de cada fila y el botón "Agregar
+// prenda" siguen funcionando igual. Esto es una segunda puerta de entrada a la
+// misma tabla, no un modo aparte.
+//
+// opts = {
+//   input, msg,                  elementos del DOM
+//   tbody, addRow, PRENDAS,      la tabla de items del formulario
+//   endpoint, contexto,          '/prendas/items/escanear/', 'venta'|'alquiler'
+//   precioDe(prenda)             cuánto vale la prenda en ESTE formulario
+// }
+window.initScanToAdd = function(opts) {
+  var input = opts.input;
+  if (!input) return;
+
+  function filasConItem() {
+    return Array.from(opts.tbody.querySelectorAll('[name="item_prenda_item"]'))
+      .filter(function(h) { return h.value; });
+  }
+
+  function filaDe(prendaItemId) {
+    var hidden = filasConItem().find(function(h) {
+      return String(h.value) === String(prendaItemId);
+    });
+    return hidden ? hidden.closest('.item-row') : null;
+  }
+
+  function agregar(prenda) {
+    window.limpiarFilasVacias(opts.tbody);
+    // Sin tercer argumento: una prenda escaneada se carga suelta, no forma
+    // parte de ningún conjunto.
+    opts.addRow(prenda.prenda_item_id, opts.precioDe(prenda));
+    scanDestacar(filaDe(prenda.prenda_item_id));
+    window.scanBeep(true);
+    scanMensaje(opts.msg, '✓ ' + (prenda.label || prenda.codigo_item), true);
+  }
+
+  function rechazar(texto, prendaItemId) {
+    window.scanBeep(false);
+    scanMensaje(opts.msg, texto, false);
+    if (prendaItemId) scanDestacar(filaDe(prendaItemId));
+  }
+
+  window.makeScanner(input, function(codigo) {
+    var clave = codigo.toLowerCase();
+    var prenda = opts.PRENDAS.find(function(p) {
+      return String(p.codigo_item).toLowerCase() === clave;
+    });
+
+    if (prenda) {
+      var repetida = filasConItem().some(function(h) {
+        return String(h.value) === String(prenda.prenda_item_id);
+      });
+      if (repetida) {
+        rechazar(prenda.codigo_item + ' ya está en la lista.', prenda.prenda_item_id);
+        return;
+      }
+      agregar(prenda);
+      return;
+    }
+
+    // No está en la lista embebida. Puede ser cualquier cosa — alquilado, de
+    // un conjunto, de otro tipo, inexistente — y cuál es importa. Lo pregunta.
+    scanMensaje(opts.msg, 'Buscando ' + codigo + '…', true);
+    var url = opts.endpoint + '?codigo=' + encodeURIComponent(codigo) +
+              '&contexto=' + encodeURIComponent(opts.contexto || '');
+    fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.ok) { rechazar(data.mensaje); return; }
+        // Disponible y del tipo correcto pero fuera del JSON embebido: el item
+        // se dio de alta con la página ya abierta. Se agrega igual.
+        opts.PRENDAS.push(data.item);
+        agregar(data.item);
+      })
+      .catch(function() {
+        rechazar('No se pudo verificar ' + codigo + '. Revisá la conexión.');
+      });
+  });
+
+  // Foco puesto de entrada: se abre la pantalla, se escanea y se guarda sin
+  // tocar el mouse en ningún momento.
+  input.focus();
+};
+
+// ── Escaneo que VERIFICA prendas (salida y devolución de alquiler) ────────────
+// Acá no se agrega nada: la lista de prendas ya está cerrada. Escanear sirve
+// para confirmar que lo que sale (o vuelve) del local es exactamente lo que
+// dice el sistema, antes de apretar el botón.
+//
+// opts = { input, msg, contador, filas (NodeList con data-codigo), form, boton }
+window.initScanVerify = function(opts) {
+  var input = opts.input;
+  if (!input) return;
+  var filas = Array.from(opts.filas || []);
+  if (!filas.length) return;
+
+  function verificadas() {
+    return filas.filter(function(f) { return f.dataset.verificado === '1'; });
+  }
+
+  function actualizarContador() {
+    if (!opts.contador) return;
+    var n = verificadas().length;
+    opts.contador.textContent = n + ' / ' + filas.length;
+    // classList y no className: el contador es un .input-group-text, y pisarle
+    // la clase entera lo saca del input-group.
+    opts.contador.classList.toggle('text-success', n === filas.length);
+    opts.contador.classList.toggle('fw-bold', n === filas.length);
+  }
+
+  function marcar(fila) {
+    fila.dataset.verificado = '1';
+    fila.classList.add('scan-verificada');
+    var celda = fila.querySelector('.scan-check');
+    if (celda) {
+      celda.innerHTML = '<i data-lucide="check" class="text-success"></i>';
+      if (window.lucide) lucide.createIcons();
+    }
+    scanDestacar(fila);
+  }
+
+  window.makeScanner(input, function(codigo) {
+    var clave = codigo.toLowerCase();
+    var fila = filas.find(function(f) {
+      return (f.dataset.codigo || '').toLowerCase() === clave;
+    });
+
+    if (!fila) {
+      window.scanBeep(false);
+      scanMensaje(opts.msg, codigo + ' NO pertenece a este alquiler.', false);
+      return;
+    }
+    if (fila.dataset.verificado === '1') {
+      window.scanBeep(false);
+      scanMensaje(opts.msg, codigo + ' ya estaba verificada.', false);
+      scanDestacar(fila);
+      return;
+    }
+    marcar(fila);
+    window.scanBeep(true);
+    var faltan = filas.length - verificadas().length;
+    scanMensaje(
+      opts.msg,
+      faltan ? '✓ ' + codigo + ' — faltan ' + faltan : '✓ ' + codigo + ' — todo verificado',
+      true
+    );
+    actualizarContador();
+  });
+
+  // Verificar es una ayuda, no un peaje. Si una etiqueta se despegó o se borró,
+  // el empleado tiene que poder entregar la prenda igual: se avisa y se sigue.
+  if (opts.form) {
+    opts.form.addEventListener('submit', function(e) {
+      var faltan = filas.length - verificadas().length;
+      if (!faltan) return;
+      var msg = faltan === 1
+        ? 'Queda 1 prenda sin verificar con el escáner. ¿Confirmás igual?'
+        : 'Quedan ' + faltan + ' prendas sin verificar con el escáner. ¿Confirmás igual?';
+      if (!confirm(msg)) e.preventDefault();
+    });
+  }
+
+  actualizarContador();
+  input.focus();
+};
