@@ -138,7 +138,13 @@ def _barcode_a_zpl(el, ancho_etiqueta, datos):
         return f"{cabecera}^B3{rot},N,{altura},{legible},N^FD{dato}^FS"
     if el['simbologia'] == 'ean13':
         return f"{cabecera}^BE{rot},{altura},{legible},N^FD{dato}^FS"
-    return f"{cabecera}^BC{rot},{altura},{legible},N,N^FD{dato}^FS"
+    # El último parámetro de ^BC es el MODO. Sin él la impresora arranca en
+    # subset B y codifica un dígito por símbolo, mientras que reportlab elige el
+    # subset óptimo: el mismo payload salía angosto en la vista previa PDF y
+    # ancho en la etiqueta impresa. `A` (automático) le pide a la impresora la
+    # misma codificación que calcula `etiquetas.modulos_code128`, así que el
+    # preview, el centrado y lo que sale del cabezal vuelven a coincidir.
+    return f"{cabecera}^BC{rot},{altura},{legible},N,N,A^FD{dato}^FS"
 
 
 def _simbolo_a_zpl(el, ancho_etiqueta, datos):

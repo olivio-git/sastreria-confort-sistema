@@ -42,6 +42,7 @@ from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.utils import get_column_letter
 from io import BytesIO # Para manejar el archivo en memoria
 from . import kardex_events
+from . import etiquetas
 FONT_PATH = os.path.join(settings.BASE_DIR, 'misastreria', 'static', 'font', 'DejaVuSans.ttf')
 
 
@@ -9300,7 +9301,12 @@ def escanear_prenda_item(request):
 
     `contexto` es 'venta' o 'alquiler' (o vacío para no filtrar por tipo).
     """
-    codigo = request.GET.get('codigo', '').strip()
+    # `normalizar_escaneo` repara el guion que el layout de teclado convierte en
+    # apóstrofo y expande el payload numérico de la etiqueta (`001501`) al
+    # `codigo_item` canónico. Va acá, en la puerta, para que TODO lo que sigue
+    # —búsqueda y mensajes de error— trabaje sobre el código real y no sobre lo
+    # que la pistola alcanzó a tipear.
+    codigo = etiquetas.normalizar_escaneo(request.GET.get('codigo', ''))
     contexto = request.GET.get('contexto', '').strip()
 
     def fallo(motivo, mensaje):

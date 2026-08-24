@@ -911,6 +911,43 @@ var SCAN_MS_ENTRE_TECLAS = 45;   // más lento que esto es una persona
 var SCAN_MIN_RAFAGA      = 5;    // teclas de máquina seguidas antes de confiar
 var SCAN_MS_FIN_RAFAGA   = 120;  // silencio que da la lectura por terminada
 
+// Espejo exacto de `etiquetas.normalizar_escaneo()` en Python. Existen las dos
+// porque el 95% de los escaneos se resuelven acá, contra la lista embebida, sin
+// tocar el servidor, y el 5% restante lo resuelve la vista. Si cambia una tiene
+// que cambiar la otra: las dos puntas tienen que llegar al mismo codigo_item.
+var SCAN_DIGITOS_SKU = 4;
+var SCAN_LARGO_ITEM  = 6;   // 4 de SKU + 2 de unidad
+var SCAN_LARGO_SKU   = 4;
+
+function scanRellenar(numero, ancho) {
+  var s = String(numero);
+  while (s.length < ancho) s = '0' + s;
+  return s;
+}
+
+window.normalizarEscaneo = function(texto) {
+  // La pistola es un teclado HID: manda scancodes, no texto. La tecla a la
+  // derecha del `0` es `-` en el mapa US —con el que el lector viene de
+  // fábrica— y `'` en el latinoamericano y el español, que son los de la PC
+  // del taller. Una etiqueta impresa PRN-015-ITM-01 llega hasta acá como
+  // PRN'015'ITM'01 y no matchea con nada. Las letras y los dígitos sin shift
+  // son idénticos en los tres mapas, así que el guion es lo único a reparar.
+  texto = String(texto == null ? '' : texto).trim().replace(/'/g, '-').toUpperCase();
+
+  // Lo que no es puro dígito ya es un código del sistema: etiqueta vieja, o
+  // alguien tipeando a mano. Se devuelve tal cual.
+  if (!/^[0-9]+$/.test(texto)) return texto;
+
+  if (texto.length === SCAN_LARGO_ITEM) {
+    return 'PRN-' + scanRellenar(parseInt(texto.slice(0, SCAN_DIGITOS_SKU), 10), 3) +
+           '-ITM-' + scanRellenar(parseInt(texto.slice(SCAN_DIGITOS_SKU), 10), 2);
+  }
+  if (texto.length === SCAN_LARGO_SKU) {
+    return 'PRN-' + scanRellenar(parseInt(texto, 10), 3);
+  }
+  return texto;
+};
+
 window.makeScanner = function(input, onScan) {
   if (!input) return;
   var ultimaTecla = 0;
@@ -920,7 +957,10 @@ window.makeScanner = function(input, onScan) {
   function emitir() {
     if (timer) { clearTimeout(timer); timer = null; }
     rafaga = 0;
-    var codigo = input.value.trim();
+    // Se normaliza acá y no en cada consumidor: `makeScanner` es el único
+    // punto por el que pasan las cuatro pantallas que escanean, así que todo lo
+    // de aguas abajo trabaja siempre con un codigo_item canónico.
+    var codigo = window.normalizarEscaneo(input.value);
     input.value = '';
     if (codigo) onScan(codigo);
     // La pistola escribe donde esté el foco. Devolverlo acá es lo que permite

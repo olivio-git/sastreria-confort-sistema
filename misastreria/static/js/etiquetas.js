@@ -133,7 +133,7 @@
       el.ancho_bloque = clamp(el.ancho_bloque ?? 0, 0, 4000)
         || Math.max(1, anchoActual - el.x);
     } else if (el.tipo === 'barcode') {
-      el.texto = el.texto || '{codigo}';
+      el.texto = el.texto || '{codigo_barra}';
       el.simbologia = ['code128', 'code39', 'ean13', 'qr'].includes(el.simbologia)
         ? el.simbologia : 'code128';
       el.modulo = clamp(el.modulo ?? 2, 1, 10);
@@ -1078,9 +1078,9 @@
   const NUEVOS = {
     texto: (p) => ({ tipo: 'texto', x: p.x, y: p.y, texto: 'Texto nuevo', tamano: 24,
                      ancho_bloque: Math.max(40, estado.ancho - p.x - 20), alineacion: 'izquierda' }),
-    barcode: (p) => ({ tipo: 'barcode', x: p.x, y: p.y, texto: '{codigo}',
+    barcode: (p) => ({ tipo: 'barcode', x: p.x, y: p.y, texto: '{codigo_barra}',
                        simbologia: 'code128', modulo: 2, alto_barra: 60 }),
-    qr: (p) => ({ tipo: 'barcode', x: p.x, y: p.y, texto: '{codigo}', nombre: 'Código QR',
+    qr: (p) => ({ tipo: 'barcode', x: p.x, y: p.y, texto: '{codigo_barra}', nombre: 'Código QR',
                   simbologia: 'qr', modulo: 3, alto_barra: 72, mostrar_texto: false }),
     simbolo: (p) => ({ tipo: 'simbolo', x: p.x, y: p.y,
                        tam: Math.min(40, estado.ancho, estado.alto), clave: primerSimbolo() }),
@@ -1533,7 +1533,9 @@
 
     } else if (el.tipo === 'barcode') {
       html += seccion('Contenido');
-      html += campo('Dato', texto('texto', el.texto), 'Normalmente {codigo}.');
+      html += campo('Dato', texto('texto', el.texto),
+        'Usá {codigo_barra}: es el mismo código comprimido a dígitos, ocupa un '
+        + 'tercio del ancho y el lector no lo deforma. El {codigo} largo va en un texto aparte.');
       html += campo('Simbología', opciones('simbologia', el.simbologia,
         [['code128', 'Code 128'], ['code39', 'Code 39'], ['ean13', 'EAN-13'], ['qr', 'QR']]));
       html += seccion('Tamaño');

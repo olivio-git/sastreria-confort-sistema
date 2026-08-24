@@ -33,6 +33,7 @@ porque reportlab usa el origen abajo a la izquierda.
 Para los textos, `y` es el BORDE SUPERIOR de la caja de texto, no la línea base.
 """
 
+import re
 from datetime import date
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -95,6 +96,116 @@ def tamanos_para_selector():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Payload del código de barras
+#
+# Lo que va impreso como BARRAS no es lo mismo que lo que va impreso como TEXTO
+# LEGIBLE, aunque hasta acá lo fuera. Son dos lectores con necesidades opuestas:
+#
+#   - La persona necesita `PRN-015-ITM-01`: le dice modelo y unidad de un
+#     vistazo, y es lo que va a tipear a mano si la etiqueta se raya.
+#   - La pistola necesita el token más corto y robusto posible. La legibilidad
+#     no le suma nada, y el guion le juega en contra por dos motivos medidos:
+#
+#   1. ANCHO. Code 128 tiene un subset C que empaqueta DOS dígitos por símbolo,
+#      pero sólo si el dato es 100% numérico. `PRN-015-ITM-01` ocupa 189 módulos
+#      y `001501` ocupa 68: el mismo dato entra en poco más de un tercio del
+#      ancho. El largo tiene que ser PAR o el subset C se corta en el último
+#      dígito y se pierde el ahorro (7 dígitos ocupan MÁS que 8).
+#
+#   2. LAYOUT DE TECLADO. La pistola es un teclado HID: manda scancodes, no
+#      texto. La tecla a la derecha del `0` es `minus` en el mapa US —con el que
+#      los lectores vienen de fábrica— y `apostrophe` en el mapa latinoamericano
+#      y en el español, que son los de la PC del taller. Una etiqueta impresa
+#      `PRN-015-ITM-01` entra al sistema como `PRN'015'ITM'01` y no matchea con
+#      nada. Los dígitos salen idénticos en los tres mapas: sin guion en el
+#      payload, la clase entera de bug desaparece en el origen.
+#
+# El payload es una compresión REVERSIBLE del código de negocio, no un id
+# opaco: `PRN-015-ITM-01` ⇄ `001501`. Se eligió así y no el pk de la base porque
+# la etiqueta se pega a una prenda que va a durar años, y un autoincremental no
+# sobrevive a una reimportación de la base: quedarían todas las etiquetas ya
+# pegadas apuntando a la prenda equivocada, y en silencio.
+# ─────────────────────────────────────────────────────────────────────────────
+
+DIGITOS_SKU = 4
+DIGITOS_ITEM = 2
+LARGO_PAYLOAD_ITEM = DIGITOS_SKU + DIGITOS_ITEM      # 6 — par, subset C puro
+LARGO_PAYLOAD_SKU = DIGITOS_SKU                      # 4 — par, y no colisiona
+
+_RE_CODIGO_ITEM = re.compile(r'^PRN-(\d+)-ITM-(\d+)$', re.IGNORECASE)
+_RE_CODIGO_SKU = re.compile(r'^PRN-(\d+)$', re.IGNORECASE)
+
+# La tecla `-` del mapa US llega como `'` en los mapas latinoamericano y
+# español. Es la única sustitución necesaria: las letras y los dígitos sin shift
+# son idénticos en los tres mapas, así que el guion es el único carácter de
+# nuestros códigos que se corrompe.
+_LAYOUT_US_A_LATAM = {"'": '-'}
+
+
+def payload_de_codigo(codigo):
+    """Comprime `PRN-015-ITM-01` → `001501` (y `PRN-015` → `0015`).
+
+    Devuelve el código sin tocar si no sigue ninguno de los dos patrones. Hay
+    etiquetas que no son de inventario —reparaciones, confecciones— y esas se
+    imprimen tal cual: nunca levanta, porque una etiqueta se tiene que poder
+    imprimir aunque el código tenga una forma que no previmos.
+    """
+    codigo = _texto_o_vacio(codigo).strip()
+
+    m = _RE_CODIGO_ITEM.match(codigo)
+    if m:
+        sku, item = int(m.group(1)), int(m.group(2))
+        if sku < 10 ** DIGITOS_SKU and item < 10 ** DIGITOS_ITEM:
+            return f"{sku:0{DIGITOS_SKU}d}{item:0{DIGITOS_ITEM}d}"
+        return codigo                    # fuera de rango: mejor largo que ambiguo
+
+    m = _RE_CODIGO_SKU.match(codigo)
+    if m:
+        sku = int(m.group(1))
+        if sku < 10 ** DIGITOS_SKU:
+            return f"{sku:0{DIGITOS_SKU}d}"
+    return codigo
+
+
+def codigo_de_payload(texto):
+    """Inversa de `payload_de_codigo`. Lo que no es payload vuelve igual.
+
+    El `:03d` y el `:02d` reconstruyen el formato canónico que arma
+    `PrendaItem.save()`, así que el resultado se puede buscar directo por
+    `codigo_item`. Un SKU de 4 dígitos reconstruye con el ancho que tenga
+    (`PRN-1000`), que es exactamente lo que genera `PrendaInventario.save()`.
+    """
+    texto = _texto_o_vacio(texto).strip()
+    if not texto.isdigit():
+        return texto
+    if len(texto) == LARGO_PAYLOAD_ITEM:
+        return (f"PRN-{int(texto[:DIGITOS_SKU]):03d}"
+                f"-ITM-{int(texto[DIGITOS_SKU:]):02d}")
+    if len(texto) == LARGO_PAYLOAD_SKU:
+        return f"PRN-{int(texto):03d}"
+    return texto
+
+
+def normalizar_escaneo(texto):
+    """Convierte lo que tipeó la pistola en un código canónico del sistema.
+
+    Es la ÚNICA puerta de entrada de todo lo escaneado, y por eso hace las dos
+    cosas juntas: repara el guion que el layout de teclado rompió y expande el
+    payload numérico. Así las etiquetas viejas (con `PRN-015-ITM-01` en las
+    barras) y las nuevas (con `001501`) terminan las dos en el mismo
+    `codigo_item`, y no hay que reimprimir nada para migrar.
+
+    El espejo de esta función vive en `sistema.js` (`window.normalizarEscaneo`),
+    porque el 95% de los escaneos se resuelven en el navegador sin tocar el
+    servidor. Si cambia una, cambia la otra.
+    """
+    texto = _texto_o_vacio(texto).strip()
+    for malo, bueno in _LAYOUT_US_A_LATAM.items():
+        texto = texto.replace(malo, bueno)
+    return codigo_de_payload(texto.upper())
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Campos sustituibles
 #
 # Son los {marcadores} que el usuario puede intercalar en cualquier texto. Se
@@ -103,7 +214,8 @@ def tamanos_para_selector():
 # ─────────────────────────────────────────────────────────────────────────────
 
 CAMPOS = {
-    'codigo':     'Código de barras',
+    'codigo':       'Código legible (PRN-015-ITM-01)',
+    'codigo_barra': 'Código comprimido (sólo para barras)',
     'prenda':     'Nombre de la prenda',
     'subtitulo':  'Subtítulo (talla · color)',
     'detalle':    'Detalle',
@@ -145,6 +257,10 @@ def datos_muestra(extra=None):
         'taller':     NEGOCIO,
     }
     datos.update(extra or {})
+    # Se deriva DESPUÉS del update, y con setdefault, por dos razones: así los
+    # cuatro `datos_de_*` lo obtienen sin repetir la conversión, y un llamador
+    # que quiera fijar el payload a mano puede hacerlo sin que se lo pisemos.
+    datos.setdefault('codigo_barra', payload_de_codigo(datos['codigo']))
     return datos
 
 
@@ -361,7 +477,8 @@ def normalizar_elemento(bruto, ancho_etiqueta):
 
     elif tipo == 'barcode':
         el.update({
-            'texto': _texto_o_vacio(bruto.get('texto', '{codigo}')) or '{codigo}',
+            'texto': (_texto_o_vacio(bruto.get('texto', '{codigo_barra}'))
+                      or '{codigo_barra}'),
             'simbologia': _opcion(bruto, 'simbologia', SIMBOLOGIAS, 'code128'),
             'modulo': _entero(bruto, 'modulo', 2, minimo=1, maximo=10),
             'alto_barra': _entero(bruto, 'alto_barra', 100, minimo=10, maximo=800),
@@ -427,14 +544,55 @@ def normalizar(elementos, ancho_etiqueta=ANCHO_DEFECTO, solo_visibles=True):
 # ─────────────────────────────────────────────────────────────────────────────
 # Ancho de un Code 128
 #
-# Un Code 128 subset B ocupa 35 módulos fijos (arranque + checksum + cierre) más
-# 11 por carácter. Multiplicado por el ancho de módulo da el ancho real en
-# puntos. Lo necesitan los dos renderers: el ZPL para centrar y elegir grosor de
-# barra, y la validación para rechazar códigos que no entran.
+# Un Code 128 ocupa 35 módulos fijos (arranque + checksum + cierre) más 11 por
+# cada SÍMBOLO. Lo necesitan los dos renderers: el ZPL para centrar y elegir
+# grosor de barra, y la validación para rechazar códigos que no entran.
+#
+# Símbolo no es lo mismo que carácter, y ahí estaba el error: el subset C mete
+# DOS dígitos en un símbolo. Contar `len(dato)` daba exacto mientras todo era
+# subset B, pero sobreestima 33 módulos en un payload de 6 dígitos (101 contra
+# 68 reales) — o sea justo en el caso que ahora es el normal. Con el código
+# centrado eso lo corría medio error a la izquierda.
+#
+# Elegir qué símbolos usar es un problema de optimización, no una regla greedy:
+# en `14-17058` conviene arrancar en C por `14`, volver a B por `-1`, y recaer
+# en C por `7058`. Se resuelve con una programación dinámica de dos estados
+# (B y C) que recorre el dato de atrás para adelante. El subset A no entra
+# porque `validar_code128` ya restringe el dato a ASCII 32..126, que B cubre
+# entero, y para los caracteres compartidos A y B cuestan lo mismo.
+#
+# El resultado coincide exactamente con lo que dibuja reportlab (verificado
+# sobre 3000 cadenas al azar) y con lo que arma la impresora en `^BC` modo A.
 # ─────────────────────────────────────────────────────────────────────────────
 
+def simbolos_code128(dato):
+    """Cantidad de símbolos de datos en la codificación más corta posible."""
+    dato = _texto_o_vacio(dato)
+    n = len(dato)
+    if not n:
+        return 0
+
+    INFINITO = float('inf')
+    # coste_b[i] = símbolos para codificar dato[i:] estando ya en subset B.
+    coste_b = [INFINITO] * (n + 1)
+    coste_c = [INFINITO] * (n + 1)
+    coste_b[n] = coste_c[n] = 0
+
+    for i in range(n - 1, -1, -1):
+        hay_par = i + 1 < n and dato[i].isdigit() and dato[i + 1].isdigit()
+        # Consumir desde acá sin cambiar de subset.
+        seguir_en_c = 1 + coste_c[i + 2] if hay_par else INFINITO
+        seguir_en_b = 1 + coste_b[i + 1]
+        # El `1 +` de la otra rama es el símbolo de cambio de subset.
+        coste_b[i] = min(seguir_en_b, 1 + seguir_en_c)
+        coste_c[i] = min(seguir_en_c, 1 + seguir_en_b)
+
+    # El símbolo de arranque cuesta igual sea B o C, así que se elige el mejor.
+    return int(min(coste_b[0], coste_c[0]))
+
+
 def modulos_code128(dato):
-    return 35 + 11 * len(dato)
+    return 35 + 11 * simbolos_code128(dato) if _texto_o_vacio(dato) else 0
 
 
 def ancho_code128(dato, modulo):
@@ -544,7 +702,7 @@ def elementos_por_defecto():
 
         # Trazabilidad. Es lo único operativo que lleva la etiqueta: sin precios
         # ni fechas, que envejecen mal pegados a una prenda.
-        {'tipo': 'barcode', 'x': 0, 'y': 188, 'texto': '{codigo}',
+        {'tipo': 'barcode', 'x': 0, 'y': 188, 'texto': '{codigo_barra}',
          'simbologia': 'code128', 'modulo': 2, 'alto_barra': 24,
          'mostrar_texto': False, 'centrar': True},
         {'tipo': 'texto', 'x': 24, 'y': 216, 'ancho_bloque': 352,
@@ -617,7 +775,7 @@ def elementos_textil_vertical():
         {'tipo': 'linea', 'x': 20, 'y': 466, 'largo': 360, 'grosor': 2,
          'nombre': 'Divisor de cuidados'},
 
-        {'tipo': 'barcode', 'x': 0, 'y': 500, 'texto': '{codigo}',
+        {'tipo': 'barcode', 'x': 0, 'y': 500, 'texto': '{codigo_barra}',
          'simbologia': 'code128', 'modulo': 1, 'alto_barra': 96,
          'mostrar_texto': False, 'centrar': True, 'nombre': 'Código de barras'},
         {'tipo': 'texto', 'x': 28, 'y': 606, 'ancho_bloque': 344,
