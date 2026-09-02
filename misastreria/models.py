@@ -1807,10 +1807,12 @@ class PlantillaEtiqueta(models.Model):
 
     @property
     def ancho_mm(self):
+        """Ancho del LIENZO, que es lo que se ve en el diseñador."""
         return round(self.ancho_puntos * 25.4 / 203, 1)
 
     @property
     def alto_mm(self):
+        """Alto del LIENZO, que es lo que se ve en el diseñador."""
         return round(self.alto_puntos * 25.4 / 203, 1)
 
     @classmethod

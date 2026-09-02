@@ -380,8 +380,12 @@
           {% endfor %}
           <option value="custom">Personalizado…</option>
         </select>
+        <!-- El lienzo ES el papel, así que este botón describe un ROLLO
+             DISTINTO: intercambia las medidas y reacomoda el diseño adentro.
+             No hay ninguna bandera de «girado» que recordar — lo que se ve en
+             el lienzo es exactamente lo que sale del cabezal. -->
         <button type="button" class="et-tool" id="et-orientacion"
-                title="Cambiar orientación y adaptar el diseño"><i data-lucide="rotate-cw-square"></i></button>
+                title="Dar vuelta el rollo (intercambia ancho y alto) y reacomodar el diseño"><i data-lucide="rotate-cw-square"></i></button>
         <!-- Las medidas se piden en MILÍMETROS, que es lo que el usuario puede
              medir con una regla contra el rollo. Los puntos de cabezal son una
              unidad interna: se convierten en el JS y no se muestran nunca. -->
@@ -492,7 +496,7 @@
      prendas es una tarea de lectura: necesita columnas alineadas y espacio.
      Encima del lienzo, en una esquina, no se podía comparar una fila con otra. -->
 <div class="modal modal-blur fade" id="et-modal-items" tabindex="-1">
-  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">Probar el diseño con una prenda real</h5>
@@ -503,12 +507,20 @@
            modal-dialog-scrollable, Bootstrap le da overflow-y a CADA
            .modal-body, así que un segundo cuerpo crea una segunda barra de
            scroll y el buscador se va de la vista al bajar la lista. -->
-      <div class="modal-header py-2">
-        <div class="input-icon w-100">
+      <div class="modal-header py-2 d-flex gap-2 flex-nowrap">
+        <div class="input-icon flex-grow-1">
           <span class="input-icon-addon"><i data-lucide="search"></i></span>
           <input type="text" class="form-control" id="et-buscar-item"
                  placeholder="Buscar por código, nombre, talla o color…"
                  autocomplete="off">
+        </div>
+        <!-- Una prenda de venta y una de alquiler no llevan la misma etiqueta:
+             filtrar por tipo evita tener que reconocerlas de memoria. -->
+        <div class="btn-group btn-group-sm flex-shrink-0" role="group"
+             id="et-filtro-tipo" aria-label="Filtrar por tipo">
+          <button type="button" class="btn btn-outline-secondary active" data-tipo="">Todas</button>
+          <button type="button" class="btn btn-outline-secondary" data-tipo="venta">Venta</button>
+          <button type="button" class="btn btn-outline-secondary" data-tipo="alquiler">Alquiler</button>
         </div>
       </div>
 
@@ -518,7 +530,10 @@
             <tr>
               <th style="width:9rem">Código</th>
               <th>Prenda</th>
-              <th style="width:11rem">Detalle</th>
+              <th style="width:9rem">Detalle</th>
+              <th style="width:6rem">Tipo</th>
+              <th style="width:7rem" title="Unidades disponibles sobre el total del modelo">Stock</th>
+              <th style="width:6rem"></th>
             </tr>
           </thead>
           <tbody id="et-items-cuerpo"></tbody>

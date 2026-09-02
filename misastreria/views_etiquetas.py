@@ -17,7 +17,7 @@ from decimal import Decimal, InvalidOperation
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
@@ -113,8 +113,14 @@ def buscar_items(request):
     Se buscan PrendaItem y no PrendaInventario porque la etiqueta va pegada a
     una prenda concreta: el `codigo_item` (PRN-010-ITM-01) es lo que distingue
     dos ternos idénticos, que es justamente para lo que sirve etiquetarlos.
+
+    Devuelve además el stock del SKU al que pertenece cada unidad. Es la
+    pregunta que se hace el que va a etiquetar —«¿cuántas de éstas tengo?»— y
+    sin el dato hay que salir del diseñador a buscarlo a Inventario.
     """
     texto = (request.GET.get('q') or '').strip()
+    tipo = (request.GET.get('tipo') or '').strip()
+
     items = (PrendaItem.objects
              .exclude(estado='baja')
              .select_related('prenda', 'ubicacion'))
@@ -126,6 +132,24 @@ def buscar_items(request):
             | Q(prenda__talla__icontains=texto)
             | Q(prenda__color__icontains=texto)
         )
+    if tipo in dict(PrendaItem.TIPO_CHOICES):
+        items = items.filter(tipo=tipo)
+
+    items = list(items.order_by('codigo_item')[:40])
+
+    # El stock se resuelve en UNA consulta agregada aparte y no anotando el
+    # queryset de arriba: anotarlo obligaría a un join de la tabla contra sí
+    # misma con `distinct`, que para 40 filas sale más caro que esto.
+    conteos = {
+        fila['prenda_id']: fila
+        for fila in (PrendaItem.objects
+                     .filter(prenda_id__in={it.prenda_id for it in items})
+                     .exclude(estado='baja')
+                     .values('prenda_id')
+                     .annotate(total=Count('id'),
+                               disponibles=Count('id', filter=Q(estado='disponible'))))
+    }
+
     return JsonResponse({
         'ok': True,
         'items': [
@@ -138,9 +162,16 @@ def buscar_items(request):
                     it.prenda.color or None,
                     it.get_condicion_display(),
                 ])),
+                'tipo': it.tipo,
+                'tipo_nombre': it.get_tipo_display(),
+                'estado': it.estado,
+                'estado_nombre': it.get_estado_display(),
+                # Stock del SKU, no de esta unidad: una unidad siempre es una.
+                'stock_disponible': conteos.get(it.prenda_id, {}).get('disponibles', 0),
+                'stock_total': conteos.get(it.prenda_id, {}).get('total', 0),
                 'datos': etiquetas.datos_de_item(it),
             }
-            for it in items.order_by('codigo_item')[:40]
+            for it in items
         ],
     })
 
@@ -199,7 +230,12 @@ def disenador(request, id=None):
             elementos = etiquetas.elementos_por_defecto()
             ancho, alto = etiquetas.ANCHO_DEFECTO, etiquetas.ALTO_DEFECTO
 
+        # El lienzo ES el papel: pedir «horizontal» no reinterpreta nada,
+        # describe un rollo distinto: el que hay que cargar en la impresora. Se
+        # intercambian las medidas y listo — no queda ninguna bandera que
+        # recordar ni ningún giro que aplicar al imprimir.
         clave_tamano = (request.GET.get('tamano') or '').strip()
+        pedida = (request.GET.get('orientacion') or '').strip()
         if clave_tamano in etiquetas.TAMANOS_MM:
             ancho_mm, alto_mm = etiquetas.TAMANOS_MM[clave_tamano]
             nuevo_ancho = etiquetas.mm_a_puntos(ancho_mm)
@@ -207,10 +243,9 @@ def disenador(request, id=None):
         else:
             nuevo_ancho, nuevo_alto = ancho, alto
 
-        orientacion = (request.GET.get('orientacion') or '').strip()
-        if orientacion == 'vertical' and nuevo_ancho > nuevo_alto:
-            nuevo_ancho, nuevo_alto = nuevo_alto, nuevo_ancho
-        elif orientacion == 'horizontal' and nuevo_ancho < nuevo_alto:
+        quiere_apaisado = {'horizontal': True, 'vertical': False}.get(pedida)
+        if (quiere_apaisado is not None
+                and quiere_apaisado != (nuevo_ancho >= nuevo_alto)):
             nuevo_ancho, nuevo_alto = nuevo_alto, nuevo_ancho
 
         if elementos and (nuevo_ancho != ancho or nuevo_alto != alto):

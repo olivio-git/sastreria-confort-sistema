@@ -316,6 +316,10 @@ def render(elementos, ancho=None, alto=None, lote=None, copias=1):
     y no con un dict suelto porque el caso real es imprimir de una sentada todas
     las unidades de un SKU recién dado de alta.
 
+    La página mide exactamente lo que mide el lienzo del diseñador. Es una vista
+    previa fiel del papel, no una reinterpretación: si acá sale de una forma,
+    del cabezal sale igual.
+
     Devuelve los bytes del PDF.
     """
     ancho_puntos = int(ancho or etiquetas.ANCHO_DEFECTO)

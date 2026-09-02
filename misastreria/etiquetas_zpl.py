@@ -47,6 +47,18 @@ _ALINEACION = {'izquierda': 'L', 'centro': 'C', 'derecha': 'R'}
 _ANCHO_MEDIO = 0.55
 
 
+def _corrido(el, corrimiento):
+    """El `^FO` del elemento con el corrimiento de calibración ya aplicado.
+
+    ^FO no admite coordenadas negativas: el borde de la etiqueta es el cero y no
+    hay nada a la izquierda de eso. Un corrimiento hacia la izquierda mayor que
+    el margen del elemento lo deja pegado al borde en vez de generar un ^FO
+    inválido que la impresora descarta en silencio.
+    """
+    dx, dy = corrimiento
+    return max(0, int(el['x']) + dx), max(0, int(el['y']) + dy)
+
+
 def _sin_tildes(texto):
     """Pasa los acentos a su letra base.
 
@@ -63,12 +75,6 @@ def _sin_tildes(texto):
 def _escapar(texto):
     """`^` y `~` son los caracteres de control de ZPL: hay que neutralizarlos."""
     return _sin_tildes(texto).replace('^', ' ').replace('~', ' ').strip()
-
-
-def _fuente(alto, ancho=None):
-    """Comando de fuente. ZPL sólo tiene una escalable, así que la familia y el
-    tracking que eligió el usuario en el diseñador acá no se pueden aplicar."""
-    return f"^A0N,{int(alto)},{int(ancho or alto)}"
 
 
 def _tamano_que_entra(texto, tamano, tamano_min, ancho_bloque, renglones):
@@ -88,7 +94,7 @@ def _tamano_que_entra(texto, tamano, tamano_min, ancho_bloque, renglones):
     return tamano
 
 
-def _texto_a_zpl(el, datos):
+def _texto_a_zpl(el, datos, corrimiento):
     texto = _escapar(etiquetas.sustituir(el['texto'], datos))
     if not texto:
         return ''
@@ -103,51 +109,54 @@ def _texto_a_zpl(el, datos):
     bloque = f"^FB{el['ancho_bloque']},{el['renglones']},0,{alineacion}"
     fuente = f"^A0{el['rotacion']},{tamano},{tamano}"
 
-    comando = f"^FO{el['x']},{el['y']}{bloque}{fuente}^FD{texto}^FS"
+    x, y = _corrido(el, corrimiento)
+    comando = f"^FO{x},{y}{bloque}{fuente}^FD{texto}^FS"
 
     if el['negrita']:
         # ^A0 no tiene versión negrita. Imprimir dos veces con un punto de
         # desplazamiento engrosa el trazo lo justo para que se note en térmica,
         # que es como se resuelve el bold en ZPL desde siempre.
-        comando += f"^FO{el['x'] + 1},{el['y']}{bloque}{fuente}^FD{texto}^FS"
+        comando += f"^FO{x + 1},{y}{bloque}{fuente}^FD{texto}^FS"
 
     return comando
 
 
-def _barcode_a_zpl(el, ancho_etiqueta, datos):
+def _barcode_a_zpl(el, ancho_etiqueta, datos, corrimiento):
     dato_original = etiquetas.sustituir(el['texto'], datos).strip()
     if not dato_original:
         return ''
 
-    x, y = el['x'], el['y']
-    rot = el['rotacion']
     modulo = el['modulo']
     altura = el['alto_barra']
     legible = 'Y' if el['mostrar_texto'] else 'N'
 
     if el['simbologia'] == 'qr':
+        x, y = _corrido(el, corrimiento)
         return f"^FO{x},{y}{etiquetas_qr.zpl_gf(dato_original, altura)}^FS"
 
     dato = _escapar(dato_original)
+    rotacion = el['rotacion']
 
+    x, y = _corrido(el, corrimiento)
     if el['centrar']:
-        x = max(0, (int(ancho_etiqueta) - etiquetas.ancho_code128(dato, modulo)) // 2)
+        x = max(0, (int(ancho_etiqueta)
+                    - etiquetas.ancho_code128(dato, modulo)) // 2)
 
     cabecera = f"^FO{x},{y}^BY{modulo},2.5,{altura}"
     if el['simbologia'] == 'code39':
-        return f"{cabecera}^B3{rot},N,{altura},{legible},N^FD{dato}^FS"
+        return f"{cabecera}^B3{rotacion},N,{altura},{legible},N^FD{dato}^FS"
     if el['simbologia'] == 'ean13':
-        return f"{cabecera}^BE{rot},{altura},{legible},N^FD{dato}^FS"
+        return f"{cabecera}^BE{rotacion},{altura},{legible},N^FD{dato}^FS"
     # El último parámetro de ^BC es el MODO. Sin él la impresora arranca en
     # subset B y codifica un dígito por símbolo, mientras que reportlab elige el
     # subset óptimo: el mismo payload salía angosto en la vista previa PDF y
     # ancho en la etiqueta impresa. `A` (automático) le pide a la impresora la
     # misma codificación que calcula `etiquetas.modulos_code128`, así que el
     # preview, el centrado y lo que sale del cabezal vuelven a coincidir.
-    return f"{cabecera}^BC{rot},{altura},{legible},N,N,A^FD{dato}^FS"
+    return f"{cabecera}^BC{rotacion},{altura},{legible},N,N,A^FD{dato}^FS"
 
 
-def _simbolo_a_zpl(el, ancho_etiqueta, datos):
+def _simbolo_a_zpl(el, ancho_etiqueta, datos, corrimiento):
     # El icono se rasteriza acá, a los puntos exactos que va a ocupar en el
     # papel. Rasterizar al tamaño final y no escalar después es lo que evita que
     # las líneas finas del símbolo se pierdan.
@@ -156,7 +165,8 @@ def _simbolo_a_zpl(el, ancho_etiqueta, datos):
     except simbolos.SimboloDesconocido:
         return ''
 
-    partes = [f"^FO{el['x']},{el['y']}{grafico}^FS"]
+    x, y = _corrido(el, corrimiento)
+    partes = [f"^FO{x},{y}{grafico}^FS"]
 
     leyenda = _escapar(etiquetas.sustituir(el['leyenda'], datos))
     if leyenda:
@@ -173,6 +183,7 @@ def _simbolo_a_zpl(el, ancho_etiqueta, datos):
             alineacion = 'C'
             # Centrar la leyenda respecto del símbolo, no de su borde izquierdo.
             lx = max(0, lx - (bloque - el['tam']) // 2)
+        lx, ly = _corrido({'x': lx, 'y': ly}, corrimiento)
         partes.append(
             f"^FO{lx},{ly}^FB{bloque},2,0,{alineacion}"
             f"^A0N,{tam},{tam}^FD{leyenda}^FS"
@@ -180,35 +191,38 @@ def _simbolo_a_zpl(el, ancho_etiqueta, datos):
     return ''.join(partes)
 
 
-def _caja_a_zpl(el):
+def _caja_a_zpl(el, corrimiento):
+    ancho, alto = el['ancho'], el['alto']
+    x, y = _corrido(el, corrimiento)
     grosor = el['grosor']
     if el['relleno']:
         # Un rectángulo sólido es un ^GB con el borde tan grueso como la caja.
-        grosor = min(el['ancho'], el['alto'])
-    return (f"^FO{el['x']},{el['y']}"
-            f"^GB{el['ancho']},{el['alto']},{grosor},B,{el['redondeo']}^FS")
+        grosor = min(ancho, alto)
+    return (f"^FO{x},{y}"
+            f"^GB{ancho},{alto},{grosor},B,{el['redondeo']}^FS")
 
 
-def _linea_a_zpl(el):
+def _linea_a_zpl(el, corrimiento):
     if el['orientacion'] == 'vertical':
         ancho, alto = el['grosor'], el['largo']
     else:
         ancho, alto = el['largo'], el['grosor']
-    return (f"^FO{el['x']},{el['y']}"
+    x, y = _corrido(el, corrimiento)
+    return (f"^FO{x},{y}"
             f"^GB{ancho},{alto},{el['grosor']},B,0^FS")
 
 
-def _elemento_a_zpl(el, ancho_etiqueta, datos):
+def _elemento_a_zpl(el, ancho_etiqueta, datos, corrimiento):
     if el['tipo'] == 'texto':
-        return _texto_a_zpl(el, datos)
+        return _texto_a_zpl(el, datos, corrimiento)
     if el['tipo'] == 'barcode':
-        return _barcode_a_zpl(el, ancho_etiqueta, datos)
+        return _barcode_a_zpl(el, ancho_etiqueta, datos, corrimiento)
     if el['tipo'] == 'simbolo':
-        return _simbolo_a_zpl(el, ancho_etiqueta, datos)
+        return _simbolo_a_zpl(el, ancho_etiqueta, datos, corrimiento)
     if el['tipo'] == 'linea':
-        return _linea_a_zpl(el)
+        return _linea_a_zpl(el, corrimiento)
     if el['tipo'] == 'caja':
-        return _caja_a_zpl(el)
+        return _caja_a_zpl(el, corrimiento)
     return ''
 
 
@@ -256,6 +270,12 @@ def _corrimiento(config):
 def render(elementos, ancho=None, alto=None, datos=None, copias=1, config=None):
     """Convierte una plantilla en el ZPL de UNA etiqueta.
 
+    `ancho` y `alto` son los del PAPEL, y son también los del lienzo del
+    diseñador: son la misma cosa. Lo que se ve en pantalla es lo que sale del
+    cabezal, sin giros intermedios. Si hace falta que un elemento salga de
+    costado, se rota ESE elemento —`el['rotacion']`— y se lo ve rotado en el
+    editor; el papel nunca se reinterpreta a espaldas del usuario.
+
     Deliberadamente no emite ^MM ni ^MN: la calibración del papel ya la tiene
     guardada la impresora, y pisarla desde acá es la forma más fácil de
     descalibrarla y que el rollo empiece a salir corrido.
@@ -268,6 +288,7 @@ def render(elementos, ancho=None, alto=None, datos=None, copias=1, config=None):
     ancho = int(ancho or etiquetas.ANCHO_DEFECTO)
     alto = int(alto or etiquetas.ALTO_DEFECTO)
     datos = etiquetas.datos_muestra(datos) if datos is None else datos
+    corrimiento = _corrimiento(config)
 
     partes = [
         '^XA',                  # arranca la etiqueta
@@ -277,24 +298,12 @@ def render(elementos, ancho=None, alto=None, datos=None, copias=1, config=None):
         '^LH0,0',               # origen arriba a la izquierda
         '^CI28',                # entrada en UTF-8
     ]
-    dx, dy = _corrimiento(config)
     for el in etiquetas.normalizar(elementos, ancho):
-        if dx or dy:
-            # ^FO no admite coordenadas negativas: el borde de la etiqueta es el
-            # cero y no hay nada a la izquierda de eso. Un corrimiento hacia la
-            # izquierda mayor que el margen del elemento lo deja pegado al borde
-            # en vez de generar un ^FO inválido que la impresora descarta.
-            #
-            # Se corre una copia: `el` viene de normalizar() y no hay que asumir
-            # que sea descartable para el que llamó.
-            el = dict(el,
-                      x=max(0, el['x'] + dx),
-                      y=max(0, el['y'] + dy))
-        comando = _elemento_a_zpl(el, ancho, datos)
+        comando = _elemento_a_zpl(el, ancho, datos, corrimiento)
         if comando:
             partes.append(comando)
     partes.append(f'^PQ{max(1, int(copias))}')   # cantidad de copias
-    partes.append('^XZ')                          # cierra y dispara la impresión
+    partes.append('^XZ')
     return '\n'.join(partes)
 
 

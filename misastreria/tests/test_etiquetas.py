@@ -7,10 +7,16 @@ a la prenda y la pistola que no la lee.
 """
 
 import json
+import random
 import re
+import shutil
+import string
+import subprocess
+import unittest
 from decimal import Decimal
+from pathlib import Path
 
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
 from misastreria import etiquetas, etiquetas_pdf, etiquetas_qr, etiquetas_zpl, simbolos
@@ -167,6 +173,103 @@ class ValidacionCode128Tests(TestCase):
         }]
         with self.assertRaises(etiquetas.DatoNoImprimible):
             etiquetas.validar_elementos(elementos, {}, 400)
+
+
+class AnchoCode128Tests(TestCase):
+    """El ancho que calcula el servidor y el que dibuja el editor.
+
+    Que estos dos números se separen es el bug más caro del módulo, porque no
+    se ve: el usuario acomoda el diseño contra un ancho que en el papel no
+    existe y sólo se entera con la etiqueta impresa. Ya pasó una vez —el
+    servidor pasó a la codificación mínima y el JS quedó contando un símbolo por
+    carácter—, y los códigos de este sistema son de puros dígitos, que es
+    justo el caso donde la diferencia es máxima.
+    """
+
+    def test_los_digitos_se_codifican_de_a_pares(self):
+        # Subset C: «000101» son 3 símbolos, no 6. Ese es el corazón del asunto.
+        self.assertEqual(etiquetas.simbolos_code128('000101'), 3)
+        self.assertEqual(etiquetas.modulos_code128('000101'), 35 + 11 * 3)
+        # 136 puntos a 203 ppp son 17 mm: la medida real de la etiqueta impresa.
+        self.assertEqual(etiquetas.ancho_code128('000101', 2), 136)
+
+    def test_un_digito_suelto_no_gana_nada_con_el_subset_c(self):
+        self.assertEqual(etiquetas.simbolos_code128('1'), 1)
+        self.assertEqual(etiquetas.simbolos_code128('123'), 3)
+
+    def test_texto_sin_digitos_cuesta_un_simbolo_por_caracter(self):
+        self.assertEqual(etiquetas.simbolos_code128('ABC'), 3)
+
+    def test_cambiar_de_subset_cuesta_y_a_veces_no_conviene(self):
+        # 14 caracteres: el tramo de dígitos paga el símbolo de cambio y aun así
+        # sale más barato que codificarlo entero en B.
+        self.assertEqual(etiquetas.simbolos_code128('PRN-010-ITM-01'),
+                         len('PRN-010-ITM-01'))
+
+    def test_el_vacio_no_ocupa_modulos(self):
+        self.assertEqual(etiquetas.modulos_code128(''), 0)
+
+
+class ParidadEditorServidorTests(SimpleTestCase):
+    """El editor dibuja en JS lo que el servidor imprime en Python.
+
+    `etiquetas.js` mantiene una copia de `simbolos_code128` porque el lienzo se
+    repinta en cada arrastre y no puede ir al servidor por cada cuadro. Una
+    copia sin test se desincroniza sola: este test extrae la función del archivo
+    REAL y la corre contra la de Python, así que el día que una de las dos
+    cambie sin la otra, falla acá y no en el rollo del sastre.
+    """
+
+    JS = Path(__file__).resolve().parent.parent / 'static' / 'js' / 'etiquetas.js'
+
+    @staticmethod
+    def _funcion_js():
+        """El cuerpo de `simbolosCode128` tal como está en el archivo servido."""
+        fuente = ParidadEditorServidorTests.JS.read_text(encoding='utf-8')
+        inicio = fuente.index('function simbolosCode128(dato) {')
+        fin = fuente.index('\n  }\n', inicio) + len('\n  }')
+        return fuente[inicio:fin]
+
+    def test_la_copia_en_js_sigue_existiendo(self):
+        # Si alguien la borra o la renombra, el resto del test pasaría a ser un
+        # skip silencioso y volveríamos a estar ciegos.
+        self.assertIn('costeC', self._funcion_js())
+
+    @unittest.skipUnless(shutil.which('node'), 'node no está instalado')
+    def test_js_y_python_cuentan_los_mismos_simbolos(self):
+        alfabeto = string.digits * 3 + string.ascii_uppercase + '-. '
+        azar = random.Random(7)
+        casos = [
+            '000101', '001001', '1', '12', '123', '1234', 'PRN-010-ITM-01',
+            'ABC123456789', 'A1B2C3', '999999999999', 'X', '12A34', '0' * 40,
+        ] + [
+            ''.join(azar.choice(alfabeto) for _ in range(azar.randint(1, 24)))
+            for _ in range(500)
+        ]
+
+        programa = (
+            self._funcion_js()
+            + "\nfor (const l of require('fs').readFileSync(0,'utf8').split('\\n'))"
+            + "\n  if (l) console.log(simbolosCode128(l));\n"
+        )
+        salida = subprocess.run(
+            ['node', '-e', programa],
+            input='\n'.join(casos), capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(salida.returncode, 0, salida.stderr)
+
+        en_js = [int(n) for n in salida.stdout.split()]
+        en_python = [etiquetas.simbolos_code128(c) for c in casos]
+        self.assertEqual(len(en_js), len(casos))
+
+        discrepancias = [
+            (dato, js, py)
+            for dato, js, py in zip(casos, en_js, en_python) if js != py
+        ]
+        self.assertEqual(discrepancias, [], (
+            'El editor y el servidor calculan anchos distintos para el mismo '
+            'código: el diseño en pantalla no es el que sale impreso.'
+        ))
 
 
 class EscaladoTests(TestCase):
@@ -379,6 +482,78 @@ class RendererZplTests(TestCase):
         # entienda, no con un ImportError crudo en la cara del usuario.
         with self.assertRaises(etiquetas_zpl.ImpresoraNoDisponible):
             etiquetas_zpl.enviar('^XA^XZ')
+
+
+class LienzoEsPapelTests(TestCase):
+    """El lienzo del diseñador y el papel de la impresora son la MISMA medida.
+
+    Hubo una versión en la que no lo eran: la plantilla guardaba un lienzo y una
+    bandera que decía que ese lienzo se apoyaba girado 90° sobre el rollo. El
+    editor dibujaba el lienzo derecho y la impresora sacaba el papel; el usuario
+    veía una cosa y le salía otra, sin ninguna forma de anticiparlo. Estos tests
+    fijan la regla que reemplazó a esa bandera: sin giros intermedios, lo que se
+    diseña es lo que se imprime, y si algo tiene que salir de costado se rota
+    ESE elemento y se lo ve rotado en pantalla.
+    """
+
+    ELEMENTOS = [
+        {'tipo': 'texto', 'x': 12, 'y': 8, 'texto': 'FORTIUM',
+         'tamano': 24, 'ancho_bloque': 300, 'renglones': 1},
+        {'tipo': 'caja', 'x': 4, 'y': 4, 'ancho': 392, 'alto': 232, 'grosor': 3},
+        {'tipo': 'linea', 'x': 12, 'y': 90, 'orientacion': 'horizontal',
+         'largo': 300, 'grosor': 3},
+        {'tipo': 'barcode', 'x': 20, 'y': 110, 'texto': '001501',
+         'simbologia': 'code128', 'modulo': 2, 'alto_barra': 70},
+    ]
+
+    def test_zpl_declara_a_la_impresora_las_medidas_del_lienzo(self):
+        """^PW y ^LL son el lienzo, tal cual, sin reinterpretar."""
+        zpl = etiquetas_zpl.render(self.ELEMENTOS, 240, 400, datos={})
+        self.assertIn('^PW240', zpl)
+        self.assertIn('^LL400', zpl)
+
+    def test_el_pdf_mide_lo_mismo_que_el_lienzo(self):
+        pdf = etiquetas_pdf.render(self.ELEMENTOS, 240, 400,
+                                   lote=[{}], copias=1)
+        # El tamaño de página va en el PDF como MediaBox, en puntos PostScript.
+        esperado = (etiquetas.puntos_a_pt(240), etiquetas.puntos_a_pt(400))
+        medida = re.search(rb'/MediaBox\s*\[([^\]]+)\]', pdf)
+        self.assertIsNotNone(medida, 'el PDF no declara MediaBox')
+        _, _, ancho_pt, alto_pt = [float(v) for v in medida.group(1).split()]
+        self.assertAlmostEqual(ancho_pt, esperado[0], places=2)
+        self.assertAlmostEqual(alto_pt, esperado[1], places=2)
+
+    def test_las_coordenadas_del_elemento_llegan_intactas_al_zpl(self):
+        """Sin giro no hay remapeo: el ^FO es el (x, y) que puso el usuario."""
+        zpl = etiquetas_zpl.render(
+            [{'tipo': 'texto', 'x': 37, 'y': 121, 'texto': 'X'}], 240, 400,
+            datos={})
+        self.assertIn('^FO37,121', zpl)
+
+    def test_un_lienzo_vertical_no_se_acuesta_sobre_el_papel(self):
+        """La regresión concreta que reportó el usuario.
+
+        Diseño vertical de 30 × 50 mm con el código de barras horizontal. Antes
+        salía un papel apaisado con el código parado; ahora el rollo es vertical
+        y el código sigue horizontal, que es lo que se ve en el editor.
+        """
+        ancho, alto = etiquetas.mm_a_puntos(30), etiquetas.mm_a_puntos(50)
+        zpl = etiquetas_zpl.render(
+            [{'tipo': 'barcode', 'x': 19, 'y': 160, 'texto': '001001',
+              'simbologia': 'code128', 'modulo': 2, 'alto_barra': 60}],
+            ancho, alto, datos={})
+        self.assertIn(f'^PW{ancho}', zpl)
+        self.assertIn(f'^LL{alto}', zpl)
+        # ^BCN: la N es «sin rotar». Nadie tocó la rotación del elemento.
+        self.assertIn('^FO19,160', zpl)
+        self.assertIn('^BCN,', zpl)
+
+    def test_la_plantilla_no_guarda_ninguna_bandera_de_giro(self):
+        plantilla = PlantillaEtiqueta(nombre='X', ancho_puntos=240,
+                                      alto_puntos=400)
+        self.assertFalse(hasattr(plantilla, 'orientacion'))
+        self.assertFalse(hasattr(plantilla, 'girada'))
+        self.assertFalse(hasattr(plantilla, 'papel_puntos'))
 
 
 class RendererPdfTests(TestCase):
@@ -840,6 +1015,125 @@ class VistasEtiquetasTests(TestCase):
         datos = respuesta.json()['items'][0]['datos']
         self.assertEqual(datos['codigo'], activo.codigo_item)
         self.assertEqual(datos['prenda'], 'Smoking Azul')
+
+    def test_buscar_items_filtra_por_tipo(self):
+        prenda = make_prenda(nombre='Chaqueta Gris')
+        venta = make_prenda_item(prenda=prenda, tipo='venta')
+        alquiler = make_prenda_item(prenda=prenda, tipo='alquiler')
+
+        url = reverse('buscar_items_etiqueta')
+        solo_venta = self.client.get(url, {'q': 'Chaqueta', 'tipo': 'venta'}).json()
+        self.assertEqual([i['codigo'] for i in solo_venta['items']],
+                         [venta.codigo_item])
+
+        solo_alquiler = self.client.get(
+            url, {'q': 'Chaqueta', 'tipo': 'alquiler'}).json()
+        self.assertEqual([i['codigo'] for i in solo_alquiler['items']],
+                         [alquiler.codigo_item])
+
+        # Un tipo que no existe no filtra nada, en vez de devolver vacío: es un
+        # parámetro de la interfaz, no una validación de negocio.
+        todos = self.client.get(url, {'q': 'Chaqueta', 'tipo': 'zzz'}).json()
+        self.assertEqual(len(todos['items']), 2)
+
+    def test_buscar_items_devuelve_el_stock_del_sku(self):
+        prenda = make_prenda(nombre='Frac Negro')
+        make_prenda_item(prenda=prenda, estado='disponible')
+        make_prenda_item(prenda=prenda, estado='disponible')
+        make_prenda_item(prenda=prenda, estado='alquilado')
+        make_prenda_item(prenda=prenda, estado='baja')     # no cuenta
+
+        items = self.client.get(reverse('buscar_items_etiqueta'),
+                                {'q': 'Frac'}).json()['items']
+        self.assertEqual(len(items), 3)
+        for item in items:
+            # El stock es del MODELO, no de la unidad: una unidad siempre es una.
+            self.assertEqual(item['stock_disponible'], 2)
+            self.assertEqual(item['stock_total'], 3)
+            self.assertIn(item['tipo'], ('venta', 'alquiler'))
+            self.assertTrue(item['tipo_nombre'])
+
+    # ── El rollo del asistente ───────────────────────────────────────────────
+
+    def test_asistente_horizontal_da_un_lienzo_apaisado(self):
+        """Pedir «horizontal» describe otro rollo, no una reinterpretación.
+
+        Antes esto marcaba la plantilla como «girada» y dejaba el papel al
+        revés del lienzo, así que el editor mostraba una cosa y la impresora
+        sacaba otra.
+        """
+        respuesta = self.client.get(
+            reverse('disenador_etiqueta'),
+            {'nueva': 1, 'origen': 'vacia', 'tamano': '32x61',
+             'orientacion': 'horizontal'})
+        contexto = respuesta.context
+        self.assertGreater(contexto['ancho'], contexto['alto'])
+        # Las medidas del rollo 32,5 × 60,8, intercambiadas: es OTRO rollo.
+        self.assertEqual(
+            (contexto['ancho'], contexto['alto']),
+            (etiquetas.mm_a_puntos(60.8), etiquetas.mm_a_puntos(32.5)),
+        )
+
+    def test_asistente_vertical_respeta_el_rollo_tal_como_viene(self):
+        respuesta = self.client.get(
+            reverse('disenador_etiqueta'),
+            {'nueva': 1, 'origen': 'vacia', 'tamano': '32x61',
+             'orientacion': 'vertical'})
+        contexto = respuesta.context
+        self.assertEqual(
+            (contexto['ancho'], contexto['alto']),
+            (etiquetas.mm_a_puntos(32.5), etiquetas.mm_a_puntos(60.8)),
+        )
+
+    def test_guardar_no_acepta_ninguna_bandera_de_giro(self):
+        """Un payload viejo con `orientacion` no debe resucitar el concepto."""
+        respuesta = self.client.post(
+            reverse('guardar_plantilla'),
+            data=json.dumps({
+                'nombre': 'Sin giro', 'elementos': [],
+                'ancho': 240, 'alto': 400, 'orientacion': 'girada',
+            }),
+            content_type='application/json',
+        )
+        self.assertTrue(respuesta.json()['ok'])
+        plantilla = PlantillaEtiqueta.objects.get(nombre='Sin giro')
+        self.assertEqual((plantilla.ancho_puntos, plantilla.alto_puntos),
+                         (240, 400))
+        self.assertFalse(hasattr(plantilla, 'orientacion'))
+
+    def test_las_etiquetas_del_sistema_usan_la_medida_de_la_plantilla(self):
+        PlantillaEtiqueta.objects.all().update(es_predeterminada=False)
+        PlantillaEtiqueta.objects.create(
+            nombre='Predeterminada vertical', ancho_puntos=240, alto_puntos=400,
+            es_predeterminada=True,
+            elementos=[{'tipo': 'texto', 'x': 10, 'y': 10, 'texto': '{codigo}',
+                        'tamano': 20}])
+        item = make_prenda_item()
+        respuesta = self.client.get(
+            reverse('exportar_etiqueta_item_pdf', args=[item.pk]))
+        self.assertEqual(respuesta.status_code, 200)
+        caja = re.search(rb'/MediaBox \[ 0 0 ([\d.]+) ([\d.]+) \]',
+                         respuesta.content)
+        self.assertAlmostEqual(float(caja.group(1)),
+                               etiquetas.puntos_a_pt(240), places=3)
+        self.assertAlmostEqual(float(caja.group(2)),
+                               etiquetas.puntos_a_pt(400), places=3)
+
+    def test_las_pantallas_muestran_la_medida_de_la_plantilla(self):
+        plantilla = PlantillaEtiqueta.objects.create(
+            nombre='Vertical visible', ancho_puntos=240, alto_puntos=400,
+            es_predeterminada=True, elementos=[])
+        # 240 × 400 puntos son 30 × 50 mm. Los decimales salen con coma porque
+        # Django localiza al español.
+        for url in (reverse('eliminar_plantilla', args=[plantilla.pk]),
+                    reverse('etiquetas_calibrar')):
+            with self.subTest(url=url):
+                respuesta = self.client.get(url)
+                self.assertEqual(respuesta.status_code, 200)
+                self.assertContains(respuesta, '30,0 × 50,0 mm')
+
+        listado = self.client.get(reverse('lista_plantillas'))
+        self.assertContains(listado, '30,0 × 50,0')
 
     # ── Etiquetas del sistema ────────────────────────────────────────────────
 

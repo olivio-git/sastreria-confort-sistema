@@ -26,8 +26,42 @@
     serif: '"Times New Roman", Times, serif',
     mono:  '"Courier New", Courier, monospace',
   };
-  // Un Code 128 B ocupa 35 módulos fijos más 11 por carácter.
-  const modulosCode128 = (dato) => 35 + 11 * dato.length;
+  // Espejo exacto de `etiquetas.simbolos_code128`. Ojo con la trampa: un SÍMBOLO
+  // de Code 128 no es un CARÁCTER. El subset C mete DOS dígitos en un símbolo, así
+  // que «000101» son 3 símbolos y no 6, y el código sale un 48 % más angosto de lo
+  // que sugiere el largo del texto.
+  //
+  // Contar de más acá no es un detalle estético: el editor dibujaría un código que
+  // no es el que sale del cabezal, y el usuario acomoda el diseño contra un ancho
+  // que en el papel no existe. La impresora recibe `^BC...,A` —modo automático—,
+  // que elige la misma codificación mínima que calcula esta función.
+  function simbolosCode128(dato) {
+    const n = dato.length;
+    if (!n) return 0;
+
+    const esDigito = (c) => c >= '0' && c <= '9';
+    const INFINITO = Infinity;
+    // costeB[i] = símbolos para codificar dato[i:] estando ya en subset B.
+    const costeB = new Array(n + 1).fill(INFINITO);
+    const costeC = new Array(n + 1).fill(INFINITO);
+    costeB[n] = 0;
+    costeC[n] = 0;
+
+    for (let i = n - 1; i >= 0; i--) {
+      const hayPar = i + 1 < n && esDigito(dato[i]) && esDigito(dato[i + 1]);
+      // Consumir desde acá sin cambiar de subset.
+      const seguirEnC = hayPar ? 1 + costeC[i + 2] : INFINITO;
+      const seguirEnB = 1 + costeB[i + 1];
+      // El `1 +` de la otra rama es el símbolo de cambio de subset.
+      costeB[i] = Math.min(seguirEnB, 1 + seguirEnC);
+      costeC[i] = Math.min(seguirEnC, 1 + seguirEnB);
+    }
+    // El símbolo de arranque cuesta igual sea B o C, así que se elige el mejor.
+    return Math.min(costeB[0], costeC[0]);
+  }
+
+  // 35 módulos fijos —arranque 11, checksum 11, cierre 13— más 11 por símbolo.
+  const modulosCode128 = (dato) => (dato ? 35 + 11 * simbolosCode128(dato) : 0);
   const PUNTOS_POR_MM = 203 / 25.4;
   const QR_TAM_MIN = 58;
 
@@ -537,9 +571,13 @@
    * No se codifica un Code 128 de verdad: la tabla del estándar son 107 entradas
    * y en el lienzo no aportan nada, porque lo que el usuario necesita decidir es
    * DÓNDE va el código y CUÁNTO ocupa, no qué barras lleva. Lo que sí es real es
-   * la ESTRUCTURA —arranque de 11 módulos, 11 por carácter, checksum de 11 y
+   * la ESTRUCTURA —arranque de 11 módulos, 11 por SÍMBOLO, checksum de 11 y
    * cierre de 13, que suman los 35 + 11n de la fórmula del servidor—, así que si
-   * acá entra en la etiqueta, en el papel también. */
+   * acá entra en la etiqueta, en el papel también.
+   *
+   * Los grupos se cuentan con `simbolosCode128` y no con el largo del texto: un
+   * código de puros dígitos se codifica de a pares, y dibujar un grupo por carácter
+   * lo pintaba casi al doble del ancho que después imprimía el cabezal. */
   const ARRANQUE = [2, 1, 1, 2, 1, 4];        // 11 módulos, el de Code 128 B
   const CIERRE = [2, 3, 3, 1, 1, 1, 2];       // 13 módulos
   const PATRONES = [
@@ -564,9 +602,13 @@
 
     grupo(ARRANQUE);
     let suma = 0;
-    for (let i = 0; i < dato.length; i++) {
-      suma += dato.charCodeAt(i) * (i + 1);
-      grupo(PATRONES[dato.charCodeAt(i) % PATRONES.length]);
+    for (let i = 0; i < dato.length; i++) suma += dato.charCodeAt(i) * (i + 1);
+    // Un grupo por símbolo real. El patrón de cada uno es decorativo pero estable:
+    // se deriva del dato para que el mismo código dibuje siempre las mismas barras
+    // y el usuario no vea el diseño titilar en cada repintado.
+    const simbolos = simbolosCode128(dato);
+    for (let i = 0; i < simbolos; i++) {
+      grupo(PATRONES[(dato.charCodeAt(i % dato.length) + i) % PATRONES.length]);
     }
     grupo(PATRONES[suma % PATRONES.length]);   // checksum
     grupo(CIERRE);
@@ -1483,6 +1525,17 @@
       data-prop="${clave}" ${valor ? 'checked' : ''}>
       <span class="form-check-label small">${etiqueta}</span></label>`;
 
+  // Un texto que es EXACTAMENTE un campo («{codigo}») se puede nombrar en el
+  // selector. Cualquier otra cosa —texto libre, o dos campos en la misma
+  // capa— es «Personalizado»: el selector no puede decir que hay un campo
+  // cuando hay dos, así que no lo dice.
+  const RE_CAMPO_SOLO = /^\{([a-z0-9_]+)\}$/i;
+
+  function campoDelTexto(texto) {
+    const coincidencia = RE_CAMPO_SOLO.exec(String(texto ?? '').trim());
+    return coincidencia && coincidencia[1] in CAMPOS ? coincidencia[1] : '';
+  }
+
   function pintarPropiedades() {
     const panel = document.getElementById('et-propiedades');
     const el = seleccionado();
@@ -1506,15 +1559,31 @@
       <div class="col-6">${campo('Y', numero('y', el.y, 0, 4000))}</div></div>`;
 
     if (el.tipo === 'texto') {
+      const actual = campoDelTexto(el.texto);
       const lista = Object.entries(CAMPOS)
-        .map(([clave, nombre]) => `<option value="{${clave}}">${nombre}</option>`).join('');
+        .map(([clave, nombre]) =>
+          `<option value="${clave}" ${clave === actual ? 'selected' : ''}>${nombre}</option>`)
+        .join('');
       html += seccion('Contenido');
       html += campo('Texto',
         `<textarea class="form-control form-control-sm" rows="2" data-prop="texto">${escaparHtml(el.texto)}</textarea>`);
-      html += campo('Insertar campo',
-        `<select class="form-select form-select-sm" id="prop-insertar">
-           <option value="">Elegir…</option>${lista}</select>`,
-        'Se reemplaza por el dato real al imprimir.');
+      // El selector MUESTRA qué campo tiene la capa, no es un botón de insertar
+      // disfrazado: si la capa dice «{codigo}», acá se lee «Código». Elegir otro
+      // lo reemplaza. Para armar un texto con varios campos está el «+», que
+      // agrega en el cursor y deja el selector en «Personalizado».
+      html += `<div class="et-prop">
+        <label>Campo</label>
+        <div class="input-group input-group-sm">
+          <select class="form-select" id="prop-campo">
+            <option value="" ${actual ? '' : 'selected'}>Personalizado</option>
+            ${lista}
+          </select>
+          <button type="button" class="btn btn-outline-secondary" id="prop-campo-mas"
+                  title="Agregar este campo donde está el cursor, sin reemplazar el texto">+</button>
+        </div>
+        <div class="form-hint">Elegir un campo reemplaza el texto; «+» lo agrega
+          donde está el cursor. Se sustituye por el dato real al imprimir.</div>
+      </div>`;
       html += seccion('Tipografía');
       html += campo('Fuente', opciones('fuente', el.fuente,
         [['sans', 'Sans (Helvetica)'], ['serif', 'Serif (Times)'], ['mono', 'Monoespaciada']]),
@@ -1652,17 +1721,48 @@
       });
     });
 
-    const insertar = document.getElementById('prop-insertar');
-    if (insertar) {
-      insertar.addEventListener('change', () => {
-        if (!insertar.value) return;
-        const area = panel.querySelector('[data-prop="texto"]');
-        area.value += insertar.value;
-        area.dispatchEvent(new Event('input'));
-        registrar();
-        insertar.value = '';
-      });
+    const selectorCampo = document.getElementById('prop-campo');
+    if (!selectorCampo) return;
+    const area = panel.querySelector('[data-prop="texto"]');
+
+    function escribirTexto(texto, cursor) {
+      const el = seleccionado();
+      if (!el) return;
+      el.texto = texto;
+      estado.elementos[estado.seleccion] = normalizar(el);
+      area.value = texto;
+      if (cursor !== undefined) {
+        area.focus();
+        area.setSelectionRange(cursor, cursor);
+      }
+      // El selector se sincroniza a mano en vez de repintar el panel: repintar
+      // reconstruye el textarea y le roba el foco al usuario a mitad de la
+      // edición, que es lo que hacía que perdiera el cursor.
+      selectorCampo.value = campoDelTexto(texto);
+      dibujar();
+      pintarCapas();
+      registrar();
     }
+
+    selectorCampo.addEventListener('change', () => {
+      if (!selectorCampo.value) return;   // «Personalizado» no toca el texto
+      escribirTexto(`{${selectorCampo.value}}`);
+    });
+
+    document.getElementById('prop-campo-mas').addEventListener('click', () => {
+      const clave = selectorCampo.value || Object.keys(CAMPOS)[0];
+      const token = `{${clave}}`;
+      const inicio = area.selectionStart ?? area.value.length;
+      const fin = area.selectionEnd ?? inicio;
+      escribirTexto(area.value.slice(0, inicio) + token + area.value.slice(fin),
+                    inicio + token.length);
+    });
+
+    // Al escribir a mano, el selector tiene que reflejarlo en el momento: si el
+    // texto deja de ser un campo puro pasa a «Personalizado» solo.
+    area.addEventListener('input', () => {
+      selectorCampo.value = campoDelTexto(area.value);
+    });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1675,13 +1775,16 @@
   const grupoCustom = document.getElementById('et-custom');
   let ultimoCambioOrientacion = null;
 
+  // El lienzo ES el papel: son la misma medida y no hay conversión entre uno y
+  // otro. Lo único que cambia de unidad es que al usuario se le habla en
+  // milímetros y adentro se trabaja en puntos de cabezal.
   function aplicarMedidas(ancho, alto, opciones = {}) {
     estado.ancho = Math.max(8, Math.min(4000, Math.round(ancho)));
     estado.alto = Math.max(8, Math.min(4000, Math.round(alto)));
     anchoActual = estado.ancho;      // lo usa normalizar() al crear elementos
 
-    // Los campos se escriben en mm, pero sólo si no los está tipeando el
-    // usuario: reescribirlos mientras escribe le movería el cursor.
+    // Los campos se escriben en mm, pero sólo se reescriben si no los está
+    // tipeando el usuario: hacerlo mientras escribe le movería el cursor.
     if (document.activeElement !== campoAncho) {
       campoAncho.value = aMm(estado.ancho).toFixed(1);
     }
@@ -1689,12 +1792,10 @@
       campoAlto.value = aMm(estado.alto).toFixed(1);
     }
 
-    const orientacion = estado.ancho >= estado.alto ? 'horizontal' : 'vertical';
+    const forma = estado.ancho >= estado.alto ? 'apaisado' : 'vertical';
     document.getElementById('et-medidas-estado').textContent =
-      `${aMm(estado.ancho).toFixed(1)} × ${aMm(estado.alto).toFixed(1)} mm · ${orientacion}`;
+      `rollo ${aMm(estado.ancho).toFixed(1)} × ${aMm(estado.alto).toFixed(1)} mm · ${forma}`;
 
-    // El selector se sincroniza para que no quede mostrando una medida que ya
-    // no es la del papel (pasa al girar la orientación).
     const clave = `${estado.ancho}x${estado.alto}`;
     const existe = [...selectorTamano.options].some((o) => o.value === clave);
     selectorTamano.value = existe ? clave : 'custom';
@@ -1750,6 +1851,9 @@
     };
   }
 
+  // Da vuelta el ROLLO: intercambia ancho y alto y reacomoda el diseño adentro.
+  // No existe ninguna bandera de «girado» — el lienzo es el papel, así que lo
+  // que queda en pantalla es literalmente lo que va a salir del cabezal.
   document.getElementById('et-orientacion').addEventListener('click', () => {
     const antes = instantanea();
     if (ultimoCambioOrientacion && antes === ultimoCambioOrientacion.despues) {
@@ -1760,7 +1864,7 @@
       registrar();
       ajustarZoom();
       repintarTodo();
-      avisar('Se restauró la orientación y el tamaño anterior del diseño.', 'info');
+      avisar('Se restauró el rollo y el tamaño anterior del diseño.', 'info');
       return;
     }
 
@@ -1771,8 +1875,8 @@
     const limites = limitesDelDiseno();
 
     // Mantiene los textos derechos y adapta proporcionalmente el diseño entero
-    // al nuevo papel. Dejar las coordenadas intactas hacía que, al pasar de
-    // horizontal a vertical, la mitad derecha quedara fuera del marco.
+    // al nuevo lienzo. Dejar las coordenadas intactas hacía que, al pasar de
+    // apaisado a vertical, la mitad derecha quedara fuera del marco.
     const margen = Math.min(8, nuevoAncho / 10, nuevoAlto / 10);
     const factor = Math.min(
       1,
@@ -1804,7 +1908,10 @@
     registrar();
     ajustarZoom();
     repintarTodo();
-    avisar('Orientación cambiada: el diseño se adaptó y centró dentro del papel.', 'info');
+    avisar(
+      `Ahora la etiqueta es de ${aMm(estado.ancho).toFixed(1)} × `
+      + `${aMm(estado.alto).toFixed(1)} mm. Cargá el rollo que corresponda.`,
+      'info');
   });
 
   let anclaZoom = null;
@@ -1928,7 +2035,6 @@
   // antes no tiene efecto porque el elemento todavía no es visible.
   document.getElementById('et-modal-items').addEventListener('shown.bs.modal', () => {
     buscador.focus();
-    buscador.select();
   });
 
   buscador.addEventListener('input', () => {
@@ -1936,23 +2042,56 @@
     temporizador = setTimeout(buscarItems, 300);
   });
 
+  // Filtro venta / alquiler. Es un grupo de botones y no un select porque son
+  // tres opciones fijas y se usan a un clic mientras se busca con la otra mano.
+  let tipoItems = '';
+  const filtroTipo = document.getElementById('et-filtro-tipo');
+  filtroTipo.addEventListener('click', (evento) => {
+    const boton = evento.target.closest('[data-tipo]');
+    if (!boton) return;
+    tipoItems = boton.dataset.tipo;
+    filtroTipo.querySelectorAll('[data-tipo]').forEach((b) =>
+      b.classList.toggle('active', b === boton));
+    buscarItems();
+  });
+
+  // Sin unidades disponibles la prenda igual se puede etiquetar —se etiqueta
+  // justamente para volver a ponerla en circulación— así que el cero se avisa
+  // en rojo pero no bloquea nada.
+  function stockItem(it) {
+    const disponible = it.stock_disponible ?? 0;
+    const total = it.stock_total ?? 0;
+    const color = disponible === 0 ? 'text-danger'
+      : disponible < total ? 'text-warning' : 'text-success';
+    return `<span class="${color} fw-medium">${disponible}</span>`
+      + `<span class="text-muted small"> / ${total}</span>`;
+  }
+
   function filaItem(it) {
+    const tipo = it.tipo === 'venta' ? 'bg-purple-lt' : 'bg-azure-lt';
     return `<tr data-item="${it.id}">
       <td class="et-item-codigo">${escaparHtml(it.codigo)}</td>
       <td>${escaparHtml(it.nombre)}</td>
       <td class="et-item-detalle">${escaparHtml(it.detalle)}</td>
+      <td><span class="badge ${tipo}">${escaparHtml(it.tipo_nombre || '')}</span></td>
+      <td>${stockItem(it)}</td>
+      <td class="text-end">
+        <button type="button" class="btn btn-sm btn-primary" data-elegir>Seleccionar</button>
+      </td>
     </tr>`;
   }
 
   async function buscarItems() {
     const consulta = buscador.value.trim();
     try {
-      const respuesta = await fetch(`${app.dataset.urlItems}?q=${encodeURIComponent(consulta)}`);
+      const parametros = new URLSearchParams({ q: consulta });
+      if (tipoItems) parametros.set('tipo', tipoItems);
+      const respuesta = await fetch(`${app.dataset.urlItems}?${parametros}`);
       const datos = await respuesta.json();
 
       if (!datos.items.length) {
         cuerpoItems.innerHTML =
-          '<tr><td colspan="3" class="text-muted py-4 text-center">'
+          '<tr><td colspan="6" class="text-center text-muted py-4">'
           + 'Ninguna prenda coincide con la búsqueda.</td></tr>';
         avisoItems.textContent = '';
         return;
@@ -1960,19 +2099,22 @@
 
       cuerpoItems.innerHTML = datos.items.map(filaItem).join('');
 
-      // El servidor corta en 40. Si vinieron 40 justos es casi seguro que hay
-      // más, y sin avisarlo el usuario cree que la prenda que busca no existe.
+      // El endpoint corta en 40. Sin decirlo, una búsqueda vacía parece la lista
+      // completa: el usuario cree que la prenda que busca no existe.
       avisoItems.textContent = datos.items.length >= 40
-        ? 'Se muestran las primeras 40. Escribí un poco más para achicar la lista.'
+        ? 'Se muestran las primeras 40. Afiná la búsqueda para ver el resto.'
         : `${datos.items.length} prenda${datos.items.length === 1 ? '' : 's'}.`;
 
       cuerpoItems.querySelectorAll('[data-item]').forEach((fila) => {
         const item = datos.items.find((i) => String(i.id) === fila.dataset.item);
+        // La fila entera sigue siendo clickeable —es más rápido— pero el botón
+        // deja visible que ahí se elige: hacer clic en una fila de tabla no es
+        // algo que se adivine.
         fila.addEventListener('click', () => elegirItem(item));
       });
     } catch (error) {
       cuerpoItems.innerHTML =
-        '<tr><td colspan="3" class="text-muted py-4 text-center">'
+        '<tr><td colspan="6" class="text-center text-danger py-4">'
         + 'No se pudo consultar el inventario.</td></tr>';
       avisoItems.textContent = '';
     }
