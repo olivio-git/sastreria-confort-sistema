@@ -3285,6 +3285,7 @@ def devolver_alquiler(request, id):
             pi.estado = 'disponible'
             pi.save(update_fields=['veces_alquilado', 'condicion', 'estado'])
         alquiler.estado = 'devuelto'
+        alquiler.fecha_devolucion_real = django_tz.now()
         alquiler.save()
         for ai in alquiler.items.select_related('prenda_item').all():
             kardex_events.emit_devolucion(ai.prenda_item, alquiler)
@@ -7072,13 +7073,19 @@ def _kpis_operativas(fecha_inicio, fecha_fin):
     Returns scalar dict with avg/min/max durations (days) and inventory occupation.
     """
     # Alquiler durations — only devueltos (fecha_devolucion is required/always set,
-    # so isnull=False was always True and selected everything; use estado instead)
+    # so isnull=False was always True and selected everything; use estado instead).
+    # Measure against the REAL return moment; fall back to the agreed date only
+    # for legacy rows that predate fecha_devolucion_real.
     pares = list(Alquiler.objects.filter(
         fecha_alquiler__gte=fecha_inicio,
         fecha_alquiler__lte=fecha_fin,
         estado='devuelto',
-    ).values_list('fecha_alquiler', 'fecha_devolucion'))
-    dur_alq = [(b - a).days for a, b in pares if b is not None]
+    ).values_list('fecha_alquiler', 'fecha_devolucion', 'fecha_devolucion_real'))
+    dur_alq = [
+        ((django_tz.localtime(real).date() if real else pactada) - inicio).days
+        for inicio, pactada, real in pares
+        if (real or pactada) is not None
+    ]
 
     # Confeccion delivery
     pares_conf = list(Confeccion.objects.filter(

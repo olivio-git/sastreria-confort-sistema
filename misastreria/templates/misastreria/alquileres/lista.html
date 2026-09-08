@@ -129,7 +129,8 @@
           <td>
             {{ a.fecha_devolucion|date:"d/m/Y" }}
             {% if a.hora_devolucion %}<small class="text-muted d-block">{{ a.hora_devolucion|time:"H:i" }}</small>{% endif %}
-            {% if a.con_recargo %}<span class="badge bg-danger text-white ms-1" title="Pasó la hora de devolución">Recargo</span>{% endif %}
+            {% if a.fecha_devolucion_real %}<small class="text-success d-block">Devuelto {{ a.fecha_devolucion_real|date:"d/m/Y H:i" }}</small>{% endif %}
+            {% if a.con_recargo %}<span class="badge bg-danger text-white ms-1" title="Devuelto fuera de la fecha/hora acordada">{{ a.dias_retraso }} día{{ a.dias_retraso|pluralize }} de mora</span>{% endif %}
           </td>
           <td>
             {% if a.estado == 'alquilado' or a.estado == 'devuelto' or a.estado == 'reservado' %}

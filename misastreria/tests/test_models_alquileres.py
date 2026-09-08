@@ -4,15 +4,16 @@ test_models_alquileres.py
 Cubre:
   - Auto-generación de código ALQ-NNN
   - recalcular_totales() con descuento
-  - con_recargo property (fecha vencida)
+  - con_recargo / dias_retraso (contra la devolución REAL, no contra hoy)
   - estado_color (busca EstadoAlquiler o devuelve 'secondary')
   - AlquilerItem.subtotal
   - total_pagado / saldo_pendiente
 """
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from django.test import TestCase
+from django.utils import timezone
 
 from misastreria.models import Alquiler, AlquilerItem
 from .factories import (
@@ -70,8 +71,13 @@ class AlquilerRecalcularTotalesTests(TestCase):
         self.assertEqual(a.total, Decimal('0'))
 
 
-class AlquilerConRecargoTests(TestCase):
-    """con_recargo=True cuando fecha_devolucion está vencida."""
+def _momento(dia, hora=12, minuto=0):
+    """Datetime aware en la zona local, para simular una devolución real."""
+    return timezone.make_aware(datetime.combine(dia, time(hora, minuto)))
+
+
+class AlquilerConRecargoActivoTests(TestCase):
+    """Alquiler todavía afuera: el atraso se mide contra ahora."""
 
     def test_fecha_futura_sin_recargo(self):
         a = make_alquiler(fecha_devolucion=date.today() + timedelta(days=5))
@@ -84,6 +90,85 @@ class AlquilerConRecargoTests(TestCase):
     def test_fecha_muy_pasada_con_recargo(self):
         a = make_alquiler(fecha_devolucion=date(2020, 1, 1))
         self.assertTrue(a.con_recargo)
+
+
+class AlquilerConRecargoDevueltoTests(TestCase):
+    """Ya devuelto: el veredicto se congela contra el momento REAL de entrega.
+
+    Este es el bug que hacía que TODO alquiler pasado saliera con recargo: se
+    comparaba la fecha pactada contra hoy, así que bastaba con que el calendario
+    avanzara para acusar de mora a un cliente que devolvió antes de tiempo.
+    """
+
+    def test_devuelto_a_tiempo_hace_anios_no_tiene_recargo(self):
+        a = make_alquiler(
+            fecha_alquiler=date(2020, 1, 5),
+            fecha_devolucion=date(2020, 1, 10),
+            fecha_devolucion_real=_momento(date(2020, 1, 10)),
+            estado='devuelto',
+        )
+        self.assertFalse(a.con_recargo)
+        self.assertEqual(a.dias_retraso, 0)
+
+    def test_devuelto_antes_de_tiempo_no_tiene_recargo(self):
+        a = make_alquiler(
+            fecha_devolucion=date.today() - timedelta(days=10),
+            fecha_devolucion_real=_momento(date.today() - timedelta(days=13)),
+            estado='devuelto',
+        )
+        self.assertFalse(a.con_recargo)
+        self.assertEqual(a.dias_retraso, 0)
+
+    def test_devuelto_tarde_tiene_recargo(self):
+        a = make_alquiler(
+            fecha_devolucion=date.today() - timedelta(days=10),
+            fecha_devolucion_real=_momento(date.today() - timedelta(days=7)),
+            estado='devuelto',
+        )
+        self.assertTrue(a.con_recargo)
+        self.assertEqual(a.dias_retraso, 3)
+
+    def test_mismo_dia_antes_de_la_hora_no_tiene_recargo(self):
+        dia = date.today() - timedelta(days=4)
+        a = make_alquiler(
+            fecha_devolucion=dia,
+            hora_devolucion=time(18, 0),
+            fecha_devolucion_real=_momento(dia, 17, 30),
+            estado='devuelto',
+        )
+        self.assertFalse(a.con_recargo)
+
+    def test_mismo_dia_pasada_la_hora_tiene_recargo_de_un_dia(self):
+        dia = date.today() - timedelta(days=4)
+        a = make_alquiler(
+            fecha_devolucion=dia,
+            hora_devolucion=time(18, 0),
+            fecha_devolucion_real=_momento(dia, 19, 30),
+            estado='devuelto',
+        )
+        self.assertTrue(a.con_recargo)
+        self.assertEqual(a.dias_retraso, 1)
+
+    def test_mismo_dia_sin_hora_pactada_no_tiene_recargo(self):
+        """Sin hora acordada, todo el día pactado cuenta como a tiempo."""
+        dia = date.today() - timedelta(days=4)
+        a = make_alquiler(
+            fecha_devolucion=dia,
+            hora_devolucion=None,
+            fecha_devolucion_real=_momento(dia, 23, 0),
+            estado='devuelto',
+        )
+        self.assertFalse(a.con_recargo)
+
+    def test_devuelto_sin_fecha_real_no_inventa_mora(self):
+        """Registro viejo sin rastro en el kardex: sin evidencia no se acusa."""
+        a = make_alquiler(
+            fecha_devolucion=date(2020, 1, 10),
+            fecha_devolucion_real=None,
+            estado='devuelto',
+        )
+        self.assertFalse(a.con_recargo)
+        self.assertEqual(a.dias_retraso, 0)
 
 
 class AlquilerEstadoColorTests(TestCase):

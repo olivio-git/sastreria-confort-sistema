@@ -87,7 +87,8 @@
             <div class="datagrid-content">
               {{ alquiler.fecha_devolucion|date:"d/m/Y" }}
               {% if alquiler.hora_devolucion %}<small class="text-muted d-block">{{ alquiler.hora_devolucion|time:"H:i" }}</small>{% endif %}
-              {% if alquiler.con_recargo %}<span class="badge bg-danger text-white ms-1">Recargo</span>{% endif %}
+              {% if alquiler.fecha_devolucion_real %}<small class="text-success d-block">Devuelto {{ alquiler.fecha_devolucion_real|date:"d/m/Y H:i" }}</small>{% endif %}
+              {% if alquiler.con_recargo %}<span class="badge bg-danger text-white ms-1">{{ alquiler.dias_retraso }} día{{ alquiler.dias_retraso|pluralize }} de mora</span>{% endif %}
             </div>
           </div>
           {% if alquiler.garantia_tipo %}
@@ -351,7 +352,10 @@
           {% if alquiler.con_recargo %}
           <div class="alert alert-warning py-2 mb-3 d-flex align-items-center gap-2">
             <i data-lucide="alarm-clock" style="width:1rem;height:1rem"></i>
-            <span class="small">Devolución fuera de la fecha/hora acordada.</span>
+            <span class="small">
+              Mora de <strong>{{ alquiler.dias_retraso }} día{{ alquiler.dias_retraso|pluralize }}</strong>
+              sobre la fecha acordada ({{ alquiler.fecha_devolucion|date:"d/m/Y" }}{% if alquiler.hora_devolucion %} {{ alquiler.hora_devolucion|time:"H:i" }}{% endif %}).
+            </span>
           </div>
           {% endif %}
           <div class="mb-3">

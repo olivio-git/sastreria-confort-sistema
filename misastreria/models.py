@@ -954,6 +954,10 @@ class Alquiler(Servicio):
     fecha_devolucion = models.DateField(verbose_name="Fecha de Devolución")
     fecha_evento = models.DateField(null=True, blank=True, verbose_name="Fecha del evento")
     hora_devolucion = models.TimeField(null=True, blank=True, verbose_name="Hora de Devolución")
+    fecha_devolucion_real = models.DateTimeField(
+        null=True, blank=True, verbose_name="Devuelto el",
+        help_text="Momento real en que las prendas volvieron. Lo estampa la pantalla de devolución.",
+    )
     estado = models.CharField(max_length=50, default='alquilado', verbose_name="Estado")
     cliente = models.ForeignKey(Cliente, on_delete=models.SET_NULL, null=True, blank=True, related_name='alquileres', verbose_name="Cliente")
     empleado = models.ForeignKey(Empleado, on_delete=models.SET_NULL, null=True, blank=True, related_name='alquileres', verbose_name="Empleado")
@@ -1002,16 +1006,43 @@ class Alquiler(Servicio):
     def estado_display(self):
         return self.estado.replace('_', ' ').title()
 
+    def _momento_juzgado(self):
+        """Instante contra el que se mide el atraso.
+
+        Si el alquiler ya se devolvió, es el momento REAL de la devolución: el
+        veredicto queda congelado y no puede correrse con el paso del calendario.
+        Si sigue activo, es ahora — la deuda de tiempo se acumula sola.
+        Devuelve None cuando está devuelto sin fecha real (registros anteriores
+        a este campo y sin rastro en el kardex): sin evidencia no se acusa.
+        """
+        if self.fecha_devolucion_real:
+            return timezone.localtime(self.fecha_devolucion_real)
+        if self.estado == 'devuelto':
+            return None
+        return timezone.localtime(timezone.now())
+
     @property
     def con_recargo(self):
-        from django.utils import timezone
-        ahora_local = timezone.localtime(timezone.now())
-        hoy = ahora_local.date()
-        if self.fecha_devolucion < hoy:
+        momento = self._momento_juzgado()
+        if momento is None:
+            return False
+        if momento.date() > self.fecha_devolucion:
             return True
-        if self.fecha_devolucion == hoy and self.hora_devolucion:
-            return ahora_local.time() > self.hora_devolucion
+        if momento.date() == self.fecha_devolucion and self.hora_devolucion:
+            return momento.time() > self.hora_devolucion
         return False
+
+    @property
+    def dias_retraso(self):
+        """Días cumplidos de atraso, para calcular el recargo.
+
+        Devolver el mismo día pero pasada la hora acordada cuenta como 1 día:
+        hay mora, y una mora de cero días no se puede cobrar.
+        """
+        if not self.con_recargo:
+            return 0
+        dias = (self._momento_juzgado().date() - self.fecha_devolucion).days
+        return dias if dias > 0 else 1
 
     @property
     def estado_color(self):
@@ -1786,6 +1817,7 @@ class PlantillaEtiqueta(models.Model):
 
     ancho_puntos = models.PositiveIntegerField(default=400, verbose_name="Ancho (puntos)")
     alto_puntos = models.PositiveIntegerField(default=240, verbose_name="Alto (puntos)")
+
 
     elementos = models.JSONField(default=list, blank=True, verbose_name="Elementos")
 
