@@ -409,11 +409,37 @@ class PrendaInventario(models.Model):
             return self._stock_disponible
         return self.items.filter(estado='disponible').count()
 
+    PREFIJO = 'PRN'
+
+    @classmethod
+    def siguiente_codigo(cls):
+        """Máximo numérico entre los códigos PRN-NNN, más uno.
+
+        Antes se tomaba el último SKU por `id` y se hacía
+        `int(codigo.split('-')[1])`. Eso fallaba de dos formas:
+
+        · al borrar el último, su número se reutilizaba y el alta siguiente
+          chocaba contra el `unique` del código;
+        · cualquier código fuera del patrón —los `HIST-NNN` que deja el corte
+          de inventario— reventaba con ValueError y dejaba el sistema sin
+          poder dar de alta ninguna prenda.
+
+        El filtro se hace por prefijo y el número se valida en Python, sin
+        `__regex`, para no depender de cómo lo implemente cada motor: local es
+        SQLite y producción MySQL.
+        """
+        numeros = []
+        for codigo in cls.objects.filter(
+            codigo__startswith=f'{cls.PREFIJO}-'
+        ).values_list('codigo', flat=True):
+            sufijo = codigo.split('-', 1)[1]
+            if sufijo.isdigit():
+                numeros.append(int(sufijo))
+        return f"{cls.PREFIJO}-{max(numeros, default=0) + 1:03d}"
+
     def save(self, *args, **kwargs):
         if not self.codigo:
-            last = PrendaInventario.objects.order_by('-id').first()
-            numero = int(last.codigo.split('-')[1]) + 1 if last and last.codigo and '-' in last.codigo else 1
-            self.codigo = f"PRN-{numero:03d}"
+            self.codigo = PrendaInventario.siguiente_codigo()
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -614,23 +640,27 @@ class PrendaItem(models.Model):
             models.Index(fields=['prenda', 'estado']),
         ]
 
+    @staticmethod
+    def siguiente_codigo(prenda):
+        """Máximo numérico entre las unidades del SKU, más uno.
+
+        Mismo criterio que PrendaInventario.siguiente_codigo: por el máximo y
+        no por el último `id`, para no reutilizar el número de una unidad
+        borrada y chocar contra el `unique`.
+        """
+        base = prenda.codigo
+        numeros = []
+        for codigo in PrendaItem.objects.filter(
+            prenda=prenda, codigo_item__startswith=f'{base}-ITM-'
+        ).values_list('codigo_item', flat=True):
+            sufijo = codigo.rsplit('-', 1)[-1]
+            if sufijo.isdigit():
+                numeros.append(int(sufijo))
+        return f"{base}-ITM-{max(numeros, default=0) + 1:02d}"
+
     def save(self, *args, **kwargs):
         if not self.codigo_item:
-            base = self.prenda.codigo
-            last = (
-                PrendaItem.objects
-                .filter(prenda=self.prenda)
-                .order_by('-id')
-                .first()
-            )
-            if last and last.codigo_item:
-                try:
-                    n = int(last.codigo_item.rsplit('-', 1)[-1]) + 1
-                except (ValueError, IndexError):
-                    n = self.prenda.items.count() + 1
-            else:
-                n = 1
-            self.codigo_item = f"{base}-ITM-{n:02d}"
+            self.codigo_item = PrendaItem.siguiente_codigo(self.prenda)
         super().save(*args, **kwargs)
 
     def __str__(self):

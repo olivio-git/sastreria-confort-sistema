@@ -851,6 +851,15 @@ class OrdenProduccionForm(forms.ModelForm):
         self.fields['fecha_estimada'].required = False
         self.fields['prenda_inventario'].required = False
         self.fields['cantidad'].required = False
+        # Sólo modelos activos. Sin esto, tras un corte de inventario el alta
+        # de producción seguía ofreciendo los 42 modelos archivados y se podía
+        # abrir una orden contra un modelo que ya no se usa. La orden ya
+        # existente conserva el suyo: el FK es PROTECT y no se toca.
+        campo = self.fields['prenda_inventario']
+        qs = campo.queryset.filter(estado='ACT')
+        if self.instance.pk and self.instance.prenda_inventario_id:
+            qs = qs | campo.queryset.filter(pk=self.instance.prenda_inventario_id)
+        campo.queryset = qs.distinct()
 
     def clean(self):
         cleaned = super().clean()
