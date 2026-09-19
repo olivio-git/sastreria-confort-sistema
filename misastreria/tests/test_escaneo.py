@@ -73,16 +73,26 @@ class EscanearPrendaItemTests(TestCase):
         self.assertFalse(data['ok'])
         self.assertEqual(data['motivo'], 'baja')
 
-    def test_item_de_otro_tipo_no_sirve_para_este_formulario(self):
+    def test_item_de_otro_tipo_se_acepta_con_aviso(self):
+        """Una prenda de venta se puede alquilar: entra, pero avisando de dónde
+        viene. El tipo dejó de ser un rechazo y pasó a ser un dato."""
         item = make_prenda_item(self.prenda, tipo='venta')
         data = self.escanear(item.codigo_item, contexto='alquiler')
-        self.assertFalse(data['ok'])
-        self.assertEqual(data['motivo'], 'tipo')
+        self.assertTrue(data['ok'])
+        self.assertIn('venta', data['aviso'].lower())
+        self.assertIn(item.codigo_item, data['aviso'])
+
+    def test_item_del_mismo_tipo_no_lleva_aviso(self):
+        item = make_prenda_item(self.prenda, tipo='alquiler')
+        data = self.escanear(item.codigo_item, contexto='alquiler')
+        self.assertTrue(data['ok'])
+        self.assertIsNone(data['aviso'])
 
     def test_sin_contexto_no_filtra_por_tipo(self):
         item = make_prenda_item(self.prenda, tipo='venta')
         data = self.escanear(item.codigo_item, contexto='')
         self.assertTrue(data['ok'])
+        self.assertIsNone(data['aviso'])
 
     def test_item_de_conjunto_manda_al_boton_de_conjuntos(self):
         item = make_prenda_item(self.prenda)

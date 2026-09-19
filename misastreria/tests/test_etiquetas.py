@@ -1008,27 +1008,56 @@ class VistasEtiquetasTests(TestCase):
         activo = make_prenda_item(prenda=prenda)
         make_prenda_item(prenda=prenda, estado='baja')
 
-        respuesta = self.client.get(reverse('buscar_items_etiqueta'), {'q': 'Smoking'})
-        codigos = [i['codigo'] for i in respuesta.json()['items']]
+        # datos=1 porque el payload de etiqueta ya no viaja por defecto: lo
+        # pide el diseñador, no los formularios de venta y alquiler.
+        respuesta = self.client.get(
+            reverse('buscar_items_inventario'), {'q': 'Smoking', 'datos': '1'})
+        codigos = [i['codigo_item'] for i in respuesta.json()['items']]
         self.assertIn(activo.codigo_item, codigos)
         self.assertEqual(len(codigos), 1)
         datos = respuesta.json()['items'][0]['datos']
         self.assertEqual(datos['codigo'], activo.codigo_item)
         self.assertEqual(datos['prenda'], 'Smoking Azul')
 
+    def test_buscar_items_sin_datos_no_calcula_el_payload_de_etiqueta(self):
+        make_prenda_item(prenda=make_prenda(nombre='Smoking Azul'))
+        respuesta = self.client.get(reverse('buscar_items_inventario'), {'q': 'Smoking'})
+        self.assertIsNone(respuesta.json()['items'][0]['datos'])
+
+    def test_buscar_items_filtra_por_estado(self):
+        prenda = make_prenda(nombre='Terno Beige')
+        libre = make_prenda_item(prenda=prenda, estado='disponible')
+        make_prenda_item(prenda=prenda, estado='alquilado')
+
+        url = reverse('buscar_items_inventario')
+        todos = self.client.get(url, {'q': 'Beige'}).json()['items']
+        self.assertEqual(len(todos), 2)
+
+        libres = self.client.get(url, {'q': 'Beige', 'estado': 'disponible'}).json()['items']
+        self.assertEqual([i['codigo_item'] for i in libres], [libre.codigo_item])
+
+    def test_buscar_items_devuelve_los_dos_precios(self):
+        prenda = make_prenda(nombre='Frac Negro', precio=Decimal('900'),
+                             precio_alquiler_base=Decimal('250'))
+        make_prenda_item(prenda=prenda)
+        item = self.client.get(reverse('buscar_items_inventario'),
+                               {'q': 'Frac'}).json()['items'][0]
+        self.assertEqual(item['precio'], 900.0)
+        self.assertEqual(item['precio_alquiler_base'], 250.0)
+
     def test_buscar_items_filtra_por_tipo(self):
         prenda = make_prenda(nombre='Chaqueta Gris')
         venta = make_prenda_item(prenda=prenda, tipo='venta')
         alquiler = make_prenda_item(prenda=prenda, tipo='alquiler')
 
-        url = reverse('buscar_items_etiqueta')
+        url = reverse('buscar_items_inventario')
         solo_venta = self.client.get(url, {'q': 'Chaqueta', 'tipo': 'venta'}).json()
-        self.assertEqual([i['codigo'] for i in solo_venta['items']],
+        self.assertEqual([i['codigo_item'] for i in solo_venta['items']],
                          [venta.codigo_item])
 
         solo_alquiler = self.client.get(
             url, {'q': 'Chaqueta', 'tipo': 'alquiler'}).json()
-        self.assertEqual([i['codigo'] for i in solo_alquiler['items']],
+        self.assertEqual([i['codigo_item'] for i in solo_alquiler['items']],
                          [alquiler.codigo_item])
 
         # Un tipo que no existe no filtra nada, en vez de devolver vacío: es un
@@ -1043,7 +1072,7 @@ class VistasEtiquetasTests(TestCase):
         make_prenda_item(prenda=prenda, estado='alquilado')
         make_prenda_item(prenda=prenda, estado='baja')     # no cuenta
 
-        items = self.client.get(reverse('buscar_items_etiqueta'),
+        items = self.client.get(reverse('buscar_items_inventario'),
                                 {'q': 'Frac'}).json()['items']
         self.assertEqual(len(items), 3)
         for item in items:
@@ -1051,7 +1080,7 @@ class VistasEtiquetasTests(TestCase):
             self.assertEqual(item['stock_disponible'], 2)
             self.assertEqual(item['stock_total'], 3)
             self.assertIn(item['tipo'], ('venta', 'alquiler'))
-            self.assertTrue(item['tipo_nombre'])
+            self.assertTrue(item['tipo_label'])
 
     # ── El rollo del asistente ───────────────────────────────────────────────
 

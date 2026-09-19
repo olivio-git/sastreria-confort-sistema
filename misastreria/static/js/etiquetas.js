@@ -2010,124 +2010,26 @@
   // Prenda real para la vista previa
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const buscador = document.getElementById('et-buscar-item');
-  const cuerpoItems = document.getElementById('et-items-cuerpo');
-  const avisoItems = document.getElementById('et-items-aviso');
   const cartel = document.getElementById('et-datos-estado');
-  let temporizador = null;
 
-  // El modal se instancia al primer uso y no al arrancar: así el diseñador no
-  // depende de que el bundle de Bootstrap haya llegado antes que este archivo.
-  let modalItems = null;
-  const abrirModalItems = () => {
-    if (!modalItems) {
-      modalItems = new bootstrap.Modal(document.getElementById('et-modal-items'));
-    }
-    modalItems.show();
-  };
-
-  document.getElementById('et-abrir-items').addEventListener('click', () => {
-    abrirModalItems();
-    buscarItems();          // se abre con las primeras prendas ya listadas
+  // La tabla, la búsqueda y el filtro por tipo los pone el componente
+  // compartido (selector_items.js). Acá sólo queda lo que es del diseñador:
+  // qué hacer con la prenda elegida. `datos: true` pide el payload de
+  // etiqueta, que es lo único que este selector necesita y los formularios de
+  // venta y alquiler no.
+  const selector = SelectorItems.crear({
+    datos: true,
+    onElegir: elegirItem,
   });
 
-  // El foco al buscador se pide cuando el modal terminó de aparecer: hacerlo
-  // antes no tiene efecto porque el elemento todavía no es visible.
-  document.getElementById('et-modal-items').addEventListener('shown.bs.modal', () => {
-    buscador.focus();
-  });
-
-  buscador.addEventListener('input', () => {
-    clearTimeout(temporizador);
-    temporizador = setTimeout(buscarItems, 300);
-  });
-
-  // Filtro venta / alquiler. Es un grupo de botones y no un select porque son
-  // tres opciones fijas y se usan a un clic mientras se busca con la otra mano.
-  let tipoItems = '';
-  const filtroTipo = document.getElementById('et-filtro-tipo');
-  filtroTipo.addEventListener('click', (evento) => {
-    const boton = evento.target.closest('[data-tipo]');
-    if (!boton) return;
-    tipoItems = boton.dataset.tipo;
-    filtroTipo.querySelectorAll('[data-tipo]').forEach((b) =>
-      b.classList.toggle('active', b === boton));
-    buscarItems();
-  });
-
-  // Sin unidades disponibles la prenda igual se puede etiquetar —se etiqueta
-  // justamente para volver a ponerla en circulación— así que el cero se avisa
-  // en rojo pero no bloquea nada.
-  function stockItem(it) {
-    const disponible = it.stock_disponible ?? 0;
-    const total = it.stock_total ?? 0;
-    const color = disponible === 0 ? 'text-danger'
-      : disponible < total ? 'text-warning' : 'text-success';
-    return `<span class="${color} fw-medium">${disponible}</span>`
-      + `<span class="text-muted small"> / ${total}</span>`;
-  }
-
-  function filaItem(it) {
-    const tipo = it.tipo === 'venta' ? 'bg-purple-lt' : 'bg-azure-lt';
-    return `<tr data-item="${it.id}">
-      <td class="et-item-codigo">${escaparHtml(it.codigo)}</td>
-      <td>${escaparHtml(it.nombre)}</td>
-      <td class="et-item-detalle">${escaparHtml(it.detalle)}</td>
-      <td><span class="badge ${tipo}">${escaparHtml(it.tipo_nombre || '')}</span></td>
-      <td>${stockItem(it)}</td>
-      <td class="text-end">
-        <button type="button" class="btn btn-sm btn-primary" data-elegir>Seleccionar</button>
-      </td>
-    </tr>`;
-  }
-
-  async function buscarItems() {
-    const consulta = buscador.value.trim();
-    try {
-      const parametros = new URLSearchParams({ q: consulta });
-      if (tipoItems) parametros.set('tipo', tipoItems);
-      const respuesta = await fetch(`${app.dataset.urlItems}?${parametros}`);
-      const datos = await respuesta.json();
-
-      if (!datos.items.length) {
-        cuerpoItems.innerHTML =
-          '<tr><td colspan="6" class="text-center text-muted py-4">'
-          + 'Ninguna prenda coincide con la búsqueda.</td></tr>';
-        avisoItems.textContent = '';
-        return;
-      }
-
-      cuerpoItems.innerHTML = datos.items.map(filaItem).join('');
-
-      // El endpoint corta en 40. Sin decirlo, una búsqueda vacía parece la lista
-      // completa: el usuario cree que la prenda que busca no existe.
-      avisoItems.textContent = datos.items.length >= 40
-        ? 'Se muestran las primeras 40. Afiná la búsqueda para ver el resto.'
-        : `${datos.items.length} prenda${datos.items.length === 1 ? '' : 's'}.`;
-
-      cuerpoItems.querySelectorAll('[data-item]').forEach((fila) => {
-        const item = datos.items.find((i) => String(i.id) === fila.dataset.item);
-        // La fila entera sigue siendo clickeable —es más rápido— pero el botón
-        // deja visible que ahí se elige: hacer clic en una fila de tabla no es
-        // algo que se adivine.
-        fila.addEventListener('click', () => elegirItem(item));
-      });
-    } catch (error) {
-      cuerpoItems.innerHTML =
-        '<tr><td colspan="6" class="text-center text-danger py-4">'
-        + 'No se pudo consultar el inventario.</td></tr>';
-      avisoItems.textContent = '';
-    }
-  }
+  document.getElementById('et-abrir-items').addEventListener('click', () => selector.abrir());
 
   function elegirItem(item) {
-    estado.itemId = item.id;
-    if (modalItems) modalItems.hide();
-    buscador.value = '';
+    estado.itemId = item.prenda_item_id;
     datosActuales = Object.assign({}, MUESTRA, item.datos || {
-      codigo: item.codigo, prenda: item.nombre, subtitulo: item.detalle,
+      codigo: item.codigo_item, prenda: item.sku_nombre, subtitulo: item.detalle,
     });
-    cartel.innerHTML = `<strong>${escaparHtml(item.codigo)}</strong>
+    cartel.innerHTML = `<strong>${escaparHtml(item.codigo_item)}</strong>
       <a href="#" id="et-quitar-item" class="ms-1">✕</a>`;
     document.getElementById('et-quitar-item').addEventListener('click', (evento) => {
       evento.preventDefault();

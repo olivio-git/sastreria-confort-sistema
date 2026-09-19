@@ -23,6 +23,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from . import etiquetas, etiquetas_pdf, etiquetas_zpl, simbolos
+from .views import serializar_prenda_item
 from .models import (
     ConfiguracionImpresora, PlantillaEtiqueta, PrendaInventario, PrendaItem,
 )
@@ -108,7 +109,12 @@ def simbolo_png(request, clave):
 
 @login_required
 def buscar_items(request):
-    """Busca unidades físicas de inventario para el selector del diseñador.
+    """Busca unidades físicas de inventario para los selectores de prendas.
+
+    La usan el diseñador de etiquetas y los formularios de venta y alquiler.
+    Vive en este módulo porque el payload de etiqueta (`datos`) necesita
+    `etiquetas.datos_de_item`, pero la búsqueda en sí no es un asunto de
+    etiquetas: de ahí el nombre neutro de la ruta.
 
     Se buscan PrendaItem y no PrendaInventario porque la etiqueta va pegada a
     una prenda concreta: el `codigo_item` (PRN-010-ITM-01) es lo que distingue
@@ -117,13 +123,43 @@ def buscar_items(request):
     Devuelve además el stock del SKU al que pertenece cada unidad. Es la
     pregunta que se hace el que va a etiquetar —«¿cuántas de éstas tengo?»— y
     sin el dato hay que salir del diseñador a buscarlo a Inventario.
+
+    Parámetros GET, todos opcionales:
+      q             texto libre (código, nombre, talla, color)
+      tipo          'venta' | 'alquiler'; vacío = ambos, que es lo que permite
+                    vender una prenda de alquiler y viceversa
+      estado        estado exacto del item; p. ej. 'disponible' para los
+                    formularios, que no pueden ofrecer algo ya alquilado
+      sin_conjunto  '1' excluye los items que forman parte de un conjunto: se
+                    cargan por el conjunto entero, no sueltos
+      datos         '1' incluye el payload de etiqueta (sólo lo usa el
+                    diseñador; calcularlo para el resto es peso muerto)
+      agrupar       '1' devuelve un renglón por MODELO y no por unidad. Es lo
+                    que piden los formularios: nadie busca «la camisa blanca
+                    número 13», busca «una camisa blanca M». Con 173 unidades
+                    para 23 modelos, listar unidades sueltas es 87% de ruido y
+                    el tope de 40 no alcanza ni para un cuarto del catálogo.
+      orden         cómo se ordenan las unidades dentro del modelo, y por lo
+                    tanto cuál queda asignada al elegir: 'desgaste' (la menos
+                    alquilada, reparte el uso parejo) o 'fifo' (la más vieja,
+                    rota el stock). El diseñador no lo usa.
     """
     texto = (request.GET.get('q') or '').strip()
     tipo = (request.GET.get('tipo') or '').strip()
+    estado = (request.GET.get('estado') or '').strip()
+    sin_conjunto = request.GET.get('sin_conjunto') == '1'
+    con_datos = request.GET.get('datos') == '1'
+    agrupar = request.GET.get('agrupar') == '1'
+    orden = (request.GET.get('orden') or '').strip()
 
+    # El SKU dado de baja se lleva sus unidades: el volcado que este endpoint
+    # reemplazó filtraba `prenda__estado='ACT'` y al generalizarlo se perdió.
+    # Sin esto, el inventario archivado —el que deja el corte de inventario—
+    # vuelve a aparecer en los formularios de venta y alquiler.
     items = (PrendaItem.objects
              .exclude(estado='baja')
-             .select_related('prenda', 'ubicacion'))
+             .filter(prenda__estado='ACT')
+             .select_related('prenda', 'ubicacion', 'corte'))
     if texto:
         items = items.filter(
             Q(codigo_item__icontains=texto)
@@ -134,8 +170,34 @@ def buscar_items(request):
         )
     if tipo in dict(PrendaItem.TIPO_CHOICES):
         items = items.filter(tipo=tipo)
+    if estado in dict(PrendaItem.ESTADO_CHOICES):
+        items = items.filter(estado=estado)
+    if sin_conjunto:
+        items = items.filter(conjunto_slots__isnull=True)
 
-    items = list(items.order_by('codigo_item')[:40])
+    if agrupar:
+        # El tope de 40 es de MODELOS, y el corte se hace sobre los modelos y
+        # no sobre las unidades. Limitar las unidades primero —aunque fuera a
+        # 400— puede partir un modelo por la mitad: el último quedaría con
+        # menos unidades de las que tiene y `disponibles` mentiría, que es
+        # justo lo que la agrupación viene a arreglar.
+        claves = list(
+            items.order_by('prenda__codigo', 'tipo')
+                 .values_list('prenda_id', 'tipo')
+                 .distinct()[:40]
+        )
+        if not claves:
+            return JsonResponse({'ok': True, 'agrupado': True, 'items': []})
+        filtro_claves = Q()
+        for prenda_id, tipo_clave in claves:
+            filtro_claves |= Q(prenda_id=prenda_id, tipo=tipo_clave)
+        # 'desgaste' primero la menos alquilada; 'fifo' la que entró primero.
+        # El orden define qué unidad queda asignada al elegir el modelo.
+        orden_unidades = ('veces_alquilado', 'id') if orden == 'desgaste' else ('id',)
+        items = list(items.filter(filtro_claves)
+                          .order_by('prenda__codigo', 'tipo', *orden_unidades))
+    else:
+        items = list(items.order_by('codigo_item')[:40])
 
     # El stock se resuelve en UNA consulta agregada aparte y no anotando el
     # queryset de arriba: anotarlo obligaría a un join de la tabla contra sí
@@ -150,26 +212,63 @@ def buscar_items(request):
                                disponibles=Count('id', filter=Q(estado='disponible'))))
     }
 
+    if agrupar:
+        # Un mismo SKU puede tener unidades de venta Y de alquiler (hoy ya hay
+        # tres así), por eso la clave es (modelo, tipo) y no sólo el modelo:
+        # fusionarlos mezclaría dos cosas que se cargan en flujos distintos.
+        grupos = {}
+        for it in items:
+            clave = (it.prenda_id, it.tipo)
+            grupo = grupos.get(clave)
+            if grupo is None:
+                p = it.prenda
+                grupo = grupos[clave] = {
+                    'prenda_id': it.prenda_id,
+                    'sku_codigo': p.codigo,
+                    'sku_nombre': p.nombre,
+                    'detalle': ' · '.join(filter(None, [
+                        f"T {p.talla}" if p.talla else None,
+                        p.color or None,
+                    ])),
+                    'tipo': it.tipo,
+                    'tipo_label': it.get_tipo_display(),
+                    'precio': float(p.precio),
+                    'precio_alquiler_base': (
+                        float(p.precio_alquiler_base) if p.precio_alquiler_base else None
+                    ),
+                    'stock_total': conteos.get(it.prenda_id, {}).get('total', 0),
+                    # Las unidades ya vienen en el orden de asignación: la
+                    # primera es la que se lleva quien elige el modelo sin
+                    # mirar. El expansor sirve para el caso en que sí importa.
+                    'unidades': [],
+                }
+            grupo['unidades'].append(serializar_prenda_item(it))
+
+        salida = list(grupos.values())
+        for g in salida:
+            g['disponibles'] = len(g['unidades'])
+        return JsonResponse({'ok': True, 'agrupado': True, 'items': salida})
+
     return JsonResponse({
         'ok': True,
         'items': [
             {
-                'id': it.pk,
-                'codigo': it.codigo_item,
-                'nombre': it.prenda.nombre,
+                # El formato canónico lo define views.serializar_prenda_item: es
+                # el mismo que consumen el escaneo y las filas ya cargadas, así
+                # que lo que sale de acá se puede empujar tal cual a `PRENDAS`
+                # sin traducir nada.
+                **serializar_prenda_item(it),
                 'detalle': ' · '.join(filter(None, [
                     f"T {it.prenda.talla}" if it.prenda.talla else None,
                     it.prenda.color or None,
                     it.get_condicion_display(),
                 ])),
-                'tipo': it.tipo,
-                'tipo_nombre': it.get_tipo_display(),
                 'estado': it.estado,
                 'estado_nombre': it.get_estado_display(),
                 # Stock del SKU, no de esta unidad: una unidad siempre es una.
                 'stock_disponible': conteos.get(it.prenda_id, {}).get('disponibles', 0),
                 'stock_total': conteos.get(it.prenda_id, {}).get('total', 0),
-                'datos': etiquetas.datos_de_item(it),
+                'datos': etiquetas.datos_de_item(it) if con_datos else None,
             }
             for it in items
         ],

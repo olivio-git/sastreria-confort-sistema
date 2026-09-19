@@ -4,7 +4,6 @@ Test suite — depreciacion-alquiler
 Covers:
   1. calcular_precio_alquiler  — función pura (guards, fórmula, piso, redondeo)
   2. PrendaItem.precio_alquiler_sugerido — property ORM end-to-end
-  3. _prenda_items_json          — serialización en view
   4. PrendaInventarioForm        — validación del formulario
 """
 
@@ -330,70 +329,6 @@ class PrendaItemSugeridoTests(TestCase):
 
 # ════════════════════════════════════════════════════════════════════════════
 # 3. _prenda_items_json — serialización en view
-# ════════════════════════════════════════════════════════════════════════════
-
-class PrendaItemsJsonTests(TestCase):
-    """Verifica que el JSON del alquiler incluye precio_alquiler_sugerido."""
-
-    def setUp(self):
-        self.user = User.objects.create_user('_test', password='test')
-        self.client = Client()
-        self.client.force_login(self.user)
-
-    def _get_json(self):
-        """Fetch crear_alquiler and extract the PRENDAS array from HTML."""
-        resp = self.client.get('/alquileres/crear/')
-        self.assertEqual(resp.status_code, 200)
-        html = resp.content.decode()
-        marker = 'const PRENDAS = '
-        start = html.find(marker)
-        if start == -1:
-            return []
-        start += len(marker)
-        end = html.index(';\n', start)
-        return json.loads(html[start:end])
-
-    def test_campo_presente_cuando_hay_items(self):
-        """Verifica que el campo precio_alquiler_sugerido existe en el JSON."""
-        prenda = make_prenda(
-            precio_alquiler_base=Decimal('500'),
-            max_usos_default=10,
-        )
-        make_item(prenda, tipo='alquiler', veces_alquilado=3)
-        data = self._get_json()
-        self.assertTrue(len(data) > 0, "No hay items en el JSON")
-        item = data[0]
-        self.assertIn('precio_alquiler_sugerido', item)
-
-    def test_campo_con_depreciacion_calculada(self):
-        prenda = make_prenda(
-            precio_alquiler_base=Decimal('500'),
-            max_usos_default=10,
-        )
-        make_item(prenda, tipo='alquiler', veces_alquilado=5)
-        data = self._get_json()
-        self.assertTrue(len(data) > 0)
-        # uso 5/10 → 250.00
-        self.assertAlmostEqual(data[0]['precio_alquiler_sugerido'], 250.0, places=2)
-
-    def test_campo_es_null_sin_precio_alquiler_base(self):
-        prenda = make_prenda()  # sin precio_alquiler_base
-        make_item(prenda, tipo='alquiler')
-        data = self._get_json()
-        self.assertTrue(len(data) > 0)
-        self.assertIsNone(data[0]['precio_alquiler_sugerido'])
-
-    def test_campo_es_base_sin_max_usos(self):
-        """Sin max_usos → sugerido es el base (no None)."""
-        prenda = make_prenda(precio_alquiler_base=Decimal('300'))  # sin max_usos_default
-        make_item(prenda, tipo='alquiler', veces_alquilado=5)
-        data = self._get_json()
-        self.assertTrue(len(data) > 0)
-        self.assertAlmostEqual(data[0]['precio_alquiler_sugerido'], 300.0, places=2)
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# 4. PrendaInventarioForm — validación
 # ════════════════════════════════════════════════════════════════════════════
 
 class PrendaInventarioFormTests(TestCase):

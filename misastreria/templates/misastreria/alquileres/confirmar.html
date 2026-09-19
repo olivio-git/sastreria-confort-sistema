@@ -69,9 +69,11 @@
             </thead>
             <tbody>
               {% for item in alquiler.items.all %}
-              <tr class="scan-fila" data-codigo="{{ item.prenda_item.codigo_item }}">
+              <tr class="scan-fila" data-codigo="{{ item.prenda_item.codigo_item }}"
+                  data-item-id="{{ item.prenda_item_id }}"
+                  data-prenda-id="{{ item.prenda_item.prenda_id }}">
                 <td class="scan-check"></td>
-                <td><code>{{ item.prenda_item.codigo_item }}</code></td>
+                <td><code class="scan-codigo">{{ item.prenda_item.codigo_item }}</code></td>
                 <td>{{ item.prenda_item.prenda.nombre }}</td>
                 <td>{{ item.prenda_item.get_condicion_display }}</td>
                 <td><span class="badge-estado badge-reservado">{{ item.prenda_item.get_estado_display }}</span></td>
@@ -111,6 +113,9 @@ window.initScanVerify({
   msg:      document.getElementById('scanMsg'),
   contador: document.getElementById('scanContador'),
   filas:    document.querySelectorAll('tr.scan-fila'),
+  // Habilita cambiar por una unidad hermana del mismo modelo cuando lo que
+  // sale del local no es lo que el sistema tenía anotado.
+  urlCambio: '{% url "cambiar_unidad_alquiler" alquiler.id %}',
   form:     document.getElementById('form-confirmar'),
 });
 </script>

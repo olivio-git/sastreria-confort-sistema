@@ -635,3 +635,79 @@ svg.lucide { flex-shrink: 0; vertical-align: middle; }
 [data-bs-theme="dark"] .scan-msg-ok    { color: #34d399; }
 [data-bs-theme="dark"] .scan-msg-error { color: #f87171; }
 [data-bs-theme="dark"] .scan-verificada > td { background-color: rgba(16, 185, 129, .16); }
+
+/* ── Selector de prendas compartido (_partials/selector_items.html) ──────────
+   Lo usan el diseñador de etiquetas y los formularios de venta y alquiler.
+
+   Pensado para lectura a distancia de brazo y vista cansada: quien lo usa a
+   diario en el local no es alguien que vaya a acercar la cara a la pantalla
+   para distinguir un gris de otro. De ahí que el nombre de la prenda y la
+   talla vayan más grandes que el resto y que los dos datos que se comparan
+   —qué prenda es y cuántas quedan— no estén nunca en `text-muted`. */
+#sel-items-tabla tbody tr { cursor: pointer; }
+#sel-items-tabla tbody tr:hover { background: rgba(37, 99, 235, .18); }
+#sel-items-tabla td { color: var(--text); vertical-align: middle; }
+#sel-items-tabla thead th {
+  position: sticky;                 /* la cabecera queda a la vista al bajar */
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  font-size: .8125rem;
+  letter-spacing: .02em;
+}
+#sel-items-tabla tbody tr.sel-items-modelo > td { padding-top: .75rem; padding-bottom: .75rem; }
+
+/* Lo que la persona busca: el nombre y la medida. Lo más grande de la fila. */
+#sel-items-tabla .sel-items-nombre {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+#sel-items-tabla .sel-items-medida {
+  font-size: 1rem;
+  font-weight: 500;
+}
+/* El código es trazabilidad, no identificación: nadie reconoce PRN-029. */
+#sel-items-tabla .sel-items-codigo {
+  font-size: .8125rem;
+  color: var(--text-muted);
+}
+
+/* «5 disponibles» y no «5 / 6»: la fracción obligaba a interpretar. */
+#sel-items-tabla .sel-items-disp { line-height: 1.2; }
+#sel-items-tabla .sel-items-disp-n {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--success);
+}
+#sel-items-tabla .sel-items-disp-t {
+  display: block;
+  font-size: .8125rem;
+  color: var(--text-muted);
+}
+#sel-items-tabla .sel-items-disp.agotado .sel-items-disp-n { color: var(--danger); }
+
+/* Botones grandes: se aprietan con prisa y a veces con el dedo. */
+#sel-items-tabla .sel-items-btn { padding: .5rem 1.25rem; font-size: .9375rem; }
+#sel-items-tabla .sel-items-btn-chico { padding: .25rem .75rem; }
+#sel-items-tabla .sel-items-vermas { font-size: .8125rem; white-space: nowrap; }
+
+/* Unidades desplegadas: la barra lateral dice «esto cuelga de la fila de
+   arriba». Sin ella, al hacer scroll parecen filas sueltas del listado. */
+#sel-items-tabla tbody tr.sel-items-unidad { background: rgba(37, 99, 235, .06); }
+#sel-items-tabla tbody tr.sel-items-unidad > td:first-child {
+  border-left: 3px solid var(--primary);
+  padding-left: 1.5rem;
+}
+#sel-items-tabla .sel-items-unidad-cod { font-size: .875rem; color: var(--text-muted); }
+#sel-items-tabla .sel-items-unidad-det { font-size: .9375rem; }
+
+/* Fila ya agregada al formulario. `opacity` sola la volvía ilegible en modo
+   oscuro —texto gris sobre fondo gris—, así que se baja el contraste con
+   color de fondo y de texto explícitos, nunca con transparencia. */
+#sel-items-tabla tbody tr.sel-items-tomada,
+#sel-items-tabla tbody tr.sel-items-tomada:hover {
+  background: var(--primary-light);
+  cursor: default;
+}
+#sel-items-tabla tbody tr.sel-items-tomada td { color: var(--text-muted); }

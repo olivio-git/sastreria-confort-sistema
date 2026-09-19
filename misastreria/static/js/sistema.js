@@ -377,206 +377,6 @@ window.makeCombobox      = makeCombobox;
 // Selector flyout para prendas: agrupa por SKU en el dropdown principal,
 // flyout lateral muestra las unidades individuales al hover.
 // prendas: array flat de _prenda_items_json (con sku_codigo, sku_nombre, talla, color, condicion, etc.)
-function makePrendaFlyoutCombobox(input, hidden, prendas) {
-  var wrapper = input.parentElement;
-
-  var chevron = document.createElement('span');
-  chevron.style.cssText = 'position:absolute;right:0.6rem;top:50%;transform:translateY(-50%);pointer-events:none;color:#6c757d;line-height:1;';
-  chevron.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
-  wrapper.appendChild(chevron);
-
-  var clearBtn = document.createElement('button');
-  clearBtn.type = 'button';
-  clearBtn.style.cssText = 'position:absolute;right:0;top:0;height:100%;width:2.2rem;border:none;background:transparent;cursor:pointer;display:none;z-index:2;color:#6c757d;padding:0;';
-  clearBtn.title = 'Limpiar';
-  clearBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
-  wrapper.appendChild(clearBtn);
-
-  // Agrupar por SKU
-  var skuMap = new Map();
-  prendas.forEach(function(p) {
-    if (!skuMap.has(p.sku_codigo)) {
-      var lbl = p.sku_nombre + (p.talla ? ' T' + p.talla : '') + (p.color ? ' ' + p.color : '');
-      skuMap.set(p.sku_codigo, { codigo: p.sku_codigo, label: lbl, items: [] });
-    }
-    skuMap.get(p.sku_codigo).items.push(p);
-  });
-  var skus = Array.from(skuMap.values());
-
-  var dropdown = document.createElement('ul');
-  dropdown.className = 'combobox-dropdown';
-  dropdown.style.cssText = 'position:fixed;z-index:9999;display:none;margin:0;padding:0;list-style:none;max-height:280px;overflow-y:auto;min-width:200px;';
-  document.body.appendChild(dropdown);
-
-  var flyout = document.createElement('ul');
-  flyout.className = 'combobox-dropdown';
-  flyout.style.cssText = 'position:fixed;z-index:10000;display:none;margin:0;padding:0;list-style:none;max-height:300px;overflow-y:auto;min-width:260px;';
-  document.body.appendChild(flyout);
-
-  var activeSkuEl = null;
-  var closeTimer  = null;
-
-  function syncUI() {
-    var has = !!hidden.value;
-    clearBtn.style.display = has ? 'block' : 'none';
-    chevron.style.display  = has ? 'none'  : 'block';
-    input.style.paddingRight = '2rem';
-  }
-
-  clearBtn.addEventListener('click', function() {
-    input.value = ''; hidden.value = '';
-    syncUI(); input.focus();
-    hidden.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-
-  syncUI();
-
-  function closeAll() {
-    dropdown.style.display = 'none'; flyout.style.display = 'none';
-    dropdown.innerHTML = ''; flyout.innerHTML = '';
-    activeSkuEl = null;
-  }
-
-  function positionDropdown() {
-    var rect = input.getBoundingClientRect();
-    dropdown.style.top   = (rect.bottom + 2) + 'px';
-    dropdown.style.left  = rect.left + 'px';
-    dropdown.style.width = rect.width + 'px';
-  }
-
-  function showFlyout(skuLi, sku) {
-    flyout.innerHTML = '';
-    sku.items.forEach(function(item) {
-      var li = document.createElement('li');
-      li.className = 'combobox-item';
-
-      var code = document.createElement('span');
-      code.className = 'prenda-flyout-code';
-      code.textContent = item.codigo_item;
-
-      var badge = document.createElement('span');
-      badge.className = 'prenda-flyout-badge ' + item.condicion;
-      badge.textContent = item.condicion_label;
-
-      li.appendChild(code);
-      li.appendChild(badge);
-
-      if (item.ubicacion) {
-        var ub = document.createElement('span');
-        ub.className = 'prenda-flyout-ubic';
-        ub.textContent = '[' + item.ubicacion + ']';
-        li.appendChild(ub);
-      }
-
-      li.addEventListener('mouseover',  function() { li.classList.add('combobox-item-active'); });
-      li.addEventListener('mouseout',   function() { li.classList.remove('combobox-item-active'); });
-      li.addEventListener('mousedown',  function(e) {
-        e.preventDefault();
-        input.value  = item.label;
-        hidden.value = item.prenda_item_id;
-        closeAll(); syncUI();
-        hidden.dispatchEvent(new Event('change', { bubbles: true }));
-      });
-      flyout.appendChild(li);
-    });
-
-    // Medir primero (offscreen) para saber la altura real antes de posicionar
-    flyout.style.top     = '-9999px';
-    flyout.style.left    = '-9999px';
-    flyout.style.display = 'block';
-
-    var ddRect  = dropdown.getBoundingClientRect();
-    var liRect  = skuLi.getBoundingClientRect();
-    var flyW    = flyout.offsetWidth  || 260;
-    var flyH    = flyout.offsetHeight || 0;
-    var vw      = window.innerWidth;
-    var vh      = window.innerHeight;
-
-    // Horizontal: derecha si cabe, sino izquierda
-    var flyLeft = (ddRect.right + 4 + flyW <= vw) ? ddRect.right + 4 : ddRect.left - flyW - 4;
-    // Vertical: alinear con el item, pero clampear para no salir del viewport
-    var flyTop  = liRect.top;
-    if (flyTop + flyH > vh - 8) flyTop = Math.max(8, vh - flyH - 8);
-
-    flyout.style.top  = flyTop + 'px';
-    flyout.style.left = flyLeft + 'px';
-  }
-
-  function renderSkus(filtered) {
-    dropdown.innerHTML = '';
-    positionDropdown();
-    if (!filtered.length) {
-      var empty = document.createElement('li');
-      empty.className = 'combobox-empty';
-      empty.textContent = 'Sin resultados';
-      dropdown.appendChild(empty);
-      dropdown.style.display = 'block';
-      return;
-    }
-    filtered.forEach(function(sku) {
-      var li = document.createElement('li');
-      li.className = 'combobox-item';
-      li.style.cssText = 'display:flex;align-items:center;';
-
-      var name = document.createElement('span');
-      name.style.flex = '1';
-      name.textContent = sku.label;
-
-      var cnt = document.createElement('span');
-      cnt.className = 'prenda-flyout-cnt';
-      cnt.textContent = sku.items.length + ' disp.';
-
-      var arrow = document.createElement('span');
-      arrow.className = 'prenda-flyout-arrow';
-      arrow.textContent = '▶';
-
-      li.appendChild(name); li.appendChild(cnt); li.appendChild(arrow);
-
-      li.addEventListener('mouseover', function() {
-        if (closeTimer) clearTimeout(closeTimer);
-        if (activeSkuEl) activeSkuEl.classList.remove('combobox-item-active');
-        activeSkuEl = li;
-        li.classList.add('combobox-item-active');
-        showFlyout(li, sku);
-      });
-      dropdown.appendChild(li);
-    });
-    dropdown.style.display = 'block';
-  }
-
-  function filterAndShow() {
-    var q = input.value.trim().toLowerCase();
-    renderSkus(q ? skus.filter(function(s) { return s.label.toLowerCase().includes(q); }) : skus);
-  }
-
-  dropdown.addEventListener('mouseleave', function() {
-    closeTimer = setTimeout(function() {
-      if (!flyout.matches(':hover')) {
-        flyout.style.display = 'none';
-        if (activeSkuEl) activeSkuEl.classList.remove('combobox-item-active');
-      }
-    }, 150);
-  });
-  flyout.addEventListener('mouseenter', function() { if (closeTimer) clearTimeout(closeTimer); });
-  flyout.addEventListener('mouseleave', function() {
-    closeTimer = setTimeout(function() {
-      flyout.style.display = 'none';
-      if (activeSkuEl) activeSkuEl.classList.remove('combobox-item-active');
-    }, 150);
-  });
-
-  input.addEventListener('focus',  function() { filterAndShow(); });
-  input.addEventListener('input',  function() { hidden.value = ''; syncUI(); filterAndShow(); });
-  input.addEventListener('blur',   function() { setTimeout(closeAll, 250); });
-
-  // Restaurar label si el hidden ya tiene valor (edición)
-  if (hidden.value) {
-    var match = prendas.find(function(p) { return String(p.prenda_item_id) === String(hidden.value); });
-    if (match) { input.value = match.label; syncUI(); }
-  }
-}
-
-window.makePrendaFlyoutCombobox = makePrendaFlyoutCombobox;
 window.makeLocalCombobox = makeLocalCombobox;
 
 document.querySelectorAll('[data-cliente-search]').forEach(function(input) {
@@ -677,6 +477,20 @@ window.addConjuntoToForm = function(conjunto, slotsIncluidos, ctx) {
     // Disponibilidad: usar slot.disponible (el backend ya sabe si está libre, incluso si es slot de conjunto)
     if (idStr && slot.disponible && !usados.has(idStr)) {
       usados.add(idStr);
+      // La fila lee el nombre de la prenda desde PRENDAS. Un conjunto trae
+      // prendas que nadie eligió en el selector, así que no están ahí: si no
+      // se registran primero, la fila sale con el campo en blanco.
+      if (ctx.PRENDAS && !ctx.PRENDAS.some(function(p) {
+        return String(p.prenda_item_id) === idStr;
+      })) {
+        ctx.PRENDAS.push({
+          prenda_item_id: slot.prenda_item_id,
+          codigo_item: slot.prenda_item_codigo,
+          label: slot.label || slot.prenda_item_nombre,
+          precio: precio,
+          precio_alquiler_base: slot.precio_alquiler_base,
+        });
+      }
       ctx.addRow(slot.prenda_item_id, precio, { grupo: grupoNum });
     } else {
       faltantes.push(slot.prenda_item_nombre || 'Sin asignar');
@@ -1033,14 +847,19 @@ window.initScanToAdd = function(opts) {
     return hidden ? hidden.closest('.item-row') : null;
   }
 
-  function agregar(prenda) {
+  // `aviso` llega cuando la prenda es de la otra línea —una de alquiler en una
+  // venta, o al revés—. Se agrega igual, pero el que la tiene en la mano tiene
+  // que enterarse: se suma al mensaje en vez de pasar desapercibido.
+  function agregar(prenda, aviso) {
     window.limpiarFilasVacias(opts.tbody);
     // Sin tercer argumento: una prenda escaneada se carga suelta, no forma
     // parte de ningún conjunto.
     opts.addRow(prenda.prenda_item_id, opts.precioDe(prenda));
     scanDestacar(filaDe(prenda.prenda_item_id));
     window.scanBeep(true);
-    scanMensaje(opts.msg, '✓ ' + (prenda.label || prenda.codigo_item), true);
+    scanMensaje(opts.msg,
+      '✓ ' + (prenda.label || prenda.codigo_item) + (aviso ? ' — ' + aviso : ''),
+      true);
   }
 
   function rechazar(texto, prendaItemId) {
@@ -1076,10 +895,11 @@ window.initScanToAdd = function(opts) {
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (!data.ok) { rechazar(data.mensaje); return; }
-        // Disponible y del tipo correcto pero fuera del JSON embebido: el item
-        // se dio de alta con la página ya abierta. Se agrega igual.
+        // Disponible pero fuera del JSON embebido: o el item se dio de alta con
+        // la página ya abierta, o es de la otra línea y por eso no estaba en la
+        // lista de este formulario. En los dos casos se agrega.
         opts.PRENDAS.push(data.item);
-        agregar(data.item);
+        agregar(data.item, data.aviso);
       })
       .catch(function() {
         rechazar('No se pudo verificar ' + codigo + '. Revisá la conexión.');
@@ -1096,7 +916,8 @@ window.initScanToAdd = function(opts) {
 // para confirmar que lo que sale (o vuelve) del local es exactamente lo que
 // dice el sistema, antes de apretar el botón.
 //
-// opts = { input, msg, contador, filas (NodeList con data-codigo), form, boton }
+// opts = { input, msg, contador, filas (NodeList con data-codigo), form, boton,
+//          urlCambio (opcional): habilita cambiar por una unidad hermana }
 window.initScanVerify = function(opts) {
   var input = opts.input;
   if (!input) return;
@@ -1128,6 +949,101 @@ window.initScanVerify = function(opts) {
     scanDestacar(fila);
   }
 
+  // Primera fila sin verificar DEL MISMO MODELO que la prenda escaneada. El
+  // modelo importa: si se manda como `desde` una fila de otro modelo, el
+  // servidor no la encuentra entre los candidatos y cae en el primero de la
+  // lista — que puede ser una unidad ya verificada, presente y correcta. El
+  // cambio entonces reemplaza justo la prenda que sí estaba, y el desgaste
+  // termina en la unidad equivocada: exactamente lo que esto viene a evitar.
+  function filaPendiente(prendaId) {
+    return filas.find(function(f) {
+      if (f.dataset.verificado === '1') return false;
+      if (prendaId == null) return true;
+      return String(f.dataset.prendaId) === String(prendaId);
+    });
+  }
+
+  function token() {
+    var campo = document.querySelector('[name=csrfmiddlewaretoken]');
+    return campo ? campo.value : '';
+  }
+
+  function proponerCambio(codigo) {
+    // Sin `desde`: cuál es el modelo de la prenda escaneada lo sabe el
+    // servidor, no el navegador. La propuesta lo devuelve y recién ahí se
+    // elige la fila pendiente correcta.
+    scanMensaje(opts.msg, 'Verificando ' + codigo + '…', true);
+
+    fetch(opts.urlCambio + '?codigo=' + encodeURIComponent(codigo),
+          { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.ok) {
+          window.scanBeep(false);
+          scanMensaje(opts.msg, data.mensaje, false);
+          return;
+        }
+        var pendiente = filaPendiente(data.propuesta.hacia.prenda_inventario_id);
+        if (!pendiente) {
+          window.scanBeep(false);
+          scanMensaje(opts.msg,
+            codigo + ': todas las prendas de ese modelo ya están verificadas.',
+            false);
+          return;
+        }
+        if (!window.confirm(data.propuesta.mensaje)) {
+          scanMensaje(opts.msg, 'Cambio cancelado.', false);
+          return;
+        }
+        aplicarCambio(codigo, pendiente.dataset.itemId);
+      })
+      .catch(function() {
+        window.scanBeep(false);
+        scanMensaje(opts.msg, 'No se pudo verificar ' + codigo + '.', false);
+      });
+  }
+
+  function aplicarCambio(codigo, desdeId) {
+    var cuerpo = new URLSearchParams({ codigo: codigo, desde: desdeId });
+    fetch(opts.urlCambio, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'X-CSRFToken': token(),
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+      body: cuerpo.toString(),
+    })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.ok) {
+          window.scanBeep(false);
+          scanMensaje(opts.msg, data.mensaje, false);
+          return;
+        }
+        // La fila pasa a ser la prenda nueva y queda verificada de una: se
+        // acaba de confirmar contra la prenda física, que es más de lo que
+        // dice un escaneo normal.
+        var fila = filas.find(function(f) {
+          return String(f.dataset.itemId) === String(desdeId);
+        }) || filaPendiente();
+        if (fila) {
+          fila.dataset.codigo = data.item.codigo_item;
+          fila.dataset.itemId = data.item.prenda_item_id;
+          var celdaCod = fila.querySelector('.scan-codigo');
+          if (celdaCod) celdaCod.textContent = data.item.codigo_item;
+          marcar(fila);
+        }
+        window.scanBeep(true);
+        scanMensaje(opts.msg, '✓ ' + data.mensaje, true);
+        actualizarContador();
+      })
+      .catch(function() {
+        window.scanBeep(false);
+        scanMensaje(opts.msg, 'No se pudo aplicar el cambio.', false);
+      });
+  }
+
   window.makeScanner(input, function(codigo) {
     var clave = codigo.toLowerCase();
     var fila = filas.find(function(f) {
@@ -1135,6 +1051,11 @@ window.initScanVerify = function(opts) {
     });
 
     if (!fila) {
+      // Puede ser una unidad hermana: el sistema anotó una y el vendedor se
+      // llevó otra del mismo modelo, que es lo normal cuando el cliente se
+      // prueba la ropa. Antes esto moría en «NO pertenece» y había que editar
+      // el alquiler a mano, con el cliente esperando.
+      if (opts.urlCambio) { proponerCambio(codigo); return; }
       window.scanBeep(false);
       scanMensaje(opts.msg, codigo + ' NO pertenece a este alquiler.', false);
       return;
@@ -1156,15 +1077,24 @@ window.initScanVerify = function(opts) {
     actualizarContador();
   });
 
-  // Verificar es una ayuda, no un peaje. Si una etiqueta se despegó o se borró,
-  // el empleado tiene que poder entregar la prenda igual: se avisa y se sigue.
+  // Verificar es una ayuda, no un peaje. Si una etiqueta se despegó o se borró
+  // —o si directamente no usan el escáner— la prenda se entrega igual.
+  //
+  // El aviso sale SÓLO si empezaron a escanear y quedó algo a medias. Avisar
+  // también cuando no verificaron nada significaba un cartel en cada entrega
+  // mientras las etiquetas no estén puestas en todo el inventario, y un cartel
+  // que sale siempre enseña a hacer clic sin leer: el día que diga algo que
+  // importa, también lo saltean.
   if (opts.form) {
     opts.form.addEventListener('submit', function(e) {
-      var faltan = filas.length - verificadas().length;
-      if (!faltan) return;
+      var hechas = verificadas().length;
+      var faltan = filas.length - hechas;
+      if (!faltan || !hechas) return;
       var msg = faltan === 1
-        ? 'Queda 1 prenda sin verificar con el escáner. ¿Confirmás igual?'
-        : 'Quedan ' + faltan + ' prendas sin verificar con el escáner. ¿Confirmás igual?';
+        ? 'Escaneaste ' + hechas + ' de ' + filas.length + ' prendas y queda 1 sin '
+          + 'verificar. ¿Confirmás igual?'
+        : 'Escaneaste ' + hechas + ' de ' + filas.length + ' prendas y quedan '
+          + faltan + ' sin verificar. ¿Confirmás igual?';
       if (!confirm(msg)) e.preventDefault();
     });
   }

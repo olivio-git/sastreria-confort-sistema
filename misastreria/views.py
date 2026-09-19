@@ -10,7 +10,7 @@ from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
 from django.utils import timezone as django_tz
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
-from .models import Empleado, TipoContrato, Cliente, Reparacion, ReparacionItem, TipoPrenda, TipoReparacion, Venta, VentaItem, Confeccion, ConfeccionItem, Alquiler, AlquilerItem, EstadoAlquiler, Transaccion, PrendaInventario, PrendaItem, UbicacionItem, Insumo, TipoMaterial, UnidadMedida, Permiso, Falta, OrdenProduccion, InsumoCortado, CajaSesion, CajaMovimiento, TipoGasto, Conjunto, ConjuntoSlot, PagoComisionEmpleado, ModeloConfeccion, VentaItemEmpleado, AlquilerItemEmpleado
+from .models import Empleado, TipoContrato, Cliente, Reparacion, ReparacionItem, TipoPrenda, TipoReparacion, Venta, VentaItem, Confeccion, ConfeccionItem, Alquiler, AlquilerItem, EstadoAlquiler, Transaccion, PrendaInventario, PrendaItem, UbicacionItem, Insumo, TipoMaterial, UnidadMedida, Permiso, Falta, OrdenProduccion, InsumoCortado, CajaSesion, CajaMovimiento, TipoGasto, Conjunto, ConjuntoSlot, PagoComisionEmpleado, ModeloConfeccion, VentaItemEmpleado, AlquilerItemEmpleado, KardexEvento
 from .forms import EmpleadoForm, ClienteForm, ReparacionForm, ReparacionItemForm, VentaForm, VentaItemForm, ConfeccionForm, ConfeccionItemFormSet, AlquilerForm, AlquilerItemForm, TransaccionForm, PrendaInventarioForm, InsumoForm, PermisoForm, FaltaForm, EmpleadoReporteForm, ClienteReporteForm, ReparacionReporteForm, OrdenProduccionForm, InsumoCortadoForm, CajaSesionAperturaForm, CajaSesionCierreForm, CajaMovimientoManualForm, TipoGastoForm, ConjuntoForm, ConjuntoSlotFormSet, PagoComisionEmpleadoForm
 from django.core.paginator import Paginator
 from datetime import date, datetime, timedelta
@@ -2100,10 +2100,6 @@ def _empleados_arreglo_json():
     ])
 
 
-def _prendas_venta_json():
-    return _prenda_items_json('venta')
-
-
 def _registrar_pagos_venta(venta, post, usuario, descripcion_default, saldo_max):
     """Registra pagos divididos de una venta (cada línea → venta_pago/venta_saldo).
     Valida que el total no exceda saldo_max. Devuelve (total_registrado, errores).
@@ -2158,14 +2154,25 @@ def crear_venta(request):
     item_id = request.GET.get('item')
     if item_id:
         try:
-            pi = PrendaItem.objects.select_related('prenda').get(id=item_id, tipo='venta', estado='disponible', conjunto_slots__isnull=True)
+            # Sin filtro de tipo: la prenda se carga venga de la línea que venga.
+            pi = PrendaItem.objects.select_related('prenda').get(
+                id=item_id, estado='disponible', prenda__estado='ACT',
+                conjunto_slots__isnull=True)
             items_preload = [{'prenda_item_id': pi.id, 'precio_unitario': float(pi.prenda.precio), 'grupo_conjunto': None}]
         except PrendaItem.DoesNotExist:
-            pass
+            # Fallar en silencio dejaba al empleado escaneando sin entender por
+            # qué no pasaba nada.
+            messages.warning(
+                request,
+                "La prenda escaneada no se pudo cargar: no está disponible o "
+                "forma parte de un conjunto."
+            )
     return render(request, 'misastreria/ventas/form.html', {
         'form': form,
         'titulo': 'Nueva Venta',
-        'prendas_json': _prendas_venta_json(),
+        # Sólo la prenda que vino por ?item= (si vino); el resto, a demanda.
+        'prendas_json': _prendas_json_de_items(
+            [i['prenda_item_id'] for i in items_preload]),
         'conjuntos_json': _conjuntos_json('venta'),
         'items_existentes': json.dumps(items_preload),
         'tipos_reparacion_json': json.dumps(list(TipoReparacion.objects.values('id', 'nombre').order_by('nombre'))),
@@ -2202,36 +2209,9 @@ def editar_venta(request, id):
             messages.error(request, 'Por favor corrige los errores del formulario.')
     else:
         form = VentaForm(instance=venta)
-    prendas_json = _prendas_venta_json()
-    items_propios_ids = list(venta.items.values_list('prenda_item_id', flat=True))
-    if items_propios_ids:
-        prendas_base = json.loads(prendas_json)
-        ids_en_json = {p['prenda_item_id'] for p in prendas_base}
-        for pi in PrendaItem.objects.filter(pk__in=items_propios_ids).select_related('prenda'):
-            if pi.id not in ids_en_json:
-                p = pi.prenda
-                ubic = f" [{pi.ubicacion}]" if pi.ubicacion else ""
-                label = (
-                    f"{pi.codigo_item} — {p.nombre}"
-                    f"{f' T{p.talla}' if p.talla else ''}"
-                    f"{f' {p.color}' if p.color else ''}"
-                    f" ({pi.get_condicion_display()}){ubic}"
-                )
-                prendas_base.append({
-                    'prenda_item_id': pi.id,
-                    'codigo_item':    pi.codigo_item,
-                    'sku_codigo':     p.codigo,
-                    'sku_nombre':     p.nombre,
-                    'talla':          p.talla,
-                    'color':          p.color,
-                    'condicion':      pi.condicion,
-                    'condicion_label': pi.get_condicion_display(),
-                    'ubicacion':      str(pi.ubicacion) if pi.ubicacion else '',
-                    'precio':         float(p.precio),
-                    'label':          label,
-                    'tipo_prenda_id': p.tipo_prenda_id,
-                })
-        prendas_json = json.dumps(prendas_base)
+    # Ídem editar_alquiler: sólo lo propio, el resto a demanda.
+    prendas_json = _prendas_json_de_items(
+        list(venta.items.values_list('prenda_item_id', flat=True)))
 
     items_existentes = [
         {
@@ -3095,14 +3075,25 @@ def crear_alquiler(request):
     item_id = request.GET.get('item')
     if item_id:
         try:
-            pi = PrendaItem.objects.select_related('prenda').get(id=item_id, tipo='alquiler', estado='disponible', conjunto_slots__isnull=True)
+            # Sin filtro de tipo: la prenda se carga venga de la línea que venga.
+            pi = PrendaItem.objects.select_related('prenda').get(
+                id=item_id, estado='disponible', prenda__estado='ACT',
+                conjunto_slots__isnull=True)
             items_preload = [{'prenda_item_id': pi.id, 'precio_unitario': float(pi.prenda.precio), 'grupo_conjunto': None}]
         except PrendaItem.DoesNotExist:
-            pass
+            # Fallar en silencio dejaba al empleado escaneando sin entender por
+            # qué no pasaba nada.
+            messages.warning(
+                request,
+                "La prenda escaneada no se pudo cargar: no está disponible o "
+                "forma parte de un conjunto."
+            )
     return render(request, 'misastreria/alquileres/form.html', {
         'form': form,
         'titulo': 'Nuevo Alquiler',
-        'prendas_json': _prendas_alquiler_json(),
+        # Sólo la prenda que vino por ?item= (si vino); el resto, a demanda.
+        'prendas_json': _prendas_json_de_items(
+            [i['prenda_item_id'] for i in items_preload]),
         'conjuntos_json': _conjuntos_json('alquiler'),
         'estado_alquiler_opts': list(EstadoAlquiler.objects.values('nombre', 'color')),
         'items_existentes': json.dumps(items_preload),
@@ -3141,38 +3132,12 @@ def editar_alquiler(request, id):
             messages.error(request, 'Por favor corrige los errores del formulario.')
     else:
         form = AlquilerForm(instance=alquiler)
-    prendas_json = _prendas_alquiler_json()
-
-    # Inyectar items propios del alquiler (aunque estén en estado 'alquilado' o 'reservado')
-    if alquiler.estado in ('alquilado', 'reservado'):
-        items_propios_ids = list(alquiler.items.values_list('prenda_item_id', flat=True))
-        prendas_base = json.loads(prendas_json)
-        ids_en_json = {p['prenda_item_id'] for p in prendas_base}
-        for pi in PrendaItem.objects.filter(pk__in=items_propios_ids).select_related('prenda'):
-            if pi.id not in ids_en_json:
-                p = pi.prenda
-                ubic = f" [{pi.ubicacion}]" if pi.ubicacion else ""
-                label = (
-                    f"{pi.codigo_item} — {p.nombre}"
-                    f"{f' T{p.talla}' if p.talla else ''}"
-                    f"{f' {p.color}' if p.color else ''}"
-                    f" ({pi.get_condicion_display()}){ubic}"
-                )
-                prendas_base.append({
-                    'prenda_item_id': pi.id,
-                    'codigo_item': pi.codigo_item,
-                    'sku_codigo': p.codigo,
-                    'sku_nombre': p.nombre,
-                    'talla': p.talla,
-                    'color': p.color,
-                    'condicion': pi.condicion,
-                    'condicion_label': pi.get_condicion_display(),
-                    'ubicacion': str(pi.ubicacion) if pi.ubicacion else '',
-                    'precio': float(p.precio),
-                    'label': label,
-                    'tipo_prenda_id': p.tipo_prenda_id,
-                })
-        prendas_json = json.dumps(prendas_base)
+    # El formulario arranca sabiendo sólo las prendas que ya tiene cargadas;
+    # el resto lo pide a demanda el selector o el escaneo. Antes se volcaba el
+    # inventario entero acá adentro (43 KB de JSON en cada render) para que el
+    # combobox tuviera de dónde leer.
+    prendas_json = _prendas_json_de_items(
+        list(alquiler.items.values_list('prenda_item_id', flat=True)))
 
     # Construir ITEMS_INICIALES para el template
     items_iniciales = [
@@ -3234,7 +3199,7 @@ def _build_prenda_item_opts(tipo=None):
 def _conjuntos_json(tipo=None):
     qs = (
         Conjunto.objects.filter(activo=True)
-        .prefetch_related('slots__prenda_item__prenda')
+        .prefetch_related('slots__prenda_item__prenda', 'slots__prenda_item__ubicacion')
         .order_by('nombre')
     )
     if tipo:
@@ -3263,6 +3228,11 @@ def _conjuntos_json(tipo=None):
                 'id': s.id,
                 'prenda_item_id': s.prenda_item_id,
                 'prenda_item_codigo': pi.codigo_item if pi else None,
+                # El mismo label que usa el selector: la fila que agrega un
+                # conjunto tiene que verse igual que una cargada a mano, y desde
+                # que el formulario dejó de embeber el inventario no hay de
+                # dónde sacarlo si no viaja acá.
+                'label': serializar_prenda_item(pi)['label'] if pi else None,
                 'prenda_item_nombre': nombre,
                 'disponible': disponible,
                 'opcional': s.opcional,
@@ -3290,49 +3260,61 @@ def _conjuntos_json(tipo=None):
     return json.dumps(data)
 
 
-def _prenda_items_json(tipo):
-    qs = (
-        PrendaItem.objects
-        .select_related('prenda')
-        .filter(
-            tipo=tipo,
-            prenda__estado='ACT',
-            estado='disponible',
-        )
-        .exclude(conjunto_slots__isnull=False)
-        .order_by('prenda__codigo', 'codigo_item')
-    )
-    data = []
-    for pi in qs:
-        p = pi.prenda
-        ubic = f" [{pi.ubicacion}]" if pi.ubicacion else ""
-        label = (
+def serializar_prenda_item(pi):
+    """Diccionario canónico de una prenda física para los formularios.
+
+    Lo consumen tres caminos que tienen que hablar el mismo idioma —el selector
+    de prendas, el escaneo con pistola y las filas ya cargadas de una venta o
+    alquiler que se está editando— porque el JS los mezcla en una sola lista
+    (`PRENDAS`) y busca ahí por `prenda_item_id`. Estaba copiado en los tres
+    lados, con la construcción del `label` repetida y libre de divergir.
+
+    Espera `pi` con `prenda` ya traída por select_related.
+    """
+    p = pi.prenda
+    ubic = f" [{pi.ubicacion}]" if pi.ubicacion else ""
+    return {
+        'prenda_item_id': pi.id,
+        'codigo_item':    pi.codigo_item,
+        'sku_codigo':     p.codigo,
+        'sku_nombre':     p.nombre,
+        'talla':          p.talla,
+        'color':          p.color,
+        'condicion':      pi.condicion,
+        'condicion_label': pi.get_condicion_display(),
+        'ubicacion':      str(pi.ubicacion) if pi.ubicacion else '',
+        'tipo':           pi.tipo,
+        'tipo_label':     pi.get_tipo_display(),
+        # El desgaste es lo que hace que una unidad no dé igual que otra: sin
+        # esto el expansor del selector lista códigos indistinguibles.
+        'veces_alquilado': pi.veces_alquilado,
+        'precio':         float(p.precio),
+        'precio_alquiler_base': (
+            float(p.precio_alquiler_base) if p.precio_alquiler_base else None
+        ),
+        'label': (
             f"{pi.codigo_item} — {p.nombre}"
             f"{f' T{p.talla}' if p.talla else ''}"
             f"{f' {p.color}' if p.color else ''}"
             f" ({pi.get_condicion_display()}){ubic}"
-        )
-        data.append({
-            'prenda_item_id': pi.id,
-            'codigo_item':    pi.codigo_item,
-            'sku_codigo':     p.codigo,
-            'sku_nombre':     p.nombre,
-            'talla':          p.talla,
-            'color':          p.color,
-            'condicion':      pi.condicion,
-            'condicion_label': pi.get_condicion_display(),
-            'ubicacion':      str(pi.ubicacion) if pi.ubicacion else '',
-            'precio':         float(p.precio),
-            'precio_alquiler_base': float(p.precio_alquiler_base) if p.precio_alquiler_base else None,
-            'label':          label,
-            'tipo_prenda_id': p.tipo_prenda_id,
-            'prenda_inventario_id': pi.prenda_id,
-        })
-    return json.dumps(data)
+        ),
+        'tipo_prenda_id': p.tipo_prenda_id,
+        # El modelo al que pertenece. Lo usa el cambio de unidad hermana para
+        # elegir qué fila sustituir sin pisar una ya verificada.
+        'prenda_inventario_id': pi.prenda_id,
+    }
 
 
-def _prendas_alquiler_json():
-    return _prenda_items_json('alquiler')
+def _prendas_json_de_items(ids):
+    """JSON de prendas concretas por id — las filas ya cargadas de un servicio.
+
+    Reemplaza al volcado del inventario entero: el formulario arranca sabiendo
+    sólo lo suyo y el resto lo pide a demanda el selector o el escaneo.
+    """
+    if not ids:
+        return '[]'
+    qs = PrendaItem.objects.filter(pk__in=ids).select_related('prenda', 'ubicacion')
+    return json.dumps([serializar_prenda_item(pi) for pi in qs])
 
 
 @login_required
@@ -3416,6 +3398,132 @@ def confirmar_reserva(request, id):
         messages.success(request, f'Reserva {alquiler.codigo} confirmada como alquiler.')
         return redirect('detalle_alquiler', id=alquiler.id)
     return render(request, 'misastreria/alquileres/confirmar.html', {'alquiler': alquiler})
+
+
+@login_required
+def cambiar_unidad_alquiler(request, id):
+    """Cambia una prenda del alquiler por otra unidad del MISMO modelo.
+
+    Existe por una asimetría del negocio: el sistema adivina qué unidad sale
+    —por desgaste o por antigüedad— pero quien atiende agarra la que el cliente
+    se probó. Lo físico manda y el sistema va atrás.
+
+    Sin esto, al escanear en la salida una prenda hermana el sistema contestaba
+    «NO pertenece a este alquiler» y ahí moría: el empleado quedaba trabado con
+    el cliente enfrente, y la única salida era editar el alquiler a mano.
+
+    Lo que se corrige no es cosmético. `veces_alquilado` se incrementa sobre las
+    prendas que el alquiler tiene ANOTADAS (ver devolver_alquiler), y ese
+    contador alimenta la vida útil y la pantalla «Prendas próx. baja». Si la
+    unidad anotada no es la que salió, el desgaste se acredita a la prenda
+    equivocada y no hay forma de detectarlo: el contador es la única fuente de
+    verdad sobre el desgaste, no hay con qué contrastarlo.
+
+    GET  → devuelve la propuesta de cambio, sin aplicar nada.
+    POST → la aplica.
+    """
+    alquiler = get_object_or_404(Alquiler, id=id)
+    codigo = etiquetas.normalizar_escaneo(request.GET.get('codigo', '')
+                                          or request.POST.get('codigo', ''))
+
+    def fallo(motivo, mensaje):
+        return JsonResponse({'ok': False, 'motivo': motivo, 'mensaje': mensaje})
+
+    if not codigo:
+        return fallo('vacio', 'No se leyó ningún código.')
+
+    nueva = (PrendaItem.objects.select_related('prenda')
+             .filter(codigo_item__iexact=codigo).first())
+    if nueva is None:
+        return fallo('no_existe', f"No hay ninguna prenda con el código {codigo}.")
+    if nueva.estado == 'baja':
+        return fallo('baja', f"{nueva.codigo_item} está dada de baja.")
+
+    items = list(alquiler.items.select_related('prenda_item__prenda'))
+    if any(ai.prenda_item_id == nueva.id for ai in items):
+        return fallo('ya_esta', f"{nueva.codigo_item} ya está en este alquiler.")
+
+    # Sólo entre unidades del mismo modelo. Cambiar un saco por un pantalón no
+    # es una corrección, es otro alquiler.
+    candidatos = [ai for ai in items if ai.prenda_item.prenda_id == nueva.prenda_id]
+    if not candidatos:
+        return fallo(
+            'otro_modelo',
+            f"{nueva.codigo_item} es «{nueva.prenda.nombre}» y este alquiler no "
+            f"lleva ninguna prenda de ese modelo."
+        )
+
+    # La unidad que entra tiene que estar libre: si figura alquilada, está en
+    # otro lado y cambiarla dejaría dos alquileres sobre la misma prenda.
+    if nueva.estado != 'disponible':
+        return fallo(
+            'ocupada',
+            f"{nueva.codigo_item} figura como {nueva.get_estado_display().lower()}."
+        )
+
+    if nueva.prenda.estado != 'ACT':
+        return fallo('sku_baja', f"El modelo de {nueva.codigo_item} está dado de baja.")
+
+    # Las prendas de un conjunto se cargan por el conjunto entero; sacarlas de
+    # ahí para un cambio suelto lo deja incompleto sin que nadie se entere.
+    if nueva.conjunto_slots.exists():
+        return fallo(
+            'conjunto',
+            f"{nueva.codigo_item} forma parte de un conjunto y no se puede usar "
+            f"como reemplazo suelto.")
+
+    desde_id = request.GET.get('desde') or request.POST.get('desde')
+    if desde_id:
+        # Antes, un `desde` que no fuera candidato caía en `candidatos[0]` — y
+        # ese podía ser una unidad ya verificada y presente, que terminaba
+        # sustituida. Si no coincide es un error de quien llama, no algo a
+        # adivinar: el desgaste acabaría en la prenda equivocada.
+        objetivo = next(
+            (ai for ai in candidatos if str(ai.prenda_item_id) == str(desde_id)), None)
+        if objetivo is None:
+            return fallo(
+                'desde_invalido',
+                f"La prenda a sustituir no pertenece a este alquiler o no es "
+                f"del mismo modelo que {nueva.codigo_item}.")
+    else:
+        objetivo = candidatos[0]
+    vieja = objetivo.prenda_item
+
+    if request.method != 'POST':
+        return JsonResponse({
+            'ok': True,
+            'propuesta': {
+                'desde': serializar_prenda_item(vieja),
+                'hacia': serializar_prenda_item(nueva),
+                'mensaje': (
+                    f"El alquiler tiene anotada la {vieja.codigo_item} y escaneaste "
+                    f"la {nueva.codigo_item}, del mismo modelo. ¿La cambio?"
+                ),
+            },
+        })
+
+    with transaction.atomic():
+        # La que entra hereda el estado de la que sale: en la salida los items
+        # están 'reservado', en la devolución 'alquilado'.
+        nueva.estado, vieja.estado = vieja.estado, 'disponible'
+        nueva.save(update_fields=['estado'])
+        vieja.save(update_fields=['estado'])
+        objetivo.prenda_item = nueva
+        objetivo.save(update_fields=['prenda_item'])
+        # Si el alquiler ya salió, su egreso de kardex quedó anotado sobre la
+        # unidad vieja. Sin mover esos eventos, la vieja queda con una salida
+        # sin retorno —figura en la calle para siempre en el kardex— y la
+        # nueva con un retorno que no tiene salida.
+        KardexEvento.objects.filter(
+            alquiler=alquiler, prenda_item=vieja
+        ).update(prenda_item=nueva)
+
+    return JsonResponse({
+        'ok': True,
+        'cambiado': True,
+        'item': serializar_prenda_item(nueva),
+        'mensaje': f"Cambiada {vieja.codigo_item} por {nueva.codigo_item}.",
+    })
 
 
 @login_required
@@ -9388,14 +9496,11 @@ def buscar_prenda_items(request):
 def escanear_prenda_item(request):
     """Resuelve un código escaneado con la pistola a un PrendaItem concreto.
 
-    El formulario ya recibe `_prenda_items_json()` embebido, así que el 95% de
-    los escaneos se resuelven en el navegador sin tocar el servidor: la pistola
-    tipea el código, el JS lo busca en esa lista y agrega la fila. Instantáneo.
-
-    Esta vista existe para el 5% restante — cuando el código NO está en esa
-    lista. Ahí el front no puede distinguir "no existe" de "existe pero está
-    alquilado", y un "no encontrado" a secas deja al empleado adivinando con la
-    prenda en la mano. Lo que devuelve acá es el motivo concreto.
+    El formulario arranca con `PRENDAS` casi vacío —sólo lo ya cargado— así que
+    prácticamente todo escaneo llega hasta acá. Lo que devuelve no es un
+    "encontrado / no encontrado": el front no puede distinguir "no existe" de
+    "existe pero está alquilado", y un "no encontrado" a secas deja al empleado
+    adivinando con la prenda en la mano. Acá sale el motivo concreto.
 
     `contexto` es 'venta' o 'alquiler' (o vacío para no filtrar por tipo).
     """
@@ -9443,12 +9548,16 @@ def escanear_prenda_item(request):
     if pi.prenda.estado != 'ACT':
         return fallo('sku_baja', f"El modelo de {pi.codigo_item} está dado de baja.")
 
+    # El tipo ya no rechaza: una prenda de alquiler se puede vender y una de
+    # venta se puede alquilar. Pero la línea a la que pertenece sigue siendo un
+    # dato que el que tiene la prenda en la mano quiere ver, así que viaja como
+    # aviso en la respuesta correcta en vez de como motivo de rechazo.
+    aviso_tipo = None
     if contexto and pi.tipo != contexto:
         destino = pi.get_tipo_display().lower()
-        return fallo(
-            'tipo',
-            f"{pi.codigo_item} está marcado como «{destino}» y esto es "
-            f"un{'a' if contexto == 'venta' else ''} {contexto}."
+        aviso_tipo = (
+            f"{pi.codigo_item} está marcado como «{destino}». "
+            f"Se agrega igual."
         )
 
     if pi.estado != 'disponible':
@@ -9473,31 +9582,10 @@ def escanear_prenda_item(request):
     # estado en el JSON embebido. Pasa cuando la página quedó abierta un rato y
     # el item se dio de alta después: devolvemos la fila para poder agregarla
     # igual, sin obligar a recargar.
-    p = pi.prenda
-    ubic = f" [{pi.ubicacion}]" if pi.ubicacion else ""
     return JsonResponse({
         'ok': True,
-        'item': {
-            'prenda_item_id': pi.id,
-            'codigo_item':    pi.codigo_item,
-            'sku_codigo':     p.codigo,
-            'sku_nombre':     p.nombre,
-            'talla':          p.talla,
-            'color':          p.color,
-            'condicion':      pi.condicion,
-            'condicion_label': pi.get_condicion_display(),
-            'ubicacion':      str(pi.ubicacion) if pi.ubicacion else '',
-            'precio':         float(p.precio),
-            'precio_alquiler_base': float(p.precio_alquiler_base) if p.precio_alquiler_base else None,
-            'label': (
-                f"{pi.codigo_item} — {p.nombre}"
-                f"{f' T{p.talla}' if p.talla else ''}"
-                f"{f' {p.color}' if p.color else ''}"
-                f" ({pi.get_condicion_display()}){ubic}"
-            ),
-            'tipo_prenda_id': p.tipo_prenda_id,
-            'prenda_inventario_id': pi.prenda_id,
-        },
+        'aviso': aviso_tipo,
+        'item': serializar_prenda_item(pi),
     })
 
 
