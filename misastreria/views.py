@@ -10,7 +10,7 @@ from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
 from django.utils import timezone as django_tz
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
-from .models import Empleado, TipoContrato, Cliente, Reparacion, ReparacionItem, TipoPrenda, TipoReparacion, Venta, VentaItem, Confeccion, ConfeccionItem, Alquiler, AlquilerItem, EstadoAlquiler, Transaccion, PrendaInventario, PrendaItem, UbicacionItem, Insumo, TipoMaterial, UnidadMedida, Permiso, Falta, OrdenProduccion, InsumoCortado, CajaSesion, CajaMovimiento, TipoGasto, Conjunto, ConjuntoSlot, PagoComisionEmpleado, ModeloConfeccion, VentaItemEmpleado, AlquilerItemEmpleado, KardexEvento
+from .models import Empleado, TipoContrato, Cliente, Reparacion, ReparacionItem, TipoPrenda, TipoReparacion, Venta, VentaItem, Confeccion, ConfeccionItem, Alquiler, AlquilerItem, EstadoAlquiler, Transaccion, PrendaInventario, PrendaItem, Corte, UbicacionItem, Insumo, TipoMaterial, UnidadMedida, Permiso, Falta, OrdenProduccion, InsumoCortado, CajaSesion, CajaMovimiento, TipoGasto, Conjunto, ConjuntoSlot, PagoComisionEmpleado, ModeloConfeccion, VentaItemEmpleado, AlquilerItemEmpleado, KardexEvento
 from .forms import EmpleadoForm, ClienteForm, ReparacionForm, ReparacionItemForm, VentaForm, VentaItemForm, ConfeccionForm, ConfeccionItemFormSet, AlquilerForm, AlquilerItemForm, TransaccionForm, PrendaInventarioForm, InsumoForm, PermisoForm, FaltaForm, EmpleadoReporteForm, ClienteReporteForm, ReparacionReporteForm, OrdenProduccionForm, InsumoCortadoForm, CajaSesionAperturaForm, CajaSesionCierreForm, CajaMovimientoManualForm, TipoGastoForm, ConjuntoForm, ConjuntoSlotFormSet, PagoComisionEmpleadoForm
 from django.core.paginator import Paginator
 from datetime import date, datetime, timedelta
@@ -3855,6 +3855,10 @@ def lista_prendas(request):
     q      = request.GET.get('q', '').strip()
     tipo   = request.GET.get('tipo', '').strip()
     estado = request.GET.get('estado', 'ACT').strip()
+    corte  = request.GET.get('corte', '').strip()
+    if not corte.isdigit():
+        # ?corte=abc no debe reventar con ValueError: se ignora el filtro.
+        corte = ''
 
     qs = (
         PrendaInventario.objects
@@ -3873,10 +3877,17 @@ def lista_prendas(request):
             Q(color__icontains=q)  | Q(talla__icontains=q)  |
             Q(codigo_referencia__icontains=q)
         )
+    # Los filtros sobre `items` van por subconsulta y no con
+    # `filter(items__...)`: después del annotate(Count('items')) eso agrega un
+    # segundo JOIN a PrendaItem y multiplica los conteos (stock_total, etc.)
+    # por la cantidad de unidades que coinciden; `.distinct()` no lo arregla.
     if tipo:
-        qs = qs.filter(items__tipo=tipo).distinct()
+        qs = qs.filter(id__in=PrendaItem.objects.filter(tipo=tipo).values('prenda_id'))
     if estado:
         qs = qs.filter(estado=estado)
+    if corte:
+        # Una prenda "tiene" el corte si al menos una de sus unidades lo usa.
+        qs = qs.filter(id__in=PrendaItem.objects.filter(corte_id=corte).values('prenda_id'))
 
     total = qs.count()
     paginator = Paginator(qs, 15)
@@ -3897,8 +3908,10 @@ def lista_prendas(request):
         'q':        q,
         'tipo':     tipo,
         'estado':   estado,
+        'corte':    corte,
         'tipo_choices':   PrendaItem.TIPO_CHOICES,
         'estado_choices': PrendaInventario.ESTADO_OPCIONES,
+        'corte_opts':     list(Corte.objects.values('id', 'numero', 'sigla')),
     })
 
 
@@ -3959,18 +3972,22 @@ def detalle_prenda(request, id):
         ),
         id=id,
     )
-    items = prenda.items.all().order_by('codigo_item')
+    items = prenda.items.all().order_by('codigo_item').select_related('corte')
     resumen = {
         'disponible': items.filter(estado='disponible').count(),
         'alquilado':  items.filter(estado='alquilado').count(),
         'baja':       items.filter(estado='baja').count(),
         'total':      items.count(),
     }
+    cortes = Corte.objects.all()
+    corte_default = Corte.mas_reciente_usado()
     return render(request, 'misastreria/prendas/detalle.html', {
         'prenda':  prenda,
         'items':   items,
         'resumen': resumen,
         'ubicacion_opts': list(UbicacionItem.objects.values('id', 'nombre')),
+        'cortes':         cortes,
+        'corte_default_id': corte_default.id if corte_default else '',
     })
 
 
@@ -3988,6 +4005,14 @@ def editar_prenda_item(request, id):
             item.ubicacion = None
         item.condicion = request.POST.get('condicion', item.condicion)
         item.tipo      = request.POST.get('tipo', item.tipo)
+        corte_id = request.POST.get('corte', '').strip()
+        if corte_id:
+            try:
+                item.corte = Corte.objects.get(id=int(corte_id))
+            except (ValueError, Corte.DoesNotExist):
+                item.corte = None
+        else:
+            item.corte = None
         item.notas     = request.POST.get('notas', '').strip()
         max_usos_raw = request.POST.get('max_usos', '').strip()
         if max_usos_raw == '':
@@ -4001,7 +4026,7 @@ def editar_prenda_item(request, id):
                 pass  # silently keep current value on invalid input
         if item.max_usos and item.max_usos <= item.veces_alquilado:
             messages.warning(request, f'El máx. de usos ({item.max_usos}) es menor o igual a los usos actuales ({item.veces_alquilado}).')
-        item.save(update_fields=['ubicacion', 'condicion', 'tipo', 'notas', 'max_usos', 'actualizado'])
+        item.save(update_fields=['ubicacion', 'condicion', 'tipo', 'notas', 'max_usos', 'corte', 'actualizado'])
         messages.success(request, f'Item {item.codigo_item} actualizado.')
         return redirect('detalle_prenda', id=item.prenda_id)
     return redirect('detalle_prenda', id=item.prenda_id)
@@ -4071,16 +4096,45 @@ def agregar_items_prenda(request, id):
             ubicacion_obj = UbicacionItem.objects.get(id=int(ubicacion_id))
         except (ValueError, UbicacionItem.DoesNotExist):
             pass
-    for _ in range(cantidad):
-        pi = PrendaItem.objects.create(
-            prenda=prenda,
-            tipo=tipo,
-            condicion=condicion,
-            ubicacion=ubicacion_obj,
-            notas=notas,
-        )
-        kardex_events.emit_ingreso(pi)
-    messages.success(request, f"Se agregaron {cantidad} item{'s' if cantidad != 1 else ''} a {prenda.codigo}.")
+
+    # Corte: "existente" reusa un Corte ya creado, "nuevo" crea el siguiente
+    # C-### dentro de la misma transacción que las unidades, "ninguno" (o
+    # cualquier valor no reconocido, p. ej. si no hay cortes todavía) deja
+    # las unidades sin corte.
+    corte_modo = request.POST.get('corte_modo', 'ninguno').strip()
+    corte_obj = None
+
+    with transaction.atomic():
+        if corte_modo == 'existente':
+            corte_id = request.POST.get('corte', '').strip()
+            if corte_id:
+                try:
+                    corte_obj = Corte.objects.get(id=int(corte_id))
+                except (ValueError, Corte.DoesNotExist):
+                    corte_obj = None
+        elif corte_modo == 'nuevo':
+            # Corte.save() normaliza y recorta sigla/tela a su max_length.
+            corte_obj = Corte.objects.create(
+                sigla=request.POST.get('nuevo_corte_sigla', ''),
+                tela=request.POST.get('nuevo_corte_tela', ''),
+            )
+
+        for _ in range(cantidad):
+            pi = PrendaItem.objects.create(
+                prenda=prenda,
+                tipo=tipo,
+                condicion=condicion,
+                ubicacion=ubicacion_obj,
+                corte=corte_obj,
+                notas=notas,
+            )
+            kardex_events.emit_ingreso(pi)
+
+    plural = 's' if cantidad != 1 else ''
+    if corte_obj:
+        messages.success(request, f"Se agregaron {cantidad} item{plural} a {prenda.codigo}, con corte {corte_obj.numero}.")
+    else:
+        messages.success(request, f"Se agregaron {cantidad} item{plural} a {prenda.codigo}.")
     return redirect('detalle_prenda', id=prenda.id)
 
 

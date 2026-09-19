@@ -13,7 +13,7 @@ from misastreria.models import (
     Venta, VentaItem,
     Confeccion,
     Alquiler, AlquilerItem,
-    PrendaInventario, PrendaItem,
+    PrendaInventario, PrendaItem, Corte,
     Insumo,
     CajaSesion, CajaMovimiento, TipoGasto,
     Transaccion,
@@ -97,6 +97,10 @@ def make_prenda_item(prenda=None, **kwargs):
     defaults = dict(tipo='alquiler', condicion='nueva')
     defaults.update(kwargs)
     return PrendaItem.objects.create(prenda=prenda, **defaults)
+
+
+def make_corte(**kwargs):
+    return Corte.objects.create(**kwargs)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

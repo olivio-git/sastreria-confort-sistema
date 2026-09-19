@@ -64,7 +64,7 @@ def _datos_pedidos(datos):
     """
     item_id = datos.get('item_id')
     if item_id:
-        item = (PrendaItem.objects.select_related('prenda', 'ubicacion')
+        item = (PrendaItem.objects.select_related('prenda', 'ubicacion', 'corte')
                 .filter(pk=item_id).first())
         if item:
             return etiquetas.datos_de_item(item)
@@ -634,7 +634,7 @@ def _sin_plantilla(request):
 def etiqueta_item_pdf(request, id):
     """Etiqueta de UNA unidad física de inventario (PrendaItem)."""
     item = get_object_or_404(
-        PrendaItem.objects.select_related('prenda', 'ubicacion'), id=id
+        PrendaItem.objects.select_related('prenda', 'ubicacion', 'corte'), id=id
     )
     try:
         return _pdf([etiquetas.datos_de_item(item)], f"etiqueta_{item.codigo_item}.pdf")
@@ -652,7 +652,7 @@ def etiquetas_prenda_pdf(request, id):
     prenda = get_object_or_404(PrendaInventario, id=id)
     items = list(
         prenda.items.exclude(estado='baja')
-                    .select_related('prenda', 'ubicacion')
+                    .select_related('prenda', 'ubicacion', 'corte')
                     .order_by('codigo_item')
     )
     if not items:

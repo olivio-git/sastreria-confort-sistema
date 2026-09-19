@@ -1,7 +1,7 @@
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.contrib.auth.models import User
-from django.db import models, transaction
+from django.db import IntegrityError, models, transaction
 from django.core.validators import EmailValidator, RegexValidator, MinValueValidator, MaxValueValidator
 from django.utils import timezone
 from django.core.exceptions import ValidationError
@@ -439,6 +439,112 @@ class UbicacionItem(models.Model):
         return self.nombre
 
 
+class Corte(models.Model):
+    """Lote de corte de tela: la tanda que se corta de un rollo de una vez.
+
+    Es independiente del modelo de prenda (PrendaInventario): un saco y un
+    pantalón cortados del mismo rollo comparten corte aunque sean SKUs
+    distintos, porque lo que importa es que combinen en tono. Se asigna por
+    UNIDAD (PrendaItem) y no por SKU, así que un mismo modelo puede tener
+    unidades de varios cortes si se repuso stock con tela nueva.
+
+    El taller no tenía este proceso antes de esta función, así que el stock
+    existente no tiene corte asignado. Nunca se inventa uno para datos
+    viejos — de ahí que `PrendaItem.corte` sea nullable.
+    """
+    PREFIJO = 'C'
+
+    numero = models.CharField(
+        max_length=20, unique=True, blank=True,
+        verbose_name="Número", help_text="Auto-generado: C-001",
+    )
+    sigla = models.CharField(
+        max_length=12, blank=True,
+        verbose_name="Sigla", help_text="Alias corto opcional, ej. AZUL-LANA",
+    )
+    fecha = models.DateField(default=timezone.now, verbose_name="Fecha")
+    tela = models.CharField(max_length=100, blank=True, verbose_name="Tela / color")
+    nota = models.TextField(blank=True, verbose_name="Nota")
+    creado = models.DateTimeField(auto_now_add=True, verbose_name="Fecha de registro")
+
+    class Meta:
+        verbose_name = "Corte"
+        verbose_name_plural = "Cortes"
+        ordering = ['-creado']
+
+    @classmethod
+    def siguiente_numero(cls):
+        """Máximo numérico entre los C-NNN existentes, más uno.
+
+        Mismo criterio que PrendaInventario.siguiente_codigo: por el máximo
+        validado en Python y no por el último `id`, para no chocar contra el
+        `unique` cuando hay huecos. Un número sí se reutiliza si se borra el
+        corte con el número más alto (el máximo baja); es inofensivo porque
+        PROTECT sólo deja borrar cortes que ninguna unidad usa.
+        """
+        numeros = []
+        for numero in cls.objects.filter(
+            numero__startswith=f'{cls.PREFIJO}-'
+        ).values_list('numero', flat=True):
+            sufijo = numero.split('-', 1)[1]
+            if sufijo.isdigit():
+                numeros.append(int(sufijo))
+        return f"{cls.PREFIJO}-{max(numeros, default=0) + 1:03d}"
+
+    # Reintentos si otra petición concurrente se lleva el mismo C-NNN.
+    MAX_REINTENTOS_NUMERO = 5
+
+    def save(self, *args, **kwargs):
+        # Normalizar y recortar al max_length para que MySQL strict no tire
+        # DataError. Se recorta DESPUÉS de upper(): 'ß'.upper() == 'SS'.
+        max_sigla = self._meta.get_field('sigla').max_length
+        max_tela = self._meta.get_field('tela').max_length
+        self.sigla = (self.sigla or '').strip().upper()[:max_sigla]
+        self.tela = (self.tela or '').strip()[:max_tela]
+
+        if self.numero:
+            super().save(*args, **kwargs)
+            return
+
+        # siguiente_numero() lee el máximo y luego se inserta: dos "Nuevo
+        # corte" simultáneos pueden calcular el mismo número. Se reintenta
+        # dentro de un savepoint para que la transacción externa (p. ej. la
+        # de agregar_items_prenda) siga usable tras el IntegrityError.
+        for intento in range(self.MAX_REINTENTOS_NUMERO):
+            self.numero = Corte.siguiente_numero()
+            try:
+                with transaction.atomic():
+                    super().save(*args, **kwargs)
+                return
+            except IntegrityError:
+                self.numero = ''
+                if intento == self.MAX_REINTENTOS_NUMERO - 1:
+                    raise
+
+    def __str__(self):
+        return f"{self.numero} · {self.sigla}" if self.sigla else self.numero
+
+    @classmethod
+    def mas_reciente_usado(cls):
+        """El corte de la unidad (PrendaItem) más nueva que tenga uno asignado,
+        o si ninguna unidad tiene corte todavía, el corte más nuevo registrado.
+
+        Es el default razonable para "usar corte existente" al agregar
+        unidades: lo más probable es que la tanda nueva venga del mismo rollo
+        que la última que se registró.
+        """
+        ultimo_item = (
+            PrendaItem.objects
+            .filter(corte__isnull=False)
+            .order_by('-creado')
+            .select_related('corte')
+            .first()
+        )
+        if ultimo_item:
+            return ultimo_item.corte
+        return cls.objects.order_by('-creado').first()
+
+
 class PrendaItem(models.Model):
     TIPO_CHOICES = [
         ('alquiler', 'Para Alquiler'),
@@ -489,6 +595,12 @@ class PrendaItem(models.Model):
         default=0, verbose_name="Veces alquilado",
     )
     max_usos = models.PositiveIntegerField(null=True, blank=True, verbose_name="Máx. usos")
+    corte = models.ForeignKey(
+        Corte, on_delete=models.PROTECT,
+        null=True, blank=True,
+        related_name='items',
+        verbose_name="Corte",
+    )
     notas = models.TextField(blank=True, verbose_name="Notas")
     creado = models.DateTimeField(auto_now_add=True, verbose_name="Fecha de alta")
     actualizado = models.DateTimeField(auto_now=True)

@@ -1,6 +1,6 @@
 from django.contrib import admin
 from .models import (
-    Cliente, PrendaInventario, PrendaItem, Insumo,
+    Cliente, PrendaInventario, PrendaItem, Corte, Insumo,
     Venta, VentaItem, Alquiler, AlquilerItem, Transaccion,
     Reparacion, Empleado, Permiso, Falta, Confeccion,
     OrdenProduccion, OrdenProduccionEmpleado, InsumoCortado,
@@ -27,9 +27,17 @@ class PrendaInventarioAdmin(admin.ModelAdmin):
     readonly_fields = ['codigo']
 
 
+@admin.register(Corte)
+class CorteAdmin(admin.ModelAdmin):
+    list_display = ['numero', 'sigla', 'fecha', 'tela']
+    search_fields = ['numero', 'sigla', 'tela']
+    list_per_page = 20
+    readonly_fields = ['numero']
+
+
 @admin.register(PrendaItem)
 class PrendaItemAdmin(admin.ModelAdmin):
-    list_display = ['codigo_item', 'prenda', 'tipo', 'condicion', 'estado', 'veces_alquilado', 'ubicacion']
+    list_display = ['codigo_item', 'prenda', 'tipo', 'condicion', 'estado', 'veces_alquilado', 'ubicacion', 'corte']
     list_filter  = ['tipo', 'condicion', 'estado']
     search_fields = ['codigo_item', 'prenda__codigo', 'prenda__nombre']
     list_per_page = 20

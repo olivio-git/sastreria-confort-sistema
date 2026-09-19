@@ -136,6 +136,7 @@
           <th>Condición</th>
           <th>Estado</th>
           <th>Ubicación</th>
+          <th>Corte</th>
           <th class="text-center">Veces alq.</th>
           <th class="text-center">Vida útil</th>
           <th>Notas</th>
@@ -164,6 +165,13 @@
             {% endif %}
           </td>
           <td>{{ item.ubicacion|default:"—" }}</td>
+          <td>
+            {% if item.corte %}
+              <code>{{ item.corte.numero }}</code>{% if item.corte.sigla %} <span class="text-muted small">· {{ item.corte.sigla }}</span>{% endif %}
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
           <td class="text-center">{{ item.veces_alquilado }}</td>
           <td class="text-center" style="min-width:120px">
             {% if item.max_usos_efectivo %}
@@ -205,7 +213,8 @@
                 data-edit-item-ubicacion-id="{{ item.ubicacion_id|default:'' }}"
                 data-edit-item-condicion="{{ item.condicion }}"
                 data-edit-item-notas="{{ item.notas|default:'' }}"
-                data-edit-item-maxusos="{{ item.max_usos|default:'' }}">
+                data-edit-item-maxusos="{{ item.max_usos|default:'' }}"
+                data-edit-item-corte="{{ item.corte_id|default:'' }}">
                 <i data-lucide="pencil"></i>
               </button>
               {% if item.estado == 'disponible' %}
@@ -239,7 +248,7 @@
         </tr>
         {% empty %}
         <tr>
-          <td colspan="10">
+          <td colspan="11">
             <div class="empty-state">
               <i data-lucide="package" style="width:2.5rem;height:2.5rem;opacity:.3;display:block;margin:0 auto .75rem"></i>
               No hay items registrados para este SKU.
@@ -296,6 +305,15 @@
             <input type="number" id="edit_max_usos" name="max_usos" class="form-control"
                    min="1" placeholder="Dejar vacío para heredar del SKU">
             <div class="form-text">Máx. alquileres antes de baja sugerida</div>
+          </div>
+          <div class="mb-3">
+            <label for="edit_corte" class="form-label">Corte <span class="text-muted small">(opcional)</span></label>
+            <select id="edit_corte" name="corte" class="form-select">
+              <option value="">Sin corte</option>
+              {% for c in cortes %}
+                <option value="{{ c.id }}">{{ c }}</option>
+              {% endfor %}
+            </select>
           </div>
           <div class="mb-3">
             <label for="edit_notas" class="form-label">Notas</label>
@@ -363,6 +381,39 @@
                       id="agr_btnNuevaUbicacion" data-ub-ctx="agr" title="Crear nueva ubicación">
                 <i data-lucide="plus"></i>
               </button>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Corte <span class="text-muted">(opcional)</span></label>
+
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="corte_modo" id="agr_corte_modo_existente"
+                     value="existente" {% if cortes %}checked{% endif %} {% if not cortes %}disabled{% endif %}>
+              <label class="form-check-label" for="agr_corte_modo_existente">Usar corte existente</label>
+            </div>
+            <div id="agr_corte_existente_wrap" class="ms-4 mb-2" {% if not cortes %}style="display:none"{% endif %}>
+              <select class="form-select form-select-sm" id="agr_corte" name="corte">
+                {% for c in cortes %}
+                  <option value="{{ c.id }}" {% if c.id == corte_default_id %}selected{% endif %}>{{ c }}</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="corte_modo" id="agr_corte_modo_nuevo" value="nuevo">
+              <label class="form-check-label" for="agr_corte_modo_nuevo">Nuevo corte</label>
+            </div>
+            <div id="agr_corte_nuevo_wrap" class="ms-4 mb-2" style="display:none">
+              <input type="text" class="form-control form-control-sm mb-1" id="agr_nuevo_corte_sigla"
+                     name="nuevo_corte_sigla" placeholder="Sigla (opcional, ej. AZUL-LANA)" maxlength="12">
+              <input type="text" class="form-control form-control-sm" id="agr_nuevo_corte_tela"
+                     name="nuevo_corte_tela" placeholder="Tela / color (opcional)" maxlength="100">
+            </div>
+
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="corte_modo" id="agr_corte_modo_ninguno"
+                     value="ninguno" {% if not cortes %}checked{% endif %}>
+              <label class="form-check-label" for="agr_corte_modo_ninguno">Sin corte</label>
             </div>
           </div>
           <div class="mb-3">
@@ -434,12 +485,27 @@
       document.getElementById('edit_tipo').value      = btn.dataset.editItemTipo || 'alquiler';
       document.getElementById('edit_condicion').value = btn.dataset.editItemCondicion || 'nueva';
       document.getElementById('edit_max_usos').value  = btn.dataset.editItemMaxusos || '';
+      document.getElementById('edit_corte').value     = btn.dataset.editItemCorte || '';
       document.getElementById('edit_notas').value     = btn.dataset.editItemNotas || '';
       // Ubicacion: precargar text + hidden
       if (editText)   editText.value   = btn.dataset.editItemUbicacion || '';
       if (editHidden) editHidden.value = btn.dataset.editItemUbicacionId || '';
       document.getElementById('formEditarItem').action = '/prendas/items/' + id + '/editar/';
       new bootstrap.Modal(document.getElementById('modalEditarItem')).show();
+    });
+  });
+
+  // Toggle del selector de corte en "Agregar items": sólo se muestra el
+  // select de "corte existente" o los inputs de "nuevo corte" según el modo
+  // elegido — el resto queda oculto para no confundir con campos que no
+  // aplican a esa elección.
+  var agrCorteExistenteWrap = document.getElementById('agr_corte_existente_wrap');
+  var agrCorteNuevoWrap     = document.getElementById('agr_corte_nuevo_wrap');
+  document.querySelectorAll('input[name="corte_modo"]').forEach(function(radio) {
+    radio.addEventListener('change', function() {
+      var modo = radio.value;
+      agrCorteExistenteWrap.style.display = modo === 'existente' ? '' : 'none';
+      agrCorteNuevoWrap.style.display     = modo === 'nuevo'     ? '' : 'none';
     });
   });
 

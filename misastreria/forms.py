@@ -685,12 +685,13 @@ class PrendaInventarioForm(forms.ModelForm):
 class PrendaItemForm(forms.ModelForm):
     class Meta:
         model = PrendaItem
-        fields = ['tipo', 'condicion', 'ubicacion', 'max_usos', 'notas']
+        fields = ['tipo', 'condicion', 'ubicacion', 'max_usos', 'corte', 'notas']
         labels = {
             'tipo': 'Tipo',
             'condicion': 'Condición',
             'ubicacion': 'Ubicación',
             'max_usos': 'Máx. usos',
+            'corte': 'Corte',
             'notas': 'Notas',
         }
         help_texts = {

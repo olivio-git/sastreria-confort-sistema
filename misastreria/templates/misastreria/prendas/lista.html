@@ -49,6 +49,17 @@
           {% endfor %}
         </select>
       </div>
+      <div class="col-6 col-md-auto">
+        <label class="form-label small mb-1 fw-semibold text-muted">Corte</label>
+        <select name="corte" class="form-select" data-debounce="0">
+          <option value="">Todos</option>
+          {% for c in corte_opts %}
+            <option value="{{ c.id }}" {% if corte == c.id|stringformat:"s" %}selected{% endif %}>
+              {{ c.numero }}{% if c.sigla %} · {{ c.sigla }}{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
       <div class="col-auto ms-auto d-flex gap-2 align-items-end">
         <a href="{% url 'lista_prendas' %}" class="btn btn-outline-secondary">Limpiar</a>
       </div>
@@ -136,13 +147,13 @@
     <nav class="ms-auto">
       <ul class="pagination pagination-sm m-0">
         {% if page_obj.has_previous %}
-          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&tipo={{ tipo }}&estado={{ estado }}">«</a></li>
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&tipo={{ tipo }}&estado={{ estado }}">‹</a></li>
+          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&tipo={{ tipo }}&estado={{ estado }}&corte={{ corte }}">«</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&tipo={{ tipo }}&estado={{ estado }}&corte={{ corte }}">‹</a></li>
         {% endif %}
         <li class="page-item active"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
         {% if page_obj.has_next %}
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&tipo={{ tipo }}&estado={{ estado }}">›</a></li>
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&tipo={{ tipo }}&estado={{ estado }}">»</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&tipo={{ tipo }}&estado={{ estado }}&corte={{ corte }}">›</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&tipo={{ tipo }}&estado={{ estado }}&corte={{ corte }}">»</a></li>
         {% endif %}
       </ul>
     </nav>
