@@ -15,6 +15,7 @@ from django.test import TestCase
 from misastreria.models import Venta, VentaItem, Alquiler, AlquilerItem
 from misastreria.views import _calcular_saldo_comision_empleado
 from .factories import (
+    asignar_arreglo,
     make_empleado, make_tipo_reparacion, make_prenda_item,
     make_venta, make_alquiler,
 )
@@ -56,11 +57,10 @@ class SaldoComisionArregloTests(TestCase):
         emp = make_empleado()
         tr = make_tipo_reparacion()
         venta = make_venta(estado='en_proceso')
-        VentaItem.objects.create(
+        asignar_arreglo(VentaItem.objects.create(
             venta=venta, prenda_item=make_prenda_item(), tipo_reparacion=tr,
             precio_unitario=Decimal('100'), precio_reparacion=Decimal('50'),
-            empleado=emp, monto_comision_fijo=Decimal('10'),
-        )
+        ), emp, Decimal('10'))
         # en_proceso → ya devenga con monto fijo
         self.assertEqual(_calcular_saldo_comision_empleado(emp), Decimal('10'))
 
@@ -69,11 +69,10 @@ class SaldoComisionArregloTests(TestCase):
         emp = make_empleado()
         tr = make_tipo_reparacion()
         alquiler = make_alquiler(estado='alquilado')
-        AlquilerItem.objects.create(
+        asignar_arreglo(AlquilerItem.objects.create(
             alquiler=alquiler, prenda_item=make_prenda_item(), tipo_reparacion=tr,
             precio_unitario=Decimal('200'), precio_reparacion=Decimal('40'),
-            empleado=emp, monto_comision_fijo=Decimal('12'),
-        )
+        ), emp, Decimal('12'))
         # alquilado → ya devenga con monto fijo
         self.assertEqual(_calcular_saldo_comision_empleado(emp), Decimal('12'))
 
@@ -81,17 +80,15 @@ class SaldoComisionArregloTests(TestCase):
         emp = make_empleado()
         tr = make_tipo_reparacion()
         venta = make_venta(estado='efectuada')
-        VentaItem.objects.create(
+        asignar_arreglo(VentaItem.objects.create(
             venta=venta, prenda_item=make_prenda_item(), tipo_reparacion=tr,
             precio_unitario=Decimal('100'), precio_reparacion=Decimal('50'),
-            empleado=emp, monto_comision_fijo=Decimal('10'),
-        )
+        ), emp, Decimal('10'))
         alquiler = make_alquiler(estado='devuelto')
-        AlquilerItem.objects.create(
+        asignar_arreglo(AlquilerItem.objects.create(
             alquiler=alquiler, prenda_item=make_prenda_item(), tipo_reparacion=tr,
             precio_unitario=Decimal('200'), precio_reparacion=Decimal('40'),
-            empleado=emp, monto_comision_fijo=Decimal('12'),
-        )
+        ), emp, Decimal('12'))
         # 10 + 12 = 22
         self.assertEqual(_calcular_saldo_comision_empleado(emp), Decimal('22'))
 
@@ -110,20 +107,18 @@ class SaldoComisionArregloTests(TestCase):
         """VentaItem(monto_comision_fijo=45) → devengado from ventas = 45."""
         emp = make_empleado()
         tr = make_tipo_reparacion()
-        VentaItem.objects.create(
+        asignar_arreglo(VentaItem.objects.create(
             venta=make_venta(), prenda_item=make_prenda_item(), tipo_reparacion=tr,
             precio_unitario=Decimal('100'), precio_reparacion=Decimal('50'),
-            empleado=emp, monto_comision_fijo=Decimal('45'),
-        )
+        ), emp, Decimal('45'))
         self.assertEqual(_calcular_saldo_comision_empleado(emp), Decimal('45'))
 
     def test_alquiler_arreglo_monto_fijo(self):
         """AlquilerItem(monto_comision_fijo=20) → devengado from alquileres = 20."""
         emp = make_empleado()
         tr = make_tipo_reparacion()
-        AlquilerItem.objects.create(
+        asignar_arreglo(AlquilerItem.objects.create(
             alquiler=make_alquiler(), prenda_item=make_prenda_item(), tipo_reparacion=tr,
             precio_unitario=Decimal('200'), precio_reparacion=Decimal('40'),
-            empleado=emp, monto_comision_fijo=Decimal('20'),
-        )
+        ), emp, Decimal('20'))
         self.assertEqual(_calcular_saldo_comision_empleado(emp), Decimal('20'))

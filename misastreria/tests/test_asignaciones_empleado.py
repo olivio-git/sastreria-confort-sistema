@@ -22,7 +22,7 @@ from misastreria.models import (
 from misastreria.views import (
     _calcular_saldo_comision_empleado, _guardar_asignaciones, _parse_asignaciones,
 )
-from .factories import make_empleado, make_reparacion, make_confeccion
+from .factories import asignar_arreglo, make_empleado, make_reparacion, make_confeccion
 
 
 def _qd(d):
@@ -209,18 +209,16 @@ class NuevosTestsComisionFija(TestCase):
 
         # venta = 30
         tr = make_tipo_reparacion()
-        VentaItem.objects.create(
+        asignar_arreglo(VentaItem.objects.create(
             venta=make_venta(), prenda_item=make_prenda_item(), tipo_reparacion=tr,
             precio_unitario=Decimal('100'), precio_reparacion=Decimal('50'),
-            empleado=e, monto_comision_fijo=Decimal('30'),
-        )
+        ), e, Decimal('30'))
 
         # alquiler = 20
-        AlquilerItem.objects.create(
+        asignar_arreglo(AlquilerItem.objects.create(
             alquiler=make_alquiler(), prenda_item=make_prenda_item(), tipo_reparacion=tr,
             precio_unitario=Decimal('200'), precio_reparacion=Decimal('40'),
-            empleado=e, monto_comision_fijo=Decimal('20'),
-        )
+        ), e, Decimal('20'))
 
         # pago = 50
         PagoComisionEmpleado.objects.create(empleado=e, monto=Decimal('50'), forma_pago='efectivo')

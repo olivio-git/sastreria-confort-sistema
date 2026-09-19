@@ -217,3 +217,20 @@ def make_orden_produccion_empleado(orden, empleado, responsabilidad='corte', mon
     return OrdenProduccionEmpleado.objects.create(
         orden=orden, empleado=empleado, responsabilidad=responsabilidad,
         monto_comision_fijo=monto)
+
+
+def asignar_arreglo(item, empleado, monto):
+    """Asigna un empleado al arreglo de un VentaItem/AlquilerItem.
+
+    Desde la migración 0063 la comisión de un arreglo vive en la tabla de
+    asignaciones y no en el FK del item, porque un arreglo puede llevar varios
+    empleados. Devuelve el item para poder encadenar en los tests.
+    """
+    from misastreria.models import VentaItem, VentaItemEmpleado, AlquilerItemEmpleado
+    if isinstance(item, VentaItem):
+        VentaItemEmpleado.objects.create(
+            venta_item=item, empleado=empleado, monto_comision_fijo=monto)
+    else:
+        AlquilerItemEmpleado.objects.create(
+            alquiler_item=item, empleado=empleado, monto_comision_fijo=monto)
+    return item

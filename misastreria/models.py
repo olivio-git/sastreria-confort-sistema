@@ -929,6 +929,52 @@ class ConfeccionItem(models.Model):
         return str(self.tipo_prenda) if self.tipo_prenda else '—'
 
 
+
+class VentaItemEmpleado(models.Model):
+    """Empleado asignado al arreglo de una prenda de venta, con su comisión en Bs.
+
+    Espeja a ReparacionEmpleado. Los arreglos dentro de venta eran el único lugar
+    del sistema donde seguía habiendo un solo empleado por trabajo: reparaciones,
+    confecciones y producción ya usaban tabla de asignaciones.
+
+    El campo `VentaItem.empleado` NO se elimina. La migración 0048 hizo este mismo
+    movimiento para reparaciones y dejó la columna vieja en su lugar —sigue ahí
+    trece migraciones después—, que es lo que permite que un problema en
+    producción no cueste datos: se deja de leer la tabla nueva y listo.
+    """
+    venta_item = models.ForeignKey(
+        VentaItem, on_delete=models.CASCADE, related_name='asignaciones',
+        verbose_name="Ítem",
+    )
+    empleado = models.ForeignKey(
+        Empleado, on_delete=models.CASCADE, related_name='asignaciones_venta',
+        verbose_name="Empleado",
+    )
+    monto_comision_fijo = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        default=Decimal('0'),
+        validators=[MinValueValidator(Decimal('0.00'))],
+        verbose_name="Comisión (Bs)",
+        help_text="Monto fijo en Bs que gana el empleado por este arreglo.",
+    )
+
+    class Meta:
+        verbose_name = "Asignación de arreglo (venta)"
+        verbose_name_plural = "Asignaciones de arreglo (venta)"
+        constraints = [
+            models.UniqueConstraint(
+                fields=['venta_item', 'empleado'], name='unique_empleado_venta_item'),
+        ]
+        ordering = ['id']
+
+    @property
+    def monto_comision(self):
+        return self.monto_comision_fijo or Decimal('0')
+
+    def __str__(self):
+        return f"{self.empleado} — Bs. {self.monto_comision_fijo}"
+
+
 class EstadoAlquiler(models.Model):
     COLOR_CHOICES = [
         ('alquilado', 'Azul (Alquilado)'),
@@ -1112,6 +1158,52 @@ class AlquilerItem(models.Model):
 
     def __str__(self):
         return f"{self.prenda_item.codigo_item}"
+
+
+
+class AlquilerItemEmpleado(models.Model):
+    """Empleado asignado al arreglo de una prenda de alquiler, con su comisión en Bs.
+
+    Espeja a ReparacionEmpleado. Los arreglos dentro de alquiler eran el único lugar
+    del sistema donde seguía habiendo un solo empleado por trabajo: reparaciones,
+    confecciones y producción ya usaban tabla de asignaciones.
+
+    El campo `AlquilerItem.empleado` NO se elimina. La migración 0048 hizo este mismo
+    movimiento para reparaciones y dejó la columna vieja en su lugar —sigue ahí
+    trece migraciones después—, que es lo que permite que un problema en
+    producción no cueste datos: se deja de leer la tabla nueva y listo.
+    """
+    alquiler_item = models.ForeignKey(
+        AlquilerItem, on_delete=models.CASCADE, related_name='asignaciones',
+        verbose_name="Ítem",
+    )
+    empleado = models.ForeignKey(
+        Empleado, on_delete=models.CASCADE, related_name='asignaciones_alquiler',
+        verbose_name="Empleado",
+    )
+    monto_comision_fijo = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        default=Decimal('0'),
+        validators=[MinValueValidator(Decimal('0.00'))],
+        verbose_name="Comisión (Bs)",
+        help_text="Monto fijo en Bs que gana el empleado por este arreglo.",
+    )
+
+    class Meta:
+        verbose_name = "Asignación de arreglo (alquiler)"
+        verbose_name_plural = "Asignaciones de arreglo (alquiler)"
+        constraints = [
+            models.UniqueConstraint(
+                fields=['alquiler_item', 'empleado'], name='unique_empleado_alquiler_item'),
+        ]
+        ordering = ['id']
+
+    @property
+    def monto_comision(self):
+        return self.monto_comision_fijo or Decimal('0')
+
+    def __str__(self):
+        return f"{self.empleado} — Bs. {self.monto_comision_fijo}"
 
 
 class KardexEvento(models.Model):

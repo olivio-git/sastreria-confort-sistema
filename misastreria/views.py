@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from itertools import zip_longest
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
@@ -10,7 +10,7 @@ from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
 from django.utils import timezone as django_tz
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
-from .models import Empleado, TipoContrato, Cliente, Reparacion, ReparacionItem, TipoPrenda, TipoReparacion, Venta, VentaItem, Confeccion, ConfeccionItem, Alquiler, AlquilerItem, EstadoAlquiler, Transaccion, PrendaInventario, PrendaItem, UbicacionItem, Insumo, TipoMaterial, UnidadMedida, Permiso, Falta, OrdenProduccion, InsumoCortado, CajaSesion, CajaMovimiento, TipoGasto, Conjunto, ConjuntoSlot, PagoComisionEmpleado, ModeloConfeccion
+from .models import Empleado, TipoContrato, Cliente, Reparacion, ReparacionItem, TipoPrenda, TipoReparacion, Venta, VentaItem, Confeccion, ConfeccionItem, Alquiler, AlquilerItem, EstadoAlquiler, Transaccion, PrendaInventario, PrendaItem, UbicacionItem, Insumo, TipoMaterial, UnidadMedida, Permiso, Falta, OrdenProduccion, InsumoCortado, CajaSesion, CajaMovimiento, TipoGasto, Conjunto, ConjuntoSlot, PagoComisionEmpleado, ModeloConfeccion, VentaItemEmpleado, AlquilerItemEmpleado
 from .forms import EmpleadoForm, ClienteForm, ReparacionForm, ReparacionItemForm, VentaForm, VentaItemForm, ConfeccionForm, ConfeccionItemFormSet, AlquilerForm, AlquilerItemForm, TransaccionForm, PrendaInventarioForm, InsumoForm, PermisoForm, FaltaForm, EmpleadoReporteForm, ClienteReporteForm, ReparacionReporteForm, OrdenProduccionForm, InsumoCortadoForm, CajaSesionAperturaForm, CajaSesionCierreForm, CajaMovimientoManualForm, TipoGastoForm, ConjuntoForm, ConjuntoSlotFormSet, PagoComisionEmpleadoForm
 from django.core.paginator import Paginator
 from datetime import date, datetime, timedelta
@@ -221,12 +221,15 @@ def _calcular_saldo_comision_empleado(empleado):
         s=Sum('monto_comision_fijo')
     )['s'] or Decimal('0')
 
-    dev_venta = empleado.arreglos_venta.aggregate(
-        s=Sum(Coalesce('monto_comision_fijo', Value(Decimal('0'))))
+    # Desde la 0063 los arreglos llevan tabla de asignaciones: un arreglo puede
+    # tener varios empleados, cada uno con su monto. El FK `item.empleado` sigue
+    # existiendo pero ya no se lee — la migración copió su contenido acá.
+    dev_venta = empleado.asignaciones_venta.aggregate(
+        s=Sum('monto_comision_fijo')
     )['s'] or Decimal('0')
 
-    dev_alquiler = empleado.arreglos_alquiler.aggregate(
-        s=Sum(Coalesce('monto_comision_fijo', Value(Decimal('0'))))
+    dev_alquiler = empleado.asignaciones_alquiler.aggregate(
+        s=Sum('monto_comision_fijo')
     )['s'] or Decimal('0')
 
     dev_prod = empleado.asignaciones_produccion.aggregate(
@@ -258,22 +261,24 @@ def _devengaciones_empleado(empleado):
     ).order_by('-confeccion__fecha_entrega', '-id')
 
     # Arreglos de ventas con comision asignada (todos los estados)
-    arreglos_venta_comision = empleado.arreglos_venta.exclude(
-        monto_comision_fijo__isnull=True
-    ).exclude(monto_comision_fijo=0).select_related(
-        'venta__cliente', 'prenda_item', 'tipo_reparacion',
+    arreglos_venta_comision = empleado.asignaciones_venta.exclude(
+        monto_comision_fijo=0
+    ).select_related(
+        'venta_item__venta__cliente', 'venta_item__prenda_item',
+        'venta_item__tipo_reparacion',
     ).annotate(
         monto_comision_calc=F('monto_comision_fijo')
-    ).order_by('-venta__id', '-id')
+    ).order_by('-venta_item__venta__id', '-id')
 
     # Arreglos de alquileres con comision asignada (todos los estados)
-    arreglos_alquiler_comision = empleado.arreglos_alquiler.exclude(
-        monto_comision_fijo__isnull=True
-    ).exclude(monto_comision_fijo=0).select_related(
-        'alquiler__cliente', 'prenda_item', 'tipo_reparacion',
+    arreglos_alquiler_comision = empleado.asignaciones_alquiler.exclude(
+        monto_comision_fijo=0
+    ).select_related(
+        'alquiler_item__alquiler__cliente', 'alquiler_item__prenda_item',
+        'alquiler_item__tipo_reparacion',
     ).annotate(
         monto_comision_calc=F('monto_comision_fijo')
-    ).order_by('-alquiler__id', '-id')
+    ).order_by('-alquiler_item__alquiler__id', '-id')
 
     # Producción con comisión asignada (todos los estados, monto fijo)
     produccion_comision = empleado.asignaciones_produccion.exclude(
@@ -329,7 +334,8 @@ def _devengaciones_empleado(empleado):
             'detalle': '',
             'comision': c.monto_comision_calc,
         })
-    for v in arreglos_venta_comision:
+    for asig in arreglos_venta_comision:
+        v = asig.venta_item
         operaciones_comision.append({
             'tipo': 'Arreglo venta', 'tipo_key': 'venta', 'badge': 'badge-entregado',
             'codigo': v.venta.codigo,
@@ -338,9 +344,10 @@ def _devengaciones_empleado(empleado):
             'base': v.precio_reparacion,
             'porcentaje': None,
             'detalle': str(v.tipo_reparacion) if v.tipo_reparacion else '',
-            'comision': v.monto_comision_calc,
+            'comision': asig.monto_comision_calc,
         })
-    for a in arreglos_alquiler_comision:
+    for asig in arreglos_alquiler_comision:
+        a = asig.alquiler_item
         operaciones_comision.append({
             'tipo': 'Arreglo alquiler', 'tipo_key': 'alquiler', 'badge': 'badge-devuelto',
             'codigo': a.alquiler.codigo,
@@ -349,7 +356,7 @@ def _devengaciones_empleado(empleado):
             'base': a.precio_reparacion,
             'porcentaje': None,
             'detalle': str(a.tipo_reparacion) if a.tipo_reparacion else '',
-            'comision': a.monto_comision_calc,
+            'comision': asig.monto_comision_calc,
         })
     for p in produccion_comision:
         operaciones_comision.append({
@@ -1937,6 +1944,72 @@ def lista_ventas(request):
     })
 
 
+def _parse_asignaciones_arreglo(crudo, emp_id_suelto, monto_suelto):
+    """Lee los empleados de UN arreglo. Devuelve [(empleado_id, monto), ...].
+
+    El formulario manda un JSON por fila (`item_asignaciones`) porque con varios
+    empleados por arreglo los arreglos paralelos dejan de alcanzar: harían falta
+    dos dimensiones y no hay forma de alinearlas sin inventar nombres de campo.
+
+    Acepta además el formato viejo de un solo empleado (`item_empleado` +
+    `item_monto_comision`). Eso no es cortesía: durante el despliegue puede
+    quedar una pestaña abierta con el formulario anterior, y perder la comisión
+    de un arreglo en silencio es plata de un empleado.
+    """
+    filas = []
+    if crudo:
+        try:
+            crudas = json.loads(crudo)
+        except (ValueError, TypeError):
+            crudas = []
+        for fila in crudas if isinstance(crudas, list) else []:
+            if not isinstance(fila, dict):
+                continue
+            # El int() va acá y no envolviendo el bucle entero: un solo
+            # `empleado_id` malformado no puede tirar abajo las comisiones de
+            # los demás empleados del mismo arreglo.
+            try:
+                emp = int(fila.get('empleado_id'))
+            except (TypeError, ValueError):
+                continue
+            try:
+                monto = Decimal(str(fila.get('monto') or '0'))
+            except (InvalidOperation, ValueError):
+                monto = Decimal('0')
+            filas.append((emp, monto))
+    elif emp_id_suelto:
+        try:
+            monto = Decimal(monto_suelto) if monto_suelto else Decimal('0')
+        except (InvalidOperation, ValueError):
+            monto = Decimal('0')
+        filas.append((int(emp_id_suelto), monto))
+
+    # Un empleado no puede estar dos veces en el mismo arreglo (hay restricción
+    # única en la base); gana la primera aparición.
+    vistos, salida = set(), []
+    for emp, monto in filas:
+        if emp in vistos:
+            continue
+        vistos.add(emp)
+        salida.append((emp, monto))
+    return salida
+
+
+def _guardar_asignaciones_arreglo(item, modelo, campo_fk, filas):
+    """Recrea las asignaciones de empleados de un arreglo. Devuelve errores."""
+    item.asignaciones.all().delete()
+    errores, validos = [], {
+        e.id for e in Empleado.objects.filter(pk__in=[f[0] for f in filas])
+    }
+    for emp_id, monto in filas:
+        if emp_id not in validos:
+            errores.append(f"Empleado {emp_id} no encontrado.")
+            continue
+        modelo.objects.create(**{campo_fk: item, 'empleado_id': emp_id,
+                                 'monto_comision_fijo': monto})
+    return errores
+
+
 def _guardar_items_venta(venta, post_data, estado_items='baja'):
     """Guarda los ítems de la venta y gestiona el estado de cada PrendaItem."""
     for item in venta.items.select_related('prenda_item'):
@@ -1953,6 +2026,7 @@ def _guardar_items_venta(venta, post_data, estado_items='baja'):
     precios_reparacion    = post_data.getlist('item_precio_reparacion')
     empleado_ids          = post_data.getlist('item_empleado')
     montos_comision       = post_data.getlist('item_monto_comision')
+    asignaciones_crudas   = post_data.getlist('item_asignaciones')
     errores               = []
     seen                  = set()
 
@@ -1992,21 +2066,24 @@ def _guardar_items_venta(venta, post_data, estado_items='baja'):
         tipo_reparacion = None
         if tr_id:
             tipo_reparacion = TipoReparacion.objects.filter(pk=tr_id).first()
-        empleado_arreglo = Empleado.objects.filter(pk=emp_id).first() if emp_id else None
-        try:
-            monto_comision = Decimal(monto_str) if (monto_str and empleado_arreglo) else None
-        except Exception:
-            monto_comision = None
+        filas_asig = _parse_asignaciones_arreglo(
+            # `i` arranca en 1 porque se usa para «Fila {i}» en los errores:
+            # la lista se indexa con i-1.
+            asignaciones_crudas[i - 1] if i - 1 < len(asignaciones_crudas) else '',
+            emp_id, monto_str)
+        # `empleado`/`monto_comision_fijo` quedan en None: son las columnas
+        # legadas que la 0063 dejó en su lugar. La comisión vive en las
+        # asignaciones y leerlas de dos lados las haría divergir.
         vi = VentaItem.objects.create(
             venta=venta,
             prenda_item=pi,
             precio_unitario=precio,
             tipo_reparacion=tipo_reparacion,
             precio_reparacion=precio_reparacion,
-            empleado=empleado_arreglo,
-            monto_comision_fijo=monto_comision,
             grupo_conjunto=grupo,
         )
+        errores += _guardar_asignaciones_arreglo(
+            vi, VentaItemEmpleado, 'venta_item', filas_asig)
         kardex_events.emit_venta(vi.prenda_item, venta, vi.precio_unitario)
         pi.estado = estado_items
         pi.save(update_fields=['estado'])
@@ -2163,10 +2240,16 @@ def editar_venta(request, id):
             'grupo_conjunto': item.grupo_conjunto,
             'tipo_reparacion_id': item.tipo_reparacion_id,
             'precio_reparacion': float(item.precio_reparacion or 0),
-            'empleado_id': item.empleado_id,
-            'monto_comision': float(item.monto_comision_fijo) if item.monto_comision_fijo is not None else None,
+            # Los empleados del arreglo viajan como lista: desde la 0063 un
+            # arreglo puede tener varios, cada uno con su monto.
+            'asignaciones': [
+                {'empleado_id': a.empleado_id,
+                 'empleado_nombre': str(a.empleado),
+                 'monto': float(a.monto_comision_fijo or 0)}
+                for a in item.asignaciones.select_related('empleado').all()
+            ],
         }
-        for item in venta.items.all()
+        for item in venta.items.prefetch_related('asignaciones__empleado')
     ]
     return render(request, 'misastreria/ventas/form.html', {
         'form':    form,
@@ -2914,6 +2997,7 @@ def _guardar_items_alquiler(alquiler, post_data, estado_anterior=None):
     precios_reparacion    = post_data.getlist('item_precio_reparacion')
     empleado_ids          = post_data.getlist('item_empleado')
     montos_comision       = post_data.getlist('item_monto_comision')
+    asignaciones_crudas   = post_data.getlist('item_asignaciones')
     errores               = []
     seen                  = set()
 
@@ -2957,21 +3041,22 @@ def _guardar_items_alquiler(alquiler, post_data, estado_anterior=None):
         tipo_reparacion = None
         if tr_id:
             tipo_reparacion = TipoReparacion.objects.filter(pk=tr_id).first()
-        empleado_arreglo = Empleado.objects.filter(pk=emp_id).first() if emp_id else None
-        try:
-            monto_comision = Decimal(monto_str) if (monto_str and empleado_arreglo) else None
-        except Exception:
-            monto_comision = None
+        filas_asig = _parse_asignaciones_arreglo(
+            # `i` arranca en 1 porque se usa para «Fila {i}» en los errores:
+            # la lista se indexa con i-1.
+            asignaciones_crudas[i - 1] if i - 1 < len(asignaciones_crudas) else '',
+            emp_id, monto_str)
+        # Ídem venta: la comisión vive en las asignaciones, no en el FK legado.
         ai = AlquilerItem.objects.create(
             alquiler=alquiler,
             prenda_item=pi,
             precio_unitario=precio,
             tipo_reparacion=tipo_reparacion,
             precio_reparacion=precio_reparacion,
-            empleado=empleado_arreglo,
-            monto_comision_fijo=monto_comision,
             grupo_conjunto=grupo,
         )
+        errores += _guardar_asignaciones_arreglo(
+            ai, AlquilerItemEmpleado, 'alquiler_item', filas_asig)
         if alquiler.estado in ESTADOS_QUE_BLOQUEAN:
             if alquiler.estado == 'alquilado':
                 kardex_events.emit_alquiler(ai.prenda_item, alquiler, ai.precio_unitario)
@@ -3097,10 +3182,16 @@ def editar_alquiler(request, id):
             'grupo_conjunto': item.grupo_conjunto,
             'tipo_reparacion_id': item.tipo_reparacion_id,
             'precio_reparacion': float(item.precio_reparacion or 0),
-            'empleado_id': item.empleado_id,
-            'monto_comision': float(item.monto_comision_fijo) if item.monto_comision_fijo is not None else None,
+            # Los empleados del arreglo viajan como lista: desde la 0063 un
+            # arreglo puede tener varios, cada uno con su monto.
+            'asignaciones': [
+                {'empleado_id': a.empleado_id,
+                 'empleado_nombre': str(a.empleado),
+                 'monto': float(a.monto_comision_fijo or 0)}
+                for a in item.asignaciones.select_related('empleado').all()
+            ],
         }
-        for item in alquiler.items.all()
+        for item in alquiler.items.prefetch_related('asignaciones__empleado')
     ]
     items_iniciales_json = json.dumps(items_iniciales)
 

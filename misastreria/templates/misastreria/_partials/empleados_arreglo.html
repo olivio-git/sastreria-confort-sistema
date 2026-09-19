@@ -1,0 +1,44 @@
+{% comment %}
+  Empleados asignados al arreglo de UNA prenda, con su comisión en Bs cada uno.
+
+  Va en un modal y no dentro de la fila de la tabla porque cada fila ya lleva
+  prenda, precio, tipo de arreglo y precio del arreglo: un repetidor anidado
+  ahí adentro sería ilegible, y quien usa esto a diario necesita lo contrario.
+
+  La fila guarda el resultado en un <input hidden> con JSON. Los arreglos
+  paralelos del resto del formulario no alcanzan cuando hay N empleados por
+  fila: harían falta dos dimensiones.
+
+  El comportamiento lo monta empleados_arreglo.js.
+{% endcomment %}
+<div class="modal modal-blur fade" id="emp-arreglo-modal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Empleados del arreglo</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small mb-3" id="emp-arreglo-contexto"></p>
+        <table class="table table-sm table-vcenter mb-2">
+          <thead>
+            <tr>
+              <th>Empleado</th>
+              <th style="width:9rem">Comisión (Bs)</th>
+              <th style="width:3rem"></th>
+            </tr>
+          </thead>
+          <tbody id="emp-arreglo-cuerpo"></tbody>
+        </table>
+        <button type="button" class="btn btn-outline-primary btn-sm" id="emp-arreglo-agregar">
+          <i data-lucide="plus"></i>Agregar empleado
+        </button>
+      </div>
+      <div class="modal-footer">
+        <span class="me-auto fw-semibold">Total: Bs <span id="emp-arreglo-total">0.00</span></span>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="emp-arreglo-guardar">Guardar</button>
+      </div>
+    </div>
+  </div>
+</div>
