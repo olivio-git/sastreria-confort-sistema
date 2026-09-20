@@ -70,3 +70,39 @@
 
   actualizar();
 })();
+
+// Detalle de devengaciones de un pago, en modal.
+//
+// Antes el detalle se dibujaba dentro de la celda "Descripción": un pago que
+// cubre 19 devengaciones producía una fila de 19 renglones que rompía la
+// altura de la tabla, y empeora a medida que se pagan más. Ahora la fila
+// muestra sólo la cantidad y el detalle vive en un <template> que este modal
+// clona al abrirse.
+//
+// Un solo modal para toda la tabla, instanciado en el primer uso y no al
+// arrancar: así el script no depende de que el bundle de Bootstrap haya
+// llegado antes que él.
+(function () {
+  var modalEl = document.getElementById('modalDevengacionesPago');
+  if (!modalEl) return;
+
+  var cuerpo = modalEl.querySelector('#devengacionesPagoCuerpo');
+  var resumen = modalEl.querySelector('#devengacionesPagoResumen');
+  var instancia = null;
+
+  // Delegado en document: las filas se renderizan del lado del servidor, pero
+  // así sigue funcionando si alguna vez se repaginan sin recargar.
+  document.addEventListener('click', function (e) {
+    var boton = e.target.closest('[data-devengaciones-de]');
+    if (!boton) return;
+
+    var plantilla = document.getElementById(boton.dataset.devengacionesDe);
+    if (!plantilla) return;
+
+    cuerpo.replaceChildren(plantilla.content.cloneNode(true));
+    resumen.textContent = boton.dataset.resumen || '';
+
+    if (!instancia) instancia = new bootstrap.Modal(modalEl);
+    instancia.show();
+  });
+})();

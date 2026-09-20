@@ -222,6 +222,7 @@
             <th>Fecha</th>
             <th>Forma de pago</th>
             <th>Vía caja</th>
+            <th class="text-center">Devengaciones</th>
             <th>Descripción</th>
             <th class="text-end">Monto</th>
           </tr>
@@ -239,22 +240,49 @@
                 <span class="badge-estado badge-inactivo">No</span>
               {% endif %}
             </td>
-            <td>
-              {{ p.descripcion|default:"—" }}
+            <td class="text-center">
               {% if p.aplicaciones_detalle %}
-              <div class="sc-aplicaciones-detalle">
-                <div class="text-muted">{{ p.aplicaciones_detalle|length }} devengaci{{ p.aplicaciones_detalle|length|pluralize:"ón,ones" }}:</div>
-                {% for ap in p.aplicaciones_detalle %}
-                <div>· {{ ap.detalle_snapshot|default:"—" }} — Bs. {{ ap.monto|floatformat:2 }}</div>
-                {% endfor %}
-              </div>
+              <button type="button"
+                      class="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-1"
+                      data-devengaciones-de="devPago{{ p.id }}"
+                      data-resumen="{{ p.codigo }} · {{ p.fecha|date:"Y-m-d H:i" }} · Bs. {{ p.monto|floatformat:2 }}"
+                      title="Ver detalle de devengaciones">
+                <span class="badge-estado badge-en_proceso">{{ p.aplicaciones_detalle|length }}</span>
+                <i data-lucide="eye"></i>
+              </button>
+              {% comment %}
+                El detalle no se dibuja en la fila: una celda con 19 renglones
+                rompe la altura de la tabla y empeora a medida que se pagan más
+                devengaciones. Viaja acá y el modal lo clona al abrirse.
+              {% endcomment %}
+              <template id="devPago{{ p.id }}">
+                <table class="table table-sm table-vcenter sc-tabla-compacta mb-0">
+                  <thead>
+                    <tr>
+                      <th>Devengación</th>
+                      <th class="text-end text-nowrap">Monto</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for ap in p.aplicaciones_detalle %}
+                    <tr>
+                      <td>{{ ap.detalle_snapshot|default:"—" }}</td>
+                      <td class="text-end fw-semibold text-nowrap">Bs. {{ ap.monto|floatformat:2 }}</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </template>
+              {% else %}
+              <span class="text-muted">—</span>
               {% endif %}
             </td>
+            <td>{{ p.descripcion|default:"—" }}</td>
             <td class="text-end fw-semibold">Bs. {{ p.monto|floatformat:2 }}</td>
           </tr>
           {% empty %}
           <tr>
-            <td colspan="6" class="text-center text-muted py-3">
+            <td colspan="7" class="text-center text-muted py-3">
               <i data-lucide="wallet" style="width:1.5rem;height:1.5rem;opacity:.4" class="d-block mx-auto mb-1"></i>
               Sin pagos de comisión registrados.
             </td>
@@ -484,6 +512,28 @@
           </button>
         </div>
       </form>
+    </div>
+  </div>
+</div>
+
+<!-- Detalle de las devengaciones que cubrió un pago. Uno solo para toda la
+     tabla: el contenido lo clona el <template> de la fila que se abrió. -->
+<div class="modal fade" id="modalDevengacionesPago" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title d-flex align-items-center gap-2">
+          <i data-lucide="list-checks"></i>Devengaciones cubiertas por el pago
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small mb-2" id="devengacionesPagoResumen"></p>
+        <div id="devengacionesPagoCuerpo"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
+      </div>
     </div>
   </div>
 </div>
