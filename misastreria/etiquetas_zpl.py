@@ -46,6 +46,35 @@ _ALINEACION = {'izquierda': 'L', 'centro': 'C', 'derecha': 'R'}
 # usa para decidir cuánto achicar un texto con `autoajustar`.
 _ANCHO_MEDIO = 0.55
 
+# Niveles de redondeo de esquina que acepta el parámetro `r` de ^GB. NO es una
+# longitud: es una escala de 0 (esquina recta) a 8 (lo más redondo que dibuja el
+# firmware), y el radio que produce es proporcional al lado MENOR de la caja.
+#
+# El resto del sistema —el editor, la validación de `etiquetas.py` y el renderer
+# PDF— guarda `redondeo` como una LONGITUD en puntos de cabezal, con un rango de
+# 0 a 100. Pasarlo crudo era el bug: con cualquier valor mayor a 8 la impresora
+# descarta el parámetro en silencio y dibuja la caja con las esquinas rectas, así
+# que el diseño salía redondeado en pantalla y en el PDF, pero nunca en papel.
+_REDONDEO_MAXIMO = 8
+
+
+def _nivel_redondeo(redondeo, ancho, alto):
+    """El `redondeo` en puntos de cabezal, llevado a la escala 0-8 de ^GB.
+
+    En el nivel 8 el radio equivale a la mitad del lado menor, así que la regla
+    es proporcional: el mismo redondeo pedido pesa más en una caja chica que en
+    una grande, igual que un radio fijo en el PDF.
+
+    Cualquier redondeo mayor que cero se lleva al nivel 1 como mínimo. El editor
+    y el PDF ya lo dibujan curvo; que la térmica lo redondee apenas es preferible
+    a que lo ignore, que es justo la divergencia que este mapeo viene a cerrar.
+    """
+    if redondeo <= 0:
+        return 0
+    mitad_menor = max(1, min(ancho, alto) / 2)
+    nivel = round(redondeo / mitad_menor * _REDONDEO_MAXIMO)
+    return max(1, min(_REDONDEO_MAXIMO, nivel))
+
 
 def _corrido(el, corrimiento):
     """El `^FO` del elemento con el corrimiento de calibración ya aplicado.
@@ -195,11 +224,16 @@ def _caja_a_zpl(el, corrimiento):
     ancho, alto = el['ancho'], el['alto']
     x, y = _corrido(el, corrimiento)
     grosor = el['grosor']
+    redondeo = el['redondeo']
     if el['relleno']:
         # Un rectángulo sólido es un ^GB con el borde tan grueso como la caja.
+        # El editor (`fillRect`) y el PDF (`rect`) dibujan el relleno con las
+        # esquinas rectas, así que acá tampoco se redondea.
         grosor = min(ancho, alto)
+        redondeo = 0
+    nivel = _nivel_redondeo(redondeo, ancho, alto)
     return (f"^FO{x},{y}"
-            f"^GB{ancho},{alto},{grosor},B,{el['redondeo']}^FS")
+            f"^GB{ancho},{alto},{grosor},B,{nivel}^FS")
 
 
 def _linea_a_zpl(el, corrimiento):

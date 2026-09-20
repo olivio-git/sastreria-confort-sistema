@@ -462,6 +462,48 @@ class RendererZplTests(TestCase):
         ], 400, 240, {})
         self.assertIn('^GB100,20,20,B,0', zpl)
 
+    def test_el_redondeo_se_traduce_a_la_escala_que_entiende_gb(self):
+        # `redondeo` se guarda en puntos de cabezal, pero el parámetro `r` de ^GB
+        # es un nivel de 0 a 8. Un pedido de media caja es el redondeo máximo.
+        zpl = etiquetas_zpl.render([
+            {'tipo': 'caja', 'x': 0, 'y': 0, 'ancho': 200, 'alto': 120,
+             'grosor': 2, 'redondeo': 60},
+        ], 400, 240, {})
+        self.assertIn('^GB200,120,2,B,8^FS', zpl)
+
+    def test_un_redondeo_fuera_de_escala_no_llega_crudo_a_la_impresora(self):
+        # Regresión: con `r` mayor a 8 el firmware descarta el parámetro y la
+        # caja sale con las esquinas rectas, que es el bug que se reportó.
+        zpl = etiquetas_zpl.render([
+            {'tipo': 'caja', 'x': 0, 'y': 0, 'ancho': 392, 'alto': 232,
+             'grosor': 2, 'redondeo': 100},
+        ], 400, 240, {})
+        nivel = int(re.search(r'\^GB392,232,2,B,(\d+)\^FS', zpl).group(1))
+        self.assertLessEqual(nivel, 8)
+        self.assertGreater(nivel, 0)
+
+    def test_el_redondeo_es_proporcional_al_lado_menor(self):
+        # El mismo radio pedido pesa más en una caja chica que en una grande,
+        # igual que un radio fijo en el PDF.
+        def nivel(ancho, alto):
+            zpl = etiquetas_zpl.render([
+                {'tipo': 'caja', 'x': 0, 'y': 0, 'ancho': ancho, 'alto': alto,
+                 'grosor': 2, 'redondeo': 20},
+            ], 400, 240, {})
+            return int(re.search(rf'\^GB{ancho},{alto},2,B,(\d+)\^FS', zpl).group(1))
+
+        self.assertGreater(nivel(100, 60), nivel(392, 232))
+
+    def test_un_redondeo_minimo_no_se_pierde_por_redondear_a_cero(self):
+        # La plantilla de fábrica usa redondeo 7 sobre una caja de 232 de alto:
+        # proporcionalmente es menos de medio nivel, pero salir recto sería la
+        # misma divergencia contra el editor y el PDF que se vino a cerrar.
+        zpl = etiquetas_zpl.render([
+            {'tipo': 'caja', 'x': 0, 'y': 0, 'ancho': 392, 'alto': 232,
+             'grosor': 2, 'redondeo': 7},
+        ], 400, 240, {})
+        self.assertIn('^GB392,232,2,B,1^FS', zpl)
+
     def test_linea_vertical_se_renderiza_como_trazo_solido(self):
         zpl = etiquetas_zpl.render([
             {'tipo': 'linea', 'x': 20, 'y': 30, 'orientacion': 'vertical',
@@ -636,6 +678,33 @@ class CoherenciaEntreRenderersTests(TestCase):
         zpl = etiquetas_zpl.render(elementos, 400, 240, {})
         self.assertIn('ok', zpl)
         self.assertEqual(zpl.count('^FD'), 1)
+
+    def test_el_redondeo_o_esta_en_los_dos_renderers_o_en_ninguno(self):
+        """El contrato: si el editor y el PDF curvan la esquina, la térmica también.
+
+        `redondeo` se valida de 0 a 100 como una longitud, pero ^GB lo lee como
+        un nivel de 0 a 8. Este barrido es el que faltaba: cubre todo el rango
+        que el validador acepta, no sólo el default.
+        """
+        for redondeo in range(0, 101):
+            zpl = etiquetas_zpl.render([
+                {'tipo': 'caja', 'x': 0, 'y': 0, 'ancho': 392, 'alto': 232,
+                 'grosor': 2, 'redondeo': redondeo},
+            ], 400, 240, {})
+            nivel = int(re.search(r'\^GB392,232,2,B,(\d+)\^FS', zpl).group(1))
+            self.assertLessEqual(nivel, 8, f'redondeo {redondeo} sale de escala')
+            self.assertEqual(
+                bool(redondeo), bool(nivel),
+                f'redondeo {redondeo}: el PDF curva y la térmica no (o al revés)')
+
+    def test_la_caja_rellena_sale_recta_por_los_dos_caminos(self):
+        # El editor usa `fillRect` y el PDF `rect`: ninguno de los dos redondea
+        # un bloque sólido, así que el ZPL tampoco puede hacerlo.
+        zpl = etiquetas_zpl.render([
+            {'tipo': 'caja', 'x': 0, 'y': 0, 'ancho': 200, 'alto': 40,
+             'relleno': True, 'redondeo': 40},
+        ], 400, 240, {})
+        self.assertIn('^GB200,40,40,B,0^FS', zpl)
 
     def test_una_capa_apagada_no_se_imprime_por_ningun_camino(self):
         elementos = [{'tipo': 'texto', 'texto': 'FANTASMA', 'visible': False},
