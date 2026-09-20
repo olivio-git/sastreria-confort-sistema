@@ -10,7 +10,8 @@ from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
 from django.utils import timezone as django_tz
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
-from .models import Empleado, TipoContrato, Cliente, Reparacion, ReparacionItem, TipoPrenda, TipoReparacion, Venta, VentaItem, Confeccion, ConfeccionItem, Alquiler, AlquilerItem, EstadoAlquiler, Transaccion, PrendaInventario, PrendaItem, Corte, UbicacionItem, Insumo, TipoMaterial, UnidadMedida, Permiso, Falta, OrdenProduccion, InsumoCortado, CajaSesion, CajaMovimiento, TipoGasto, Conjunto, ConjuntoSlot, PagoComisionEmpleado, ModeloConfeccion, VentaItemEmpleado, AlquilerItemEmpleado, KardexEvento
+from .models import Empleado, TipoContrato, Cliente, Reparacion, ReparacionItem, TipoPrenda, TipoReparacion, Venta, VentaItem, Confeccion, ConfeccionItem, Alquiler, AlquilerItem, EstadoAlquiler, Transaccion, PrendaInventario, PrendaItem, Corte, UbicacionItem, Insumo, TipoMaterial, UnidadMedida, Permiso, Falta, OrdenProduccion, InsumoCortado, CajaSesion, CajaMovimiento, TipoGasto, Conjunto, ConjuntoSlot, PagoComisionEmpleado, ModeloConfeccion, VentaItemEmpleado, AlquilerItemEmpleado, KardexEvento, ReparacionEmpleado, ConfeccionEmpleado, OrdenProduccionEmpleado, AplicacionPagoComision
+from . import comisiones
 from .forms import EmpleadoForm, ClienteForm, ReparacionForm, ReparacionItemForm, VentaForm, VentaItemForm, ConfeccionForm, ConfeccionItemFormSet, AlquilerForm, AlquilerItemForm, TransaccionForm, PrendaInventarioForm, InsumoForm, PermisoForm, FaltaForm, EmpleadoReporteForm, ClienteReporteForm, ReparacionReporteForm, OrdenProduccionForm, InsumoCortadoForm, CajaSesionAperturaForm, CajaSesionCierreForm, CajaMovimientoManualForm, TipoGastoForm, ConjuntoForm, ConjuntoSlotFormSet, PagoComisionEmpleadoForm
 from django.core.paginator import Paginator
 from datetime import date, datetime, timedelta
@@ -240,6 +241,172 @@ def _calcular_saldo_comision_empleado(empleado):
     return (dev_rep + dev_conf + dev_venta + dev_alquiler + dev_prod) - pagado
 
 
+# Mapea la clave corta de cada tipo de operación a (modelo de asignación,
+# nombre del FK en AplicacionPagoComision). Única fuente de verdad para
+# `_devengaciones_empleado` (lectura) y `pagar_comision_empleado` (escritura
+# por selección), así ambos lados siempre están de acuerdo en qué es cada clave.
+ASIGNACION_MODELOS = {
+    'reparacion': (ReparacionEmpleado, 'reparacion_empleado'),
+    'confeccion': (ConfeccionEmpleado, 'confeccion_empleado'),
+    'venta': (VentaItemEmpleado, 'venta_item_empleado'),
+    'alquiler': (AlquilerItemEmpleado, 'alquiler_item_empleado'),
+    'produccion': (OrdenProduccionEmpleado, 'produccion_empleado'),
+}
+
+
+def _pagados_por_asignacion(fk_field, ids):
+    """Suma de AplicacionPagoComision.monto por fila de asignación.
+
+    Una sola query de agregación por tabla de asignación (5 en total desde
+    `_devengaciones_empleado`) en vez de una por fila: evita el N+1 de
+    consultar el pagado fila por fila al armar la lista de operaciones.
+    """
+    if not ids:
+        return {}
+    filas = (
+        AplicacionPagoComision.objects
+        .filter(**{f'{fk_field}__in': ids})
+        .values(fk_field)
+        .annotate(total=Sum('monto'))
+    )
+    return {f[fk_field]: f['total'] or Decimal('0') for f in filas}
+
+
+_SNAPSHOT_MAX = AplicacionPagoComision._meta.get_field('detalle_snapshot').max_length
+
+
+def _snapshot_devengacion(tipo_key, fila, sufijo=''):
+    """detalle_snapshot de una devengación (ver comisiones.detalle_snapshot),
+    con un sufijo opcional, siempre dentro del max_length de la columna."""
+    texto = comisiones.detalle_snapshot(tipo_key, fila, max_length=_SNAPSHOT_MAX - len(sufijo))
+    return texto + sufijo
+
+
+def _fuentes_saldo_a_favor(empleado, bloquear=False):
+    """ÚNICA definición del "saldo a favor / no aplicado" de un empleado.
+
+    Saldo a favor = dinero ya pagado al empleado (sus PagoComisionEmpleado)
+    que hoy NO cubre una devengación viva hasta su comisión vigente. Lo usan
+    el detalle en pantalla, el Excel y el pago (que lo consume primero), así
+    los tres siempre coinciden. Proviene de tres fuentes, en este orden de
+    consumo:
+
+      1. 'huerfana': AplicacionPagoComision sin ninguna FK (la fila de
+         asignación se borró: se quitó al empleado, cambió la prenda...).
+      2. 'excedente': lo aplicado a una fila viva por encima de su
+         monto_comision_fijo actual (la comisión se redujo después de pagar,
+         o quedó en 0). Se toma de las aplicaciones más nuevas de esa fila.
+      3. 'remanente': la parte de un pago que no tiene aplicación alguna
+         (pagos anteriores a la 0065 que la 0066 no pudo repartir).
+
+    Matemáticamente: total = pagado − Σ_filas_vivas min(aplicado, comisión).
+
+    Devuelve (total, fuentes); cada fuente es un dict con 'tipo',
+    'disponible' y 'aplicacion' (huerfana/excedente) o 'pago' (remanente).
+    Con `bloquear=True` las aplicaciones se leen con select_for_update (el
+    llamador ya está dentro de transaction.atomic()).
+    """
+    fuentes = []
+    aps = AplicacionPagoComision.objects.filter(pago__empleado=empleado)
+    if bloquear:
+        aps = aps.select_for_update()
+
+    # 1. Huérfanas
+    huerfanas = aps.filter(**{f'{fk}__isnull': True for _m, fk in ASIGNACION_MODELOS.values()})
+    for ap in huerfanas.order_by('id'):
+        fuentes.append({'tipo': 'huerfana', 'aplicacion': ap, 'disponible': ap.monto})
+
+    # 2. Excedente sobre la comisión vigente de filas vivas
+    for _tipo, (_modelo, fk) in ASIGNACION_MODELOS.items():
+        agregados = (
+            AplicacionPagoComision.objects
+            .filter(pago__empleado=empleado, **{f'{fk}__isnull': False})
+            .values(fk, f'{fk}__monto_comision_fijo', f'{fk}__empleado_id')
+            .annotate(total=Sum('monto'))
+        )
+        excedentes = {}
+        for fila in agregados:
+            tope = fila[f'{fk}__monto_comision_fijo'] or Decimal('0')
+            if fila[f'{fk}__empleado_id'] != empleado.id:
+                tope = Decimal('0')
+            exceso = (fila['total'] or Decimal('0')) - tope
+            if exceso > 0:
+                excedentes[fila[fk]] = exceso
+        if not excedentes:
+            continue
+        for ap in aps.filter(**{f'{fk}__in': list(excedentes)}).order_by('-id'):
+            fila_id = getattr(ap, f'{fk}_id')
+            tomar = min(ap.monto, excedentes[fila_id])
+            if tomar > 0:
+                fuentes.append({'tipo': 'excedente', 'aplicacion': ap, 'disponible': tomar})
+                excedentes[fila_id] -= tomar
+
+    # 3. Remanente de pagos sin aplicar
+    pagos = empleado.pagos_comision.annotate(
+        aplicado=Coalesce(Sum('aplicaciones__monto'), Value(Decimal('0')),
+                          output_field=DecimalField(max_digits=12, decimal_places=2)),
+    ).filter(monto__gt=F('aplicado')).order_by('fecha', 'id')
+    for pago in pagos:
+        fuentes.append({'tipo': 'remanente', 'pago': pago, 'disponible': pago.monto - pago.aplicado})
+
+    total = sum((f['disponible'] for f in fuentes), Decimal('0'))
+    return total, fuentes
+
+
+def _aplicar_saldo_a_favor(empleado, destinos):
+    """Cubre `destinos` con el saldo a favor del empleado ANTES de cobrar
+    plata nueva. Evita el doble pago: un pago que quedó "a favor" (p. ej. el
+    empleado se quitó de la operación y luego se volvió a agregar) se
+    re-apunta a la devengación nueva en vez de volver a pagarse.
+
+    destinos: lista de dicts con 'tipo_key', 'fk_field', 'asignacion' y
+    'monto' (pendiente). Se MUTA 'monto' restando lo cubierto. Las
+    aplicaciones huérfanas/excedentes se re-apuntan enteras o se parten en
+    dos (se reduce la original y se crea otra bajo el MISMO pago); del
+    remanente de un pago se crea una aplicación nueva bajo ese pago.
+    Devuelve el total cubierto con saldo a favor.
+    """
+    _total, fuentes = _fuentes_saldo_a_favor(empleado, bloquear=True)
+    fks = [fk for _m, fk in ASIGNACION_MODELOS.values()]
+    cubierto = Decimal('0')
+    idx = 0
+    for d in destinos:
+        snapshot = _snapshot_devengacion(d['tipo_key'], d['asignacion'], ' (saldo a favor)')
+        while d['monto'] > 0 and idx < len(fuentes):
+            f = fuentes[idx]
+            if f['disponible'] <= 0:
+                idx += 1
+                continue
+            tomar = min(d['monto'], f['disponible'])
+            if f['tipo'] == 'remanente':
+                AplicacionPagoComision.objects.create(
+                    pago=f['pago'], monto=tomar, detalle_snapshot=snapshot,
+                    **{d['fk_field']: d['asignacion']},
+                )
+            else:
+                ap = f['aplicacion']
+                if tomar >= ap.monto:
+                    # Se mueve la aplicación entera a la devengación destino.
+                    for fk in fks:
+                        setattr(ap, fk, None)
+                    setattr(ap, d['fk_field'], d['asignacion'])
+                    ap.detalle_snapshot = snapshot
+                    ap.save(update_fields=fks + ['detalle_snapshot'])
+                else:
+                    # Se parte: la original conserva el resto, la nueva
+                    # (mismo pago) cubre el destino.
+                    ap.monto -= tomar
+                    ap.save(update_fields=['monto'])
+                    AplicacionPagoComision.objects.create(
+                        pago_id=ap.pago_id, monto=tomar, detalle_snapshot=snapshot,
+                        **{d['fk_field']: d['asignacion']},
+                    )
+            f['disponible'] -= tomar
+            d['monto'] -= tomar
+            cubierto += tomar
+    return cubierto
+
+
 def _devengaciones_empleado(empleado):
     """Datos de devengaciones (ganancias) y pagos de comisión de un empleado.
 
@@ -264,8 +431,7 @@ def _devengaciones_empleado(empleado):
     arreglos_venta_comision = empleado.asignaciones_venta.exclude(
         monto_comision_fijo=0
     ).select_related(
-        'venta_item__venta__cliente', 'venta_item__prenda_item',
-        'venta_item__tipo_reparacion',
+        'venta_item__venta__cliente', 'venta_item__tipo_reparacion',
     ).annotate(
         monto_comision_calc=F('monto_comision_fijo')
     ).order_by('-venta_item__venta__id', '-id')
@@ -274,8 +440,7 @@ def _devengaciones_empleado(empleado):
     arreglos_alquiler_comision = empleado.asignaciones_alquiler.exclude(
         monto_comision_fijo=0
     ).select_related(
-        'alquiler_item__alquiler__cliente', 'alquiler_item__prenda_item',
-        'alquiler_item__tipo_reparacion',
+        'alquiler_item__alquiler__cliente', 'alquiler_item__tipo_reparacion',
     ).annotate(
         monto_comision_calc=F('monto_comision_fijo')
     ).order_by('-alquiler_item__alquiler__id', '-id')
@@ -287,7 +452,7 @@ def _devengaciones_empleado(empleado):
         monto_comision_calc=F('monto_comision_fijo')
     ).order_by('-orden__creado', '-id')
 
-    # Totales devengados
+    # Totales devengados (aggregate en DB, comportamiento sin cambios)
     total_devengado_rep = reparaciones_comision.aggregate(
         s=Sum('monto_comision_calc')
     )['s'] or Decimal('0')
@@ -309,66 +474,95 @@ def _devengaciones_empleado(empleado):
         + total_devengado_prod
     )
 
+    # Se materializa cada queryset UNA vez (list()) para poder juntar sus ids
+    # y pedir el pagado por lote sin N+1, reusando esa misma lista al armar
+    # `operaciones_comision` más abajo (no se vuelve a golpear la DB).
+    reparaciones_lista = list(reparaciones_comision)
+    confecciones_lista = list(confecciones_comision)
+    arreglos_venta_lista = list(arreglos_venta_comision)
+    arreglos_alquiler_lista = list(arreglos_alquiler_comision)
+    produccion_lista = list(produccion_comision)
+
+    pagado_rep = _pagados_por_asignacion('reparacion_empleado', [r.id for r in reparaciones_lista])
+    pagado_conf = _pagados_por_asignacion('confeccion_empleado', [c.id for c in confecciones_lista])
+    pagado_venta = _pagados_por_asignacion('venta_item_empleado', [a.id for a in arreglos_venta_lista])
+    pagado_alquiler = _pagados_por_asignacion('alquiler_item_empleado', [a.id for a in arreglos_alquiler_lista])
+    pagado_prod = _pagados_por_asignacion('produccion_empleado', [p.id for p in produccion_lista])
+
+    def _fila_comision(tipo_key, pagado_dict, asignacion, comun):
+        pagado = pagado_dict.get(asignacion.id, Decimal('0'))
+        comision = asignacion.monto_comision_calc
+        pendiente = max(Decimal('0'), comision - pagado)
+        estado = comisiones.estado_asignacion(comision, pagado)
+        comun.update({
+            'tipo_key': tipo_key,
+            'id': asignacion.id,
+            'clave': f'{tipo_key}:{asignacion.id}',
+            'comision': comision,
+            'pagado': pagado,
+            'pendiente': pendiente,
+            'estado': estado,
+            'estado_label': estado.capitalize(),
+            'estado_badge': comisiones.ESTADO_BADGE[estado],
+            'estado_filtro': comisiones.estado_filtro(estado),
+        })
+        return comun
+
     # Lista unificada de operaciones devengadas (ordenada por fecha desc) para
-    # dar trazabilidad y permitir filtrar por tipo en el detalle del empleado.
+    # dar trazabilidad y permitir filtrar por tipo/estado en el detalle.
     operaciones_comision = []
-    for r in reparaciones_comision:
-        operaciones_comision.append({
-            'tipo': 'Reparación', 'tipo_key': 'reparacion', 'badge': 'badge-en_proceso',
+    for r in reparaciones_lista:
+        operaciones_comision.append(_fila_comision('reparacion', pagado_rep, r, {
+            'tipo': 'Reparación', 'badge': 'badge-en_proceso',
             'codigo': r.reparacion.codigo,
             'fecha': r.reparacion.fecha_entrega,
             'cliente': r.reparacion.cliente,
             'base': r.reparacion.total,
             'porcentaje': None,
             'detalle': '',
-            'comision': r.monto_comision_calc,
-        })
-    for c in confecciones_comision:
-        operaciones_comision.append({
-            'tipo': 'Confección', 'tipo_key': 'confeccion', 'badge': 'badge-alquilado',
+        }))
+    for c in confecciones_lista:
+        operaciones_comision.append(_fila_comision('confeccion', pagado_conf, c, {
+            'tipo': 'Confección', 'badge': 'badge-alquilado',
             'codigo': c.confeccion.codigo,
             'fecha': c.confeccion.fecha_entrega,
             'cliente': c.confeccion.cliente,
             'base': c.confeccion.precio,
             'porcentaje': None,
             'detalle': '',
-            'comision': c.monto_comision_calc,
-        })
-    for asig in arreglos_venta_comision:
+        }))
+    for asig in arreglos_venta_lista:
         v = asig.venta_item
-        operaciones_comision.append({
-            'tipo': 'Arreglo venta', 'tipo_key': 'venta', 'badge': 'badge-entregado',
+        operaciones_comision.append(_fila_comision('venta', pagado_venta, asig, {
+            'tipo': 'Arreglo venta', 'badge': 'badge-entregado',
             'codigo': v.venta.codigo,
             'fecha': v.venta.fecha_venta,
             'cliente': v.venta.cliente,
             'base': v.precio_reparacion,
             'porcentaje': None,
             'detalle': str(v.tipo_reparacion) if v.tipo_reparacion else '',
-            'comision': asig.monto_comision_calc,
-        })
-    for asig in arreglos_alquiler_comision:
+        }))
+    for asig in arreglos_alquiler_lista:
         a = asig.alquiler_item
-        operaciones_comision.append({
-            'tipo': 'Arreglo alquiler', 'tipo_key': 'alquiler', 'badge': 'badge-devuelto',
+        operaciones_comision.append(_fila_comision('alquiler', pagado_alquiler, asig, {
+            'tipo': 'Arreglo alquiler', 'badge': 'badge-devuelto',
             'codigo': a.alquiler.codigo,
             'fecha': a.alquiler.fecha_alquiler,
             'cliente': a.alquiler.cliente,
             'base': a.precio_reparacion,
             'porcentaje': None,
             'detalle': str(a.tipo_reparacion) if a.tipo_reparacion else '',
-            'comision': asig.monto_comision_calc,
-        })
-    for p in produccion_comision:
-        operaciones_comision.append({
-            'tipo': 'Producción', 'tipo_key': 'produccion', 'badge': 'badge-tipo-stock',
+        }))
+    for p in produccion_lista:
+        operaciones_comision.append(_fila_comision('produccion', pagado_prod, p, {
+            'tipo': 'Producción', 'badge': 'badge-tipo-stock',
             'codigo': p.orden.codigo,
             'fecha': p.orden.fecha_estimada or p.orden.fecha_inicio,
             'cliente': None,
             'base': None,
             'porcentaje': None,
             'detalle': p.get_responsabilidad_display(),
-            'comision': p.monto_comision_calc,
-        })
+        }))
     operaciones_comision.sort(
         key=lambda o: (o['fecha'] or date.min, o['codigo']), reverse=True
     )
@@ -387,21 +581,68 @@ def _devengaciones_empleado(empleado):
     ]
     conteo_comision = [c for c in conteo_comision if c[2] > 0]
 
-    # Pagos
-    pagos_comision = empleado.pagos_comision.order_by('-fecha', '-id')
-    total_pagado = pagos_comision.aggregate(s=Sum('monto'))['s'] or Decimal('0')
+    # Conteo por estado (chips Pendientes / Parciales / Pagadas / Todas, cada
+    # uno con el estado real de la fila, no el agrupado) y la sublista de
+    # pendientes/parciales que llena el modal de "Pagar comisión" — separada
+    # acá porque en el template un {% if %} dentro de {% for %} no dispara el
+    # {% empty %} del for (el iterable en sí no está vacío), así que el
+    # estado vacío del modal se decide con esta lista ya filtrada en Python.
+    # `operaciones_pendientes` sigue agrupando pendiente+parcial (vía
+    # `estado_filtro`): es lo que se puede pagar, así que el modal no cambia.
+    operaciones_pendientes = [o for o in operaciones_comision if o['estado_filtro'] == 'pendiente']
+    n_pendientes = sum(1 for o in operaciones_comision if o['estado'] == 'pendiente')
+    n_parciales = sum(1 for o in operaciones_comision if o['estado'] == 'parcial')
+    n_pagadas = sum(1 for o in operaciones_comision if o['estado'] == 'pagada')
+
+    # Suma de "pendiente" fila por fila (sin compensar con el saldo a favor):
+    # junto con `no_aplicado_comision` es la reconciliación que se muestra en
+    # el Excel — `total_pendiente_bruto - no_aplicado_comision == saldo_comision`
+    # siempre, porque `no_aplicado_comision` es exactamente la plata pagada
+    # que hoy no se refleja como `pagado` de ninguna fila viva (huérfana,
+    # excedente sobre comisión reducida, o remanente sin aplicar).
+    total_pendiente_bruto = sum((o['pendiente'] for o in operaciones_comision), Decimal('0'))
+
+    # Pagos, con el detalle de qué devengaciones cubrió cada uno (para el
+    # historial expandible) sin N+1: una sola query trae todas las
+    # aplicaciones de todos los pagos del empleado, y se agrupan en Python.
+    pagos_comision = list(
+        empleado.pagos_comision.order_by('-fecha', '-id')
+    )
+    aplicaciones_por_pago = {}
+    if pagos_comision:
+        # Sólo se muestran detalle_snapshot y monto: sin joins a las filas.
+        for ap in AplicacionPagoComision.objects.filter(
+            pago__in=pagos_comision
+        ).order_by('id'):
+            aplicaciones_por_pago.setdefault(ap.pago_id, []).append(ap)
+    for p in pagos_comision:
+        p.aplicaciones_detalle = aplicaciones_por_pago.get(p.id, [])
+
+    total_pagado = sum((p.monto for p in pagos_comision), Decimal('0'))
+
+    # "A favor" / no aplicado: dinero ya entregado al empleado que hoy no
+    # cubre una devengación viva (aplicación huérfana, excedente sobre una
+    # comisión reducida, o remanente sin aplicar de un pago). Misma
+    # definición que consume el pago — ver `_fuentes_saldo_a_favor`.
+    no_aplicado, _fuentes = _fuentes_saldo_a_favor(empleado)
 
     saldo_comision = total_devengado - total_pagado
 
     return {
         'operaciones_comision': operaciones_comision,
+        'operaciones_pendientes_comision': operaciones_pendientes,
         'conteo_comision': conteo_comision,
         'total_operaciones_comision': len(operaciones_comision),
+        'n_pendientes_comision': n_pendientes,
+        'n_parciales_comision': n_parciales,
+        'n_pagadas_comision': n_pagadas,
         'pagos_comision': pagos_comision,
         'total_devengado': total_devengado,
         'total_devengado_prod': total_devengado_prod,
         'total_pagado': total_pagado,
+        'no_aplicado_comision': no_aplicado,
         'saldo_comision': saldo_comision,
+        'total_pendiente_bruto': total_pendiente_bruto,
     }
 
 
@@ -422,17 +663,42 @@ def detalle_empleado(request, id):
     })
 
 
+#: Relleno de fila según estado real de la devengación, para que se
+#: identifique de un vistazo en el Excel cuáles ya están pagadas (mismo
+#: criterio de color que la leyenda del detalle en pantalla).
+_FILL_ESTADO_EXCEL = {
+    'pagada': PatternFill('solid', fgColor='D1FAE5'),
+    'parcial': PatternFill('solid', fgColor='DBEAFE'),
+    'pendiente': PatternFill('solid', fgColor='FEF3C7'),
+}
+
+
 @login_required
 def exportar_devengaciones_empleado_excel(request, id):
     """Resumen descargable (Excel) de las devengaciones de un empleado:
-    operaciones devengadas (ganancias) e historial de pagos."""
+    operaciones devengadas (ganancias), sólo-pagadas e historial de pagos.
+
+    `?estado=pendientes` filtra la hoja de devengaciones a sólo las filas
+    pendientes/parciales (botón «Descargar pendientes» del detalle);
+    `?estado=pagadas` la filtra a sólo las pagadas (botón «Descargar
+    pagadas») — el nombre del archivo lo refleja para que no se confunda
+    con el resumen completo."""
     empleado = get_object_or_404(Empleado, id=id)
     datos = _devengaciones_empleado(empleado)
+    estado_param = request.GET.get('estado', '').strip()
+    solo_pendientes = estado_param == 'pendientes'
+    solo_pagadas = estado_param == 'pagadas'
+    operaciones = datos['operaciones_comision']
+    if solo_pendientes:
+        operaciones = [o for o in operaciones if o['estado_filtro'] == 'pendiente']
+    elif solo_pagadas:
+        operaciones = [o for o in operaciones if o['estado'] == 'pagada']
 
     azul = PatternFill('solid', fgColor='2563EB')
     gris = PatternFill('solid', fgColor='E2E8F0')
     blanco_bold = Font(bold=True, color='FFFFFF')
     bold = Font(bold=True)
+    italica_muted = Font(italic=True, size=9, color='64748B')
     derecha = Alignment(horizontal='right')
     centro = Alignment(horizontal='center')
 
@@ -442,20 +708,32 @@ def exportar_devengaciones_empleado_excel(request, id):
     ws = wb.active
     ws.title = "Devengaciones"
 
-    ws.merge_cells('A1:G1')
-    ws['A1'] = f"FORTIUM TAILOR — Devengaciones de {empleado}"
+    ws.merge_cells('A1:I1')
+    if solo_pendientes:
+        sufijo_titulo = ' pendientes'
+    elif solo_pagadas:
+        sufijo_titulo = ' pagadas'
+    else:
+        sufijo_titulo = ''
+    titulo = f"FORTIUM TAILOR — Devengaciones{sufijo_titulo} de {empleado}"
+    ws['A1'] = titulo
     ws['A1'].font = Font(size=14, bold=True)
     ws['A1'].alignment = centro
 
     ws['A2'] = "Generado:"
     ws['B2'] = django_tz.localtime().strftime('%d/%m/%Y %H:%M')
 
-    # Resumen
+    # Resumen — incluye la línea de reconciliación que pidió el reviewer:
+    # Pendiente bruto (suma fila a fila, sin compensar) − Saldo a favor
+    # (plata pagada que no cubre ninguna devengación viva) = Saldo pendiente.
     resumen = [
         ('Total devengado', datos['total_devengado']),
         ('Total pagado', datos['total_pagado']),
+        ('Pendiente bruto', datos['total_pendiente_bruto']),
+        ('Saldo a favor (no aplicado)', datos['no_aplicado_comision']),
         ('Saldo pendiente', datos['saldo_comision']),
     ]
+    seguro = comisiones.valor_excel_seguro
     fila = 4
     for etiqueta, valor in resumen:
         ws.cell(row=fila, column=1, value=etiqueta).font = bold
@@ -464,10 +742,26 @@ def exportar_devengaciones_empleado_excel(request, id):
         c.font = bold
         fila += 1
 
+    ws.cell(row=fila, column=1, value=(
+        f"Pendiente bruto − Saldo a favor = Saldo pendiente  →  "
+        f"{datos['total_pendiente_bruto']:.2f} − {datos['no_aplicado_comision']:.2f} "
+        f"= {datos['saldo_comision']:.2f}"
+    )).font = italica_muted
+    fila += 2
+
+    # Leyenda de colores por estado (misma paleta que las filas de abajo)
+    ws.cell(row=fila, column=1, value='Leyenda de colores:').font = bold
+    fila += 1
+    for etiqueta_leyenda, estado_key in [('Pagada', 'pagada'), ('Parcial', 'parcial'), ('Pendiente', 'pendiente')]:
+        c = ws.cell(row=fila, column=1, value=etiqueta_leyenda)
+        c.fill = _FILL_ESTADO_EXCEL[estado_key]
+        c.font = bold
+        fila += 1
+
     # Tabla de operaciones devengadas
     fila += 1
     encabezado_op = fila
-    headers_op = ['Tipo', 'Código', 'Fecha', 'Cliente', 'Base', 'Comisión']
+    headers_op = ['Tipo', 'Código', 'Fecha', 'Cliente', 'Base', 'Comisión', 'Estado', 'Pagado', 'Pendiente']
     for col, texto in enumerate(headers_op, 1):
         c = ws.cell(row=encabezado_op, column=col, value=texto)
         c.font = blanco_bold
@@ -475,28 +769,49 @@ def exportar_devengaciones_empleado_excel(request, id):
         c.alignment = centro
     fila += 1
 
-    for o in datos['operaciones_comision']:
+    for o in operaciones:
+        fill_fila = _FILL_ESTADO_EXCEL.get(o['estado'])
         ws.cell(row=fila, column=1, value=o['tipo'])
-        ws.cell(row=fila, column=2, value=f"{o['codigo']}" + (f" — {o['detalle']}" if o['detalle'] else ''))
+        ws.cell(row=fila, column=2, value=seguro(f"{o['codigo']}" + (f" — {o['detalle']}" if o['detalle'] else '')))
         ws.cell(row=fila, column=3, value=o['fecha'].strftime('%d/%m/%Y') if o['fecha'] else '—')
-        ws.cell(row=fila, column=4, value=str(o['cliente']) if o['cliente'] else '—')
+        ws.cell(row=fila, column=4, value=seguro(str(o['cliente'])) if o['cliente'] else '—')
         cb = ws.cell(row=fila, column=5, value=float(o['base']) if o['base'] is not None else '—')
         if o['base'] is not None:
             cb.number_format = '#,##0.00'
         cc = ws.cell(row=fila, column=6, value=float(o['comision']))
         cc.number_format = '#,##0.00'
+        ce = ws.cell(row=fila, column=7, value=o['estado_label'])
+        ce.font = bold
+        cp = ws.cell(row=fila, column=8, value=float(o['pagado']))
+        cp.number_format = '#,##0.00'
+        cpe = ws.cell(row=fila, column=9, value=float(o['pendiente']))
+        cpe.number_format = '#,##0.00'
+        if fill_fila:
+            for col in range(1, 10):
+                ws.cell(row=fila, column=col).fill = fill_fila
         fila += 1
+
+    ultima_fila_datos = fila - 1
 
     # Total devengado al pie
     ws.cell(row=fila, column=5, value='Total').font = bold
-    ct = ws.cell(row=fila, column=6, value=float(datos['total_devengado']))
+    ct = ws.cell(row=fila, column=6, value=float(sum((o['comision'] for o in operaciones), Decimal('0'))))
     ct.number_format = '#,##0.00'
     ct.font = bold
     ct.fill = gris
+    ctp = ws.cell(row=fila, column=9, value=float(sum((o['pendiente'] for o in operaciones), Decimal('0'))))
+    ctp.number_format = '#,##0.00'
+    ctp.font = bold
+    ctp.fill = gris
 
-    anchos_op = [16, 28, 13, 28, 14, 14]
+    anchos_op = [16, 28, 13, 28, 14, 14, 12, 14, 14]
     for col, ancho in enumerate(anchos_op, 1):
         ws.column_dimensions[get_column_letter(col)].width = ancho
+
+    # Encabezado siempre visible al scrollear + autofiltro para poder
+    # filtrar por Estado (o cualquier columna) dentro del propio Excel.
+    ws.freeze_panes = f'A{encabezado_op + 1}'
+    ws.auto_filter.ref = f'A{encabezado_op}:I{max(ultima_fila_datos, encabezado_op)}'
 
     # --- Hoja 2: Historial de pagos ---
     ws2 = wb.create_sheet("Pagos")
@@ -518,7 +833,12 @@ def exportar_devengaciones_empleado_excel(request, id):
         ws2.cell(row=fila, column=2, value=django_tz.localtime(p.fecha).strftime('%d/%m/%Y %H:%M'))
         ws2.cell(row=fila, column=3, value=p.get_forma_pago_display())
         ws2.cell(row=fila, column=4, value='Sí' if p.via_caja else 'No')
-        ws2.cell(row=fila, column=5, value=p.descripcion or '—')
+        detalle_pago = p.descripcion or '—'
+        if p.aplicaciones_detalle:
+            detalle_pago += ' | ' + '; '.join(
+                f"{ap.detalle_snapshot or '—'} (Bs {ap.monto:.2f})" for ap in p.aplicaciones_detalle
+            )
+        ws2.cell(row=fila, column=5, value=seguro(detalle_pago))
         cm = ws2.cell(row=fila, column=6, value=float(p.monto))
         cm.number_format = '#,##0.00'
         fila += 1
@@ -533,6 +853,52 @@ def exportar_devengaciones_empleado_excel(request, id):
     for col, ancho in enumerate(anchos_pago, 1):
         ws2.column_dimensions[get_column_letter(col)].width = ancho
 
+    # --- Hoja 3: Sólo pagadas — siempre a partir del total del empleado
+    # (no del filtro `?estado=`), para que sirva de referencia fija de
+    # "esto ya está pagado" sin importar qué se esté descargando. ---
+    pagadas = [o for o in datos['operaciones_comision'] if o['estado'] == 'pagada']
+    ws3 = wb.create_sheet("Pagadas")
+    ws3.merge_cells('A1:G1')
+    ws3['A1'] = f"FORTIUM TAILOR — Devengaciones pagadas de {empleado}"
+    ws3['A1'].font = Font(size=14, bold=True)
+    ws3['A1'].alignment = centro
+
+    headers_pagadas = ['Tipo', 'Código', 'Fecha', 'Cliente', 'Base', 'Comisión', 'Pagado']
+    for col, texto in enumerate(headers_pagadas, 1):
+        c = ws3.cell(row=3, column=col, value=texto)
+        c.font = blanco_bold
+        c.fill = azul
+        c.alignment = centro
+
+    fila3 = 4
+    for o in pagadas:
+        ws3.cell(row=fila3, column=1, value=o['tipo'])
+        ws3.cell(row=fila3, column=2, value=seguro(f"{o['codigo']}" + (f" — {o['detalle']}" if o['detalle'] else '')))
+        ws3.cell(row=fila3, column=3, value=o['fecha'].strftime('%d/%m/%Y') if o['fecha'] else '—')
+        ws3.cell(row=fila3, column=4, value=seguro(str(o['cliente'])) if o['cliente'] else '—')
+        cb3 = ws3.cell(row=fila3, column=5, value=float(o['base']) if o['base'] is not None else '—')
+        if o['base'] is not None:
+            cb3.number_format = '#,##0.00'
+        cc3 = ws3.cell(row=fila3, column=6, value=float(o['comision']))
+        cc3.number_format = '#,##0.00'
+        cp3 = ws3.cell(row=fila3, column=7, value=float(o['pagado']))
+        cp3.number_format = '#,##0.00'
+        for col in range(1, 8):
+            ws3.cell(row=fila3, column=col).fill = _FILL_ESTADO_EXCEL['pagada']
+        fila3 += 1
+
+    ws3.cell(row=fila3, column=5, value='Total').font = bold
+    ct3 = ws3.cell(row=fila3, column=6, value=float(sum((o['comision'] for o in pagadas), Decimal('0'))))
+    ct3.number_format = '#,##0.00'
+    ct3.font = bold
+    ct3.fill = gris
+
+    anchos_pagadas = [16, 28, 13, 28, 14, 14, 14]
+    for col, ancho in enumerate(anchos_pagadas, 1):
+        ws3.column_dimensions[get_column_letter(col)].width = ancho
+    ws3.freeze_panes = 'A4'
+    ws3.auto_filter.ref = f'A3:G{max(fila3 - 1, 3)}'
+
     output = BytesIO()
     wb.save(output)
     output.seek(0)
@@ -542,7 +908,13 @@ def exportar_devengaciones_empleado_excel(request, id):
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     )
     nombre = (empleado.codigo or str(empleado.id))
-    response['Content-Disposition'] = f'attachment; filename="devengaciones_{nombre}.xlsx"'
+    if solo_pendientes:
+        prefijo = 'devengaciones_pendientes'
+    elif solo_pagadas:
+        prefijo = 'devengaciones_pagadas'
+    else:
+        prefijo = 'devengaciones'
+    response['Content-Disposition'] = f'attachment; filename="{prefijo}_{nombre}.xlsx"'
     return response
 
 
@@ -591,8 +963,54 @@ def eliminar_falta(request, id):
     return redirect('detalle_empleado', id=empleado_id)
 
 
+def _resolver_clave_devengacion(empleado, tipo_key, id_asignacion):
+    """Valida UNA devengación ya normalizada (tipo_key, id) del modal de pago.
+
+    Devuelve (fk_field, fila_bloqueada, pendiente) o levanta ValueError con un
+    mensaje listo para mostrarle al usuario. Bloquea la fila con
+    select_for_update (el caller ya está dentro de un transaction.atomic()).
+    """
+    clave = f'{tipo_key}:{id_asignacion}'
+    modelo, fk_field = ASIGNACION_MODELOS[tipo_key]
+    try:
+        fila = modelo.objects.select_for_update().get(pk=id_asignacion, empleado=empleado)
+    except modelo.DoesNotExist:
+        raise ValueError(f"La devengación «{clave}» no existe o no pertenece a {empleado}.")
+    if not fila.monto_comision_fijo:
+        raise ValueError(f"La devengación «{clave}» no tiene comisión asignada.")
+    pagado = AplicacionPagoComision.objects.filter(
+        **{fk_field: fila}
+    ).aggregate(s=Sum('monto'))['s'] or Decimal('0')
+    pendiente = fila.monto_comision_fijo - pagado
+    if pendiente <= 0:
+        raise ValueError(f"La devengación «{clave}» ya está pagada por completo.")
+    return fk_field, fila, pendiente
+
+
 @login_required
 def pagar_comision_empleado(request, empleado_id):
+    """Registra un pago de comisión cubriendo devengaciones puntuales.
+
+    El monto NO se tipea: el usuario marca en el modal qué devengaciones
+    (pendientes o parciales) quiere pagar y el monto se deriva de la suma de
+    sus saldos pendientes. Rechaza la selección completa si cualquier clave
+    es inválida, de otro empleado, o ya está pagada — no paga un subconjunto
+    silenciosamente ante datos manipulados o una fila que se pagó mientras el
+    modal estaba abierto.
+
+    Anti doble pago:
+      - Las claves se normalizan a (tipo, int(id)) y se deduplican ANTES de
+        resolverlas ("reparacion:5" repetida o como "reparacion:05" cuenta
+        una sola vez).
+      - Se bloquea la fila del Empleado primero: todos los pagos de un mismo
+        empleado quedan serializados (y el orden de bloqueo es siempre
+        Empleado → filas ordenadas por clave, sin deadlocks entre pagos).
+      - El saldo a favor del empleado (ver `_fuentes_saldo_a_favor`) se
+        consume PRIMERO; sólo el resto se cobra como pago nuevo.
+      - Defensa final: la plata nueva nunca puede superar el saldo de
+        comisión del empleado (devengado − pagado).
+    """
+    from django.db import OperationalError
     from django.http import HttpResponseNotAllowed
     from .caja_signals import registrar_pago_comision_empleado
 
@@ -601,39 +1019,112 @@ def pagar_comision_empleado(request, empleado_id):
 
     empleado = get_object_or_404(Empleado, id=empleado_id)
     form = PagoComisionEmpleadoForm(request.POST)
+    claves = request.POST.getlist('sel')
+
+    if not claves:
+        messages.error(request, "Selecciona al menos una devengación pendiente.")
+        return redirect('detalle_empleado', id=empleado_id)
+
+    try:
+        normalizadas = sorted({
+            comisiones.parsear_clave_devengacion(c, ASIGNACION_MODELOS) for c in claves
+        })
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect('detalle_empleado', id=empleado_id)
 
     if not form.is_valid():
         for err in form.errors.values():
             messages.error(request, err.as_text())
         return redirect('detalle_empleado', id=empleado_id)
 
-    monto = form.cleaned_data['monto']
+    pago = None
+    try:
+        with transaction.atomic():
+            empleado = Empleado.objects.select_for_update().get(pk=empleado.pk)
 
-    saldo = _calcular_saldo_comision_empleado(empleado)
-    if monto > saldo:
+            destinos = []
+            for tipo_key, id_asignacion in normalizadas:
+                fk_field, fila, pendiente = _resolver_clave_devengacion(empleado, tipo_key, id_asignacion)
+                destinos.append({
+                    'tipo_key': tipo_key,
+                    'fk_field': fk_field,
+                    'asignacion': fila,
+                    'monto': pendiente,
+                })
+
+            total_seleccionado = sum((d['monto'] for d in destinos), Decimal('0'))
+            if total_seleccionado <= 0:
+                raise ValueError("El total seleccionado es Bs 0.")
+
+            # Saldo antes de tocar nada (re-apuntar saldo a favor no lo cambia).
+            saldo = _calcular_saldo_comision_empleado(empleado)
+
+            cubierto_con_saldo = _aplicar_saldo_a_favor(empleado, destinos)
+
+            aplicaciones = [
+                {
+                    'fk_field': d['fk_field'],
+                    'asignacion': d['asignacion'],
+                    'monto': d['monto'],
+                    'detalle_snapshot': _snapshot_devengacion(d['tipo_key'], d['asignacion']),
+                }
+                for d in destinos if d['monto'] > 0
+            ]
+            monto_nuevo = sum((a['monto'] for a in aplicaciones), Decimal('0'))
+
+            # Sólo la plata NUEVA se contrasta con el saldo: cubrir con saldo a
+            # favor (monto_nuevo == 0) es válido aunque el saldo sea negativo.
+            if monto_nuevo > 0 and monto_nuevo > saldo:
+                raise ValueError(
+                    f"No se registró el pago: el monto a pagar (Bs {monto_nuevo:.2f}) supera "
+                    f"el saldo de comisión del empleado (Bs {saldo:.2f}). Recarga la página "
+                    f"y revisa las devengaciones seleccionadas."
+                )
+
+            if monto_nuevo > 0:
+                pago = registrar_pago_comision_empleado(
+                    empleado=empleado,
+                    monto=monto_nuevo,
+                    forma_pago=form.cleaned_data['forma_pago'],
+                    via_caja=form.cleaned_data.get('via_caja', False),
+                    descripcion=form.cleaned_data.get('descripcion', ''),
+                    usuario=request.user,
+                    aplicaciones=aplicaciones,
+                )
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect('detalle_empleado', id=empleado_id)
+    except OperationalError:
+        # Deadlock / lock wait timeout: otra operación estaba modificando las
+        # mismas filas. No se registró nada (la transacción se revirtió).
         messages.error(
             request,
-            f"El pago de Bs {monto:.2f} excede el saldo de comisión pendiente (Bs {saldo:.2f})."
+            "No se pudo registrar el pago porque otra operación estaba modificando "
+            "los mismos datos. Intenta de nuevo."
         )
         return redirect('detalle_empleado', id=empleado_id)
 
-    registrar_pago_comision_empleado(
-        empleado=empleado,
-        monto=monto,
-        forma_pago=form.cleaned_data['forma_pago'],
-        via_caja=form.cleaned_data.get('via_caja', False),
-        descripcion=form.cleaned_data.get('descripcion', ''),
-        usuario=request.user,
-    )
-    via_label = "vía caja" if form.cleaned_data.get('via_caja') else "fuera de caja"
-    messages.success(request, f"Comisión de Bs {monto:.2f} registrada ({via_label}).")
+    n = len(destinos)
+    txt_n = f"{n} devengaci{'ón' if n == 1 else 'ones'}"
+    if pago is None:
+        messages.success(request, f"Se aplicó Bs {cubierto_con_saldo:.2f} de saldo a favor a {txt_n}.")
+    elif cubierto_con_saldo > 0:
+        messages.success(
+            request,
+            f"Pago {pago.codigo} por Bs {monto_nuevo:.2f} aplicado a {txt_n} "
+            f"(Bs {cubierto_con_saldo:.2f} cubiertos con saldo a favor)."
+        )
+    else:
+        messages.success(request, f"Pago {pago.codigo} por Bs {monto_nuevo:.2f} aplicado a {txt_n}.")
     return redirect('detalle_empleado', id=empleado_id)
 
 
 @login_required
 def reporte_dias_trabajados(request):
-    year = int(request.GET.get('year', datetime.now().year))
-    month = int(request.GET.get('month', datetime.now().month))
+    hoy_reporte = django_tz.localdate()
+    year = int(request.GET.get('year', hoy_reporte.year))
+    month = int(request.GET.get('month', hoy_reporte.month))
     empleados = Empleado.objects.filter(activo=True)
     reportes = []
 
@@ -1117,14 +1608,22 @@ def _parse_asignaciones(post, monto_key='pct'):
 
 def _guardar_asignaciones(instance, post, modelo_asignacion, fk_name,
                           commission_field='porcentaje_comision', monto_key='pct', sync_lead=True):
-    """Borra y recrea las asignaciones de empleados de un servicio desde POST.
+    """Sincroniza las asignaciones de empleados de un servicio desde POST.
     Sincroniza el 'lead' (instance.empleado) con la primera fila.
     commission_field: campo del modelo de asignación que guarda la comisión.
     monto_key: clave del POST para el valor de comisión ('pct' o 'monto').
     sync_lead: si True, también sincroniza instance.porcentaje_comision con la primera fila.
-    Retorna lista de errores."""
+    Retorna lista de errores.
+
+    Actualiza EN EL LUGAR por clave natural (servicio + empleado): la fila de
+    un empleado que sigue asignado conserva su id, sólo cambia el monto; se
+    crean las nuevas y se borran sólo las de empleados quitados. Antes se
+    borraba y recreaba todo, lo que dejaba huérfanas las AplicacionPagoComision
+    (FK SET_NULL) y la comisión ya pagada volvía a figurar pendiente — se
+    podía pagar dos veces."""
     from .models import Empleado
-    instance.asignaciones.all().delete()
+    existentes = {a.empleado_id: a for a in instance.asignaciones.all()}
+    conservados = set()
     errores = []
     lead_emp = None
     lead_pct = None
@@ -1134,10 +1633,21 @@ def _guardar_asignaciones(instance, post, modelo_asignacion, fk_name,
         except Empleado.DoesNotExist:
             errores.append(f"Empleado {emp_id} no encontrado.")
             continue
-        modelo_asignacion.objects.create(**{fk_name: instance, 'empleado': emp, commission_field: pct})
+        fila = existentes.get(emp.id)
+        if fila is not None:
+            if getattr(fila, commission_field) != pct:
+                setattr(fila, commission_field, pct)
+                fila.save(update_fields=[commission_field])
+        else:
+            modelo_asignacion.objects.create(**{fk_name: instance, 'empleado': emp, commission_field: pct})
+        conservados.add(emp.id)
         if lead_emp is None:
             lead_emp = emp
             lead_pct = pct
+    # Sólo se borran las filas de empleados que ya no están en el POST. Si
+    # tenían pagos aplicados, esas aplicaciones quedan huérfanas (SET_NULL) y
+    # cuentan como "a favor" del empleado: el historial no se pierde.
+    instance.asignaciones.exclude(empleado_id__in=conservados).delete()
     instance.empleado = lead_emp
     if sync_lead:
         instance.porcentaje_comision = lead_pct
@@ -1153,10 +1663,18 @@ def _asignaciones_json(instance, monto_field='porcentaje_comision'):
     El JSON siempre usa la clave 'monto' para que el partial JS pueda leer data.monto."""
     if not instance or not instance.pk:
         return '[]'
+    # El lead va primero: `_guardar_asignaciones` actualiza en el lugar, así
+    # que el orden por id ya no refleja el orden del último POST, y el lead se
+    # toma de la primera fila — re-guardar sin tocar nada no debe cambiarlo.
+    lead_id = getattr(instance, 'empleado_id', None)
+    asignaciones = sorted(
+        instance.asignaciones.select_related('empleado').all(),
+        key=lambda a: a.empleado_id != lead_id,
+    )
     return json.dumps([
         {'empleado_id': a.empleado_id, 'empleado_nombre': str(a.empleado),
          'monto': str(getattr(a, monto_field))}
-        for a in instance.asignaciones.select_related('empleado').all()
+        for a in asignaciones
     ])
 
 
@@ -1193,23 +1711,48 @@ def _parse_asignaciones_produccion(post):
 
 
 def _guardar_asignaciones_produccion(orden, post):
-    """Borra y recrea OrdenProduccionEmpleado para la orden. Retorna lista de errores."""
+    """Sincroniza OrdenProduccionEmpleado de la orden desde POST. Retorna lista de errores.
+
+    Actualiza EN EL LUGAR por clave natural (orden + empleado + fase), igual que
+    `_guardar_asignaciones`: las filas que siguen conservan su id (y con él sus
+    AplicacionPagoComision), se crean las nuevas y se borran sólo las quitadas.
+    """
     from .models import Empleado, OrdenProduccionEmpleado
     filas, errores = _parse_asignaciones_produccion(post)
-    orden.empleados_produccion.all().delete()
+    existentes = {
+        (a.empleado_id, a.responsabilidad): a for a in orden.empleados_produccion.all()
+    }
+    conservados = set()
     for emp_id, resp, monto in filas:
         try:
             emp = Empleado.objects.get(pk=emp_id)
         except Empleado.DoesNotExist:
             errores.append(f"Empleado {emp_id} no encontrado.")
             continue
-        try:
-            with transaction.atomic():
-                OrdenProduccionEmpleado.objects.create(
-                    orden=orden, empleado=emp,
-                    responsabilidad=resp, monto_comision_fijo=monto)
-        except IntegrityError:
+        clave = (emp.id, resp)
+        if clave in conservados:
+            # Misma restricción única que la base (orden, empleado, fase):
+            # gana la primera fila, como cuando se recreaba y chocaba.
             errores.append(f"{emp} ya está asignado a la fase '{resp}' en esta orden.")
+            continue
+        fila = existentes.get(clave)
+        if fila is not None:
+            if fila.monto_comision_fijo != monto:
+                fila.monto_comision_fijo = monto
+                fila.save(update_fields=['monto_comision_fijo'])
+        else:
+            try:
+                with transaction.atomic():
+                    OrdenProduccionEmpleado.objects.create(
+                        orden=orden, empleado=emp,
+                        responsabilidad=resp, monto_comision_fijo=monto)
+            except IntegrityError:
+                errores.append(f"{emp} ya está asignado a la fase '{resp}' en esta orden.")
+                continue
+        conservados.add(clave)
+    for clave, fila in existentes.items():
+        if clave not in conservados:
+            fila.delete()
     return errores
 
 
@@ -2010,13 +2553,62 @@ def _guardar_asignaciones_arreglo(item, modelo, campo_fk, filas):
     return errores
 
 
+def _capturar_aplicaciones_arreglo(items, fk_aplicacion, campo_item):
+    """Antes de borrar los items de una venta/alquiler, anota qué
+    AplicacionPagoComision apuntan a sus asignaciones de arreglo, por clave
+    natural (prenda_item, empleado). Los items se recrean en cada edición y
+    sus asignaciones caen en cascada (las aplicaciones quedan con la FK en
+    NULL); con esta captura `_reenganchar_aplicaciones_arreglo` las vuelve a
+    apuntar a la fila nueva equivalente y la comisión pagada sigue pagada.
+
+    items: queryset de VentaItem/AlquilerItem a punto de borrarse.
+    fk_aplicacion: 'venta_item_empleado' / 'alquiler_item_empleado'.
+    campo_item: 'venta_item' / 'alquiler_item' (FK de la asignación al item).
+    Devuelve {(prenda_item_id, empleado_id): [ids de AplicacionPagoComision]}.
+    """
+    capturadas = {}
+    filas = AplicacionPagoComision.objects.filter(
+        **{f'{fk_aplicacion}__{campo_item}__in': items}
+    ).values_list(
+        'id', f'{fk_aplicacion}__{campo_item}__prenda_item_id', f'{fk_aplicacion}__empleado_id',
+    )
+    for ap_id, prenda_item_id, empleado_id in filas:
+        capturadas.setdefault((prenda_item_id, empleado_id), []).append(ap_id)
+    return capturadas
+
+
+def _reenganchar_aplicaciones_arreglo(capturadas, items, modelo_asignacion, fk_aplicacion, campo_item):
+    """Re-apunta las aplicaciones capturadas a las asignaciones recién creadas
+    con la misma clave (prenda_item, empleado). Las que no encuentran pareja
+    (se quitó al empleado del arreglo o se cambió la prenda) quedan huérfanas:
+    conservan monto y detalle_snapshot y cuentan como "a favor" del empleado.
+    """
+    if not capturadas:
+        return
+    nuevas = modelo_asignacion.objects.filter(
+        **{f'{campo_item}__in': items}
+    ).select_related(campo_item)
+    for asig in nuevas:
+        clave = (getattr(asig, campo_item).prenda_item_id, asig.empleado_id)
+        ids = capturadas.pop(clave, None)
+        if ids:
+            AplicacionPagoComision.objects.filter(id__in=ids).update(**{fk_aplicacion: asig})
+
+
+@transaction.atomic
 def _guardar_items_venta(venta, post_data, estado_items='baja'):
-    """Guarda los ítems de la venta y gestiona el estado de cada PrendaItem."""
+    """Guarda los ítems de la venta y gestiona el estado de cada PrendaItem.
+
+    Atómico: los items se borran y recrean, y las aplicaciones de pago de
+    comisión se re-enganchan al final; un fallo a mitad de camino no puede
+    dejar comisiones pagadas desenganchadas (y pagables otra vez)."""
     for item in venta.items.select_related('prenda_item'):
         pi = item.prenda_item
         pi.estado = 'disponible'
         pi.save(update_fields=['estado'])
     kardex_events.delete_eventos_venta(venta)
+    aplicaciones_capturadas = _capturar_aplicaciones_arreglo(
+        venta.items.all(), 'venta_item_empleado', 'venta_item')
     venta.items.all().delete()
 
     prenda_item_ids       = post_data.getlist('item_prenda_item')
@@ -2088,6 +2680,9 @@ def _guardar_items_venta(venta, post_data, estado_items='baja'):
         pi.estado = estado_items
         pi.save(update_fields=['estado'])
 
+    _reenganchar_aplicaciones_arreglo(
+        aplicaciones_capturadas, venta.items.all(), VentaItemEmpleado,
+        'venta_item_empleado', 'venta_item')
     venta.recalcular_totales()
     return errores
 
@@ -2751,7 +3346,7 @@ def entregar_confeccion(request, id):
         confeccion.estado = 'entregado'
         confeccion.saldo = 0
         if not confeccion.fecha_entrega:
-            confeccion.fecha_entrega = date.today()
+            confeccion.fecha_entrega = django_tz.localdate()
         if confeccion.garantia_meses and not confeccion.garantia_hasta:
             confeccion.garantia_hasta = confeccion.fecha_entrega + relativedelta(months=confeccion.garantia_meses)
         confeccion.save()
@@ -2945,8 +3540,12 @@ def lista_alquileres(request):
     })
 
 
+@transaction.atomic
 def _guardar_items_alquiler(alquiler, post_data, estado_anterior=None):
-    """Guarda los ítems del alquiler y gestiona el estado de cada PrendaItem."""
+    """Guarda los ítems del alquiler y gestiona el estado de cada PrendaItem.
+
+    Atómico por lo mismo que `_guardar_items_venta`: recrea items y
+    re-engancha las aplicaciones de pago de comisión de sus arreglos."""
     ESTADOS_QUE_BLOQUEAN = {'alquilado', 'reservado'}
     ESTADOS_NORMALES = {'alquilado', 'devuelto', 'reservado'}
     if estado_anterior in ESTADOS_QUE_BLOQUEAN:
@@ -2968,6 +3567,8 @@ def _guardar_items_alquiler(alquiler, post_data, estado_anterior=None):
                 pi.estado = target
                 pi.save(update_fields=['estado'])
     kardex_events.delete_eventos_alquiler(alquiler)
+    aplicaciones_capturadas = _capturar_aplicaciones_arreglo(
+        alquiler.items.all(), 'alquiler_item_empleado', 'alquiler_item')
     alquiler.items.all().delete()
 
     prenda_item_ids       = post_data.getlist('item_prenda_item')
@@ -3043,6 +3644,9 @@ def _guardar_items_alquiler(alquiler, post_data, estado_anterior=None):
             pi.estado = alquiler.estado
             pi.save(update_fields=['estado'])
 
+    _reenganchar_aplicaciones_arreglo(
+        aplicaciones_capturadas, alquiler.items.all(), AlquilerItemEmpleado,
+        'alquiler_item_empleado', 'alquiler_item')
     alquiler.recalcular_totales()
     return errores
 
@@ -4040,7 +4644,7 @@ def baja_prenda_item(request, id):
             messages.error(request, f'El item {item.codigo_item} está {item.get_estado_display().lower()} y no puede darse de baja.')
             return redirect('detalle_prenda', id=item.prenda_id)
         item.estado = 'baja'
-        item.fecha_baja = date.today()
+        item.fecha_baja = django_tz.localdate()
         item.save(update_fields=['estado', 'fecha_baja', 'actualizado'])
         kardex_events.emit_baja(item)
         messages.success(request, f'Item {item.codigo_item} dado de baja.')
@@ -7470,7 +8074,7 @@ def _yoy_comparativa(fecha_inicio, fecha_fin):
 
 @login_required
 def analitica_items(request):
-    today = date.today()
+    today = django_tz.localdate()
     fecha_fin_default = today
     fecha_inicio_default = today - timedelta(days=30)
 
@@ -7517,7 +8121,7 @@ def analitica_items(request):
 
 @login_required
 def analitica_empleados(request):
-    today = date.today()
+    today = django_tz.localdate()
     fecha_fin_default = today
     fecha_inicio_default = today - timedelta(days=30)
 
@@ -7551,7 +8155,7 @@ def analitica_empleados(request):
 
 @login_required
 def analitica_clientes_ltv(request):
-    today = date.today()
+    today = django_tz.localdate()
     fecha_fin_default = today
     fecha_inicio_default = today - timedelta(days=30)
 
@@ -7595,7 +8199,7 @@ def analitica_clientes_ltv(request):
 
 @login_required
 def analitica_operativas(request):
-    today = date.today()
+    today = django_tz.localdate()
     fecha_fin_default = today
     fecha_inicio_default = today - timedelta(days=30)
 
@@ -7628,7 +8232,7 @@ def analitica_operativas(request):
 
 @login_required
 def analitica_comparativas(request):
-    today = date.today()
+    today = django_tz.localdate()
     periodo = request.GET.get('periodo', 'this_month')
     export_format = request.GET.get('export_format', '')
 
@@ -7686,7 +8290,7 @@ def analitica_comparativas(request):
 
 @login_required
 def estacionalidad(request):
-    hoy = date.today()
+    hoy = django_tz.localdate()
 
     # Available years: from earliest record up to current year
     años_candidatos = [
@@ -7742,7 +8346,7 @@ def estacionalidad(request):
 
 @login_required
 def prendas_temporada(request):
-    hoy = date.today()
+    hoy = django_tz.localdate()
 
     try:
         año = int(request.GET.get('año', hoy.year))

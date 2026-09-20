@@ -1,8 +1,9 @@
 import random
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 from django.core.management.base import BaseCommand
+from django.utils import timezone
 
 from misastreria import kardex_events
 from misastreria.models import (
@@ -19,7 +20,7 @@ from misastreria.models import (
 
 
 def rand_fecha(dias_max=365, dias_min=0):
-    return date.today() - timedelta(days=random.randint(dias_min, dias_max))
+    return timezone.localdate() - timedelta(days=random.randint(dias_min, dias_max))
 
 
 NOMBRES = ['Carlos', 'Juan', 'Luis', 'Marco', 'Diego', 'Rodrigo', 'Fernando',

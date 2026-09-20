@@ -711,3 +711,145 @@ svg.lucide { flex-shrink: 0; vertical-align: middle; }
   cursor: default;
 }
 #sel-items-tabla tbody tr.sel-items-tomada td { color: var(--text-muted); }
+
+/* ============================================================
+   Detalle de empleado — layout compacto (CLAUDE.md: "visuals too big")
+   Todo escopado con .sc-* para no afectar otras vistas.
+   ============================================================ */
+
+/* Datos del empleado y datagrid del header: menos padding, texto un punto
+   más chico que el default de Tabler. */
+.sc-card-compact > .card-header {
+  padding: .5rem .75rem;
+}
+.sc-card-compact > .card-header .card-title {
+  font-size: .9rem;
+}
+.sc-card-compact > .card-body {
+  padding: .75rem;
+}
+.sc-card-compact > .card-footer {
+  padding: .375rem .75rem;
+}
+.sc-card-compact .datagrid-item { padding-top: .35rem; padding-bottom: .35rem; }
+.sc-card-compact .datagrid-title { font-size: .72rem; }
+.sc-card-compact .datagrid-content { font-size: .875rem; }
+
+/* Botones "Añadir" de Permisos/Faltas: btn-sm ya los achica, esto sólo
+   recorta el padding horizontal que Tabler deja de más en btn-sm con ícono. */
+.sc-card-compact .card-options .btn-sm { padding: .25rem .5rem; }
+
+/* Resumen de comisión (Devengado / Pagado / Pendiente / Seleccionado):
+   tiles chicas con acento de color en vez de números sueltos centrados. */
+.sc-comision-resumen { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: .75rem; }
+.sc-comision-tile {
+  flex: 1 1 140px;
+  padding: .5rem .75rem;
+  border-radius: var(--radius);
+  background: var(--tblr-bg-surface-secondary, var(--bg));
+  border-left: 3px solid var(--border);
+}
+.sc-comision-tile-label {
+  font-size: .68rem;
+  text-transform: uppercase;
+  letter-spacing: .02em;
+  color: var(--text-muted);
+  margin-bottom: .1rem;
+}
+.sc-comision-tile-valor { font-size: 1.05rem; font-weight: 700; line-height: 1.2; }
+.sc-comision-tile-devengado { border-left-color: var(--primary); }
+.sc-comision-tile-pagado { border-left-color: var(--success); }
+.sc-comision-tile-pagado .sc-comision-tile-valor { color: var(--success); }
+.sc-comision-tile-pendiente { border-left-color: var(--danger); }
+.sc-comision-tile-pendiente .sc-comision-tile-valor { color: var(--danger); }
+.sc-comision-tile-pendiente.sc-comision-tile-ok { border-left-color: var(--success); }
+.sc-comision-tile-pendiente.sc-comision-tile-ok .sc-comision-tile-valor { color: var(--success); }
+.sc-comision-tile-seleccion { border-left-color: var(--info); }
+.sc-comision-tile-seleccion .sc-comision-tile-valor { color: var(--info); }
+
+/* Tabla de devengaciones/pagos: filas un poco más apretadas que table-sm
+   default, para que entren más sin scroll. */
+.sc-tabla-compacta td, .sc-tabla-compacta th { padding-top: .35rem; padding-bottom: .35rem; }
+
+/* Detalle de aplicaciones dentro del historial de pagos (qué devengaciones
+   cubrió cada pago) — bloque discreto, no otra tabla completa. */
+.sc-aplicaciones-detalle {
+  font-size: .78rem;
+  color: var(--text-muted);
+  margin-top: .15rem;
+  padding-left: .1rem;
+}
+.sc-aplicaciones-detalle > div { line-height: 1.35; }
+
+[data-bs-theme="dark"] .sc-comision-tile { background: var(--tblr-bg-surface); }
+
+/* ============================================================
+   Devengaciones de comisión — filtro de estado prominente, leyenda
+   de colores y tinte de fila por estado (pendiente/parcial/pagada).
+   El objetivo es poder ubicar "lo ya pagado" de un vistazo, sin
+   depender sólo del badge de la columna Estado.
+   ============================================================ */
+
+/* Filtro de estado: segmentado, con acento de color propio por estado
+   cuando está activo (a diferencia de los chips de tipo, que son todos
+   grises) — así "Pagadas" salta a la vista igual que "Pendientes". */
+.sc-filtro-estado { display: flex; gap: .4rem; flex-wrap: wrap; }
+.sc-filtro-estado .btn { font-weight: 600; font-size: .82rem; }
+.sc-filtro-estado .btn .badge {
+  background: var(--bg);
+  color: var(--text-muted);
+  font-weight: 700;
+}
+.sc-filtro-estado .btn[data-value^="pendiente"].active {
+  background: rgba(245, 158, 11, .16); border-color: var(--warning); color: #92400e;
+}
+.sc-filtro-estado .btn[data-value="parcial"].active {
+  background: rgba(6, 182, 212, .16); border-color: var(--info); color: #0e7490;
+}
+.sc-filtro-estado .btn[data-value="pagada"].active {
+  background: rgba(16, 185, 129, .16); border-color: var(--success); color: #047857;
+}
+.sc-filtro-estado .btn[data-value=""].active {
+  background: rgba(37, 99, 235, .12); border-color: var(--primary); color: var(--primary);
+}
+.sc-filtro-estado .btn.active .badge { background: rgba(255, 255, 255, .6); color: inherit; }
+
+/* Leyenda de colores bajo el filtro, antes de la tabla */
+.sc-leyenda-estado {
+  display: flex; gap: 1rem; flex-wrap: wrap;
+  font-size: .76rem; color: var(--text-muted);
+  margin-bottom: .5rem;
+}
+.sc-leyenda-estado span { display: inline-flex; align-items: center; gap: .35rem; }
+.sc-leyenda-dot { width: .55rem; height: .55rem; border-radius: 50%; display: inline-block; }
+.sc-leyenda-dot-pagada    { background: var(--success); }
+.sc-leyenda-dot-parcial   { background: var(--info); }
+.sc-leyenda-dot-pendiente { background: var(--warning); }
+
+/* Tinte de fila por estado — mismo patrón que `.scan-verificada` (fondo con
+   baja opacidad sobre la celda) más un acento en el borde izquierdo. */
+.sc-fila-pendiente > td { background-color: rgba(245, 158, 11, .08); }
+.sc-fila-parcial   > td { background-color: rgba(6, 182, 212, .08); }
+.sc-fila-pagada    > td { background-color: rgba(16, 185, 129, .08); }
+.sc-fila-pendiente > td:first-child { box-shadow: inset 3px 0 0 0 var(--warning); }
+.sc-fila-parcial   > td:first-child { box-shadow: inset 3px 0 0 0 var(--info); }
+.sc-fila-pagada    > td:first-child { box-shadow: inset 3px 0 0 0 var(--success); }
+
+[data-bs-theme="dark"] .sc-filtro-estado .btn { background: var(--tblr-bg-surface); border-color: var(--tblr-border-color); color: var(--tblr-muted); }
+[data-bs-theme="dark"] .sc-filtro-estado .btn[data-value^="pendiente"].active {
+  background: rgba(245, 158, 11, .22); border-color: var(--warning); color: #fcd34d;
+}
+[data-bs-theme="dark"] .sc-filtro-estado .btn[data-value="parcial"].active {
+  background: rgba(6, 182, 212, .22); border-color: var(--info); color: #67e8f9;
+}
+[data-bs-theme="dark"] .sc-filtro-estado .btn[data-value="pagada"].active {
+  background: rgba(16, 185, 129, .22); border-color: var(--success); color: #6ee7b7;
+}
+[data-bs-theme="dark"] .sc-filtro-estado .btn[data-value=""].active {
+  background: rgba(37, 99, 235, .22); border-color: var(--primary); color: #93c5fd;
+}
+[data-bs-theme="dark"] .sc-filtro-estado .btn.active .badge { background: rgba(0, 0, 0, .25); color: inherit; }
+
+[data-bs-theme="dark"] .sc-fila-pendiente > td { background-color: rgba(245, 158, 11, .14); color: var(--tblr-body-color); }
+[data-bs-theme="dark"] .sc-fila-parcial   > td { background-color: rgba(6, 182, 212, .16); color: var(--tblr-body-color); }
+[data-bs-theme="dark"] .sc-fila-pagada    > td { background-color: rgba(16, 185, 129, .14); color: var(--tblr-body-color); }

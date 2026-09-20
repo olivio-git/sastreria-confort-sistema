@@ -576,19 +576,14 @@ class PagoVentaForm(forms.Form):
 
 
 class PagoComisionEmpleadoForm(forms.Form):
-    from decimal import Decimal as _Decimal
-    monto = forms.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        min_value=_Decimal('0.01'),
-        widget=forms.NumberInput(attrs={
-            'class': 'form-control',
-            'step': '0.01',
-            'min': '0.01',
-            'placeholder': '0.00',
-        }),
-        label='Monto a pagar',
-    )
+    """Pago de comisión por selección de devengaciones puntuales.
+
+    El monto YA NO se tipea: se deriva del total de las devengaciones
+    (pendientes o parciales) que el usuario marca en el modal — ver
+    `pagar_comision_empleado`. El campo `sel` (una o más claves
+    "tipo:id_asignacion") no vive en este Form porque son checkboxes
+    dinámicos por empleado; se leen directo de `request.POST.getlist('sel')`.
+    """
     forma_pago = forms.ChoiceField(
         choices=FORMA_PAGO_CHOICES,
         widget=forms.Select(attrs={'class': 'form-select'}),

@@ -110,7 +110,7 @@ class Cliente(models.Model):
     celular = models.CharField(max_length=15, validators=[RegexValidator(r'^\+?\d{9,15}$')], verbose_name="Celular")
     email = models.EmailField(null=True, blank=True, verbose_name="Correo Electrónico")
     pais = models.CharField(max_length=100, blank=True, verbose_name="País")
-    fecha_registro = models.DateField(default=timezone.now, verbose_name="Fecha de Registro")
+    fecha_registro = models.DateField(default=timezone.localdate, verbose_name="Fecha de Registro")
     notas = models.TextField(blank=True, verbose_name="Notas")
     creado = models.DateTimeField(auto_now_add=True, verbose_name="Fecha de Creación")
 
@@ -488,7 +488,7 @@ class Corte(models.Model):
         max_length=12, blank=True,
         verbose_name="Sigla", help_text="Alias corto opcional, ej. AZUL-LANA",
     )
-    fecha = models.DateField(default=timezone.now, verbose_name="Fecha")
+    fecha = models.DateField(default=timezone.localdate, verbose_name="Fecha")
     tela = models.CharField(max_length=100, blank=True, verbose_name="Tela / color")
     nota = models.TextField(blank=True, verbose_name="Nota")
     creado = models.DateTimeField(auto_now_add=True, verbose_name="Fecha de registro")
@@ -773,7 +773,7 @@ class Venta(Servicio):
     ]
 
     codigo = models.CharField(max_length=10, unique=True, blank=True, verbose_name="Código")
-    fecha_venta = models.DateField(default=timezone.now, verbose_name="Fecha de Venta")
+    fecha_venta = models.DateField(default=timezone.localdate, verbose_name="Fecha de Venta")
     cliente = models.ForeignKey(Cliente, on_delete=models.SET_NULL, null=True, blank=True, related_name='ventas', verbose_name="Cliente")
     empleado = models.ForeignKey('Empleado', on_delete=models.SET_NULL, null=True, blank=True, related_name='ventas', verbose_name="Empleado")
     descuento = models.DecimalField(max_digits=5, decimal_places=2, default=0, verbose_name="Descuento (%)")
@@ -890,7 +890,7 @@ class Confeccion(models.Model):
     ]
 
     codigo       = models.CharField(max_length=20, unique=True, blank=True)
-    fecha_inicio = models.DateField(default=timezone.now)
+    fecha_inicio = models.DateField(default=timezone.localdate)
     color        = models.CharField(max_length=50)
     modelo       = models.CharField(max_length=100)
     cliente      = models.ForeignKey(Cliente, on_delete=models.PROTECT, null=True, blank=True)
@@ -921,10 +921,9 @@ class Confeccion(models.Model):
 
     @property
     def garantia_estado(self):
-        from datetime import date
         if not self.garantia_hasta:
             return None
-        return 'vigente' if self.garantia_hasta >= date.today() else 'vencida'
+        return 'vigente' if self.garantia_hasta >= timezone.localdate() else 'vencida'
 
     @property
     def tipos_prenda_display(self):
@@ -1138,7 +1137,7 @@ class EstadoAlquiler(models.Model):
 
 class Alquiler(Servicio):
     codigo = models.CharField(max_length=20, unique=True, blank=True, verbose_name="Código")
-    fecha_alquiler = models.DateField(default=timezone.now, verbose_name="Fecha de Alquiler")
+    fecha_alquiler = models.DateField(default=timezone.localdate, verbose_name="Fecha de Alquiler")
     fecha_devolucion = models.DateField(verbose_name="Fecha de Devolución")
     fecha_evento = models.DateField(null=True, blank=True, verbose_name="Fecha del evento")
     hora_devolucion = models.TimeField(null=True, blank=True, verbose_name="Hora de Devolución")
@@ -1395,7 +1394,7 @@ class Transaccion(models.Model):
     tipo_transaccion = models.CharField(max_length=10, choices=TIPO_TRANSACCION_CHOICES, default='ingreso', verbose_name="Tipo de Transacción")
     descripcion = models.TextField(verbose_name="Descripción")
     tipo_servicio = models.CharField(max_length=20, choices=TIPO_SERVICIO_CHOICES, verbose_name="Tipo de Servicio")
-    fecha = models.DateField(default=timezone.now, verbose_name="Fecha")
+    fecha = models.DateField(default=timezone.localdate, verbose_name="Fecha")
     cantidad = models.PositiveIntegerField(verbose_name="Cantidad")
     monto = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0.01)], verbose_name="Monto")
     creado = models.DateTimeField(auto_now_add=True, verbose_name="Fecha de Creación")
@@ -1457,7 +1456,7 @@ class OrdenProduccion(models.Model):
         verbose_name="Cantidad a producir",
     )
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='corte', verbose_name="Estado")
-    fecha_inicio = models.DateField(default=timezone.now, verbose_name="Fecha de Inicio")
+    fecha_inicio = models.DateField(default=timezone.localdate, verbose_name="Fecha de Inicio")
     fecha_estimada = models.DateField(null=True, blank=True, verbose_name="Fecha Estimada")
     notas = models.TextField(blank=True, verbose_name="Notas")
     creado = models.DateTimeField(auto_now_add=True)
@@ -1532,6 +1531,105 @@ class OrdenProduccionEmpleado(models.Model):
 
     def __str__(self):
         return f"{self.empleado} — {self.get_responsabilidad_display()} — Bs. {self.monto_comision_fijo} de {self.orden.codigo}"
+
+
+class AplicacionPagoComision(models.Model):
+    """Vincula un PagoComisionEmpleado con las devengaciones (filas de asignación)
+    concretas que ese pago cubre. A lo sumo UNA de las 5 FK de asignación puede
+    estar seteada por fila: cada aplicación corresponde a una sola fila de una
+    sola tabla de asignación (no se reparte una aplicación entre dos servicios).
+
+    Ninguna FK seteada = aplicación huérfana: la fila de asignación se borró
+    (el empleado se quitó de la operación, o el arreglo cambió de prenda).
+    Es historial, no un error: conserva `monto` y `detalle_snapshot`, y como
+    `pago.empleado` sigue apuntando al empleado, ese monto se cuenta como
+    "a favor / no aplicado" en `_devengaciones_empleado`. Por eso la
+    restricción es "a lo sumo una" y no "exactamente una": con "exactamente
+    una", el SET_NULL de abajo violaba el CHECK y la edición reventaba.
+
+    Decisión de on_delete — SET_NULL, no PROTECT:
+    Con PROTECT, quitar de una operación a un empleado ya pagado sería
+    imposible (ProtectedError en pleno guardado). Para que una edición normal
+    (mismos empleados) NO deje huérfanas las aplicaciones, los helpers de
+    guardado conservan la identidad de las filas de asignación:
+    `_guardar_asignaciones` y `_guardar_asignaciones_produccion` actualizan
+    en el lugar por clave natural (operación + empleado [+ fase]), y
+    `_guardar_items_venta`/`_guardar_items_alquiler` (que sí recrean los
+    items) re-enganchan las aplicaciones a la fila nueva por
+    (prenda_item, empleado) dentro de la misma transacción. Ver
+    `_capturar_aplicaciones_arreglo` / `_reenganchar_aplicaciones_arreglo`.
+    """
+    pago = models.ForeignKey(
+        PagoComisionEmpleado, on_delete=models.CASCADE, related_name='aplicaciones',
+        verbose_name="Pago",
+    )
+    reparacion_empleado = models.ForeignKey(
+        ReparacionEmpleado, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='aplicaciones_pago', verbose_name="Asignación de reparación",
+    )
+    confeccion_empleado = models.ForeignKey(
+        ConfeccionEmpleado, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='aplicaciones_pago', verbose_name="Asignación de confección",
+    )
+    venta_item_empleado = models.ForeignKey(
+        VentaItemEmpleado, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='aplicaciones_pago', verbose_name="Asignación de arreglo (venta)",
+    )
+    alquiler_item_empleado = models.ForeignKey(
+        AlquilerItemEmpleado, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='aplicaciones_pago', verbose_name="Asignación de arreglo (alquiler)",
+    )
+    produccion_empleado = models.ForeignKey(
+        OrdenProduccionEmpleado, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='aplicaciones_pago', verbose_name="Asignación de producción",
+    )
+    monto = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        validators=[MinValueValidator(Decimal('0.01'))],
+        verbose_name="Monto aplicado",
+    )
+    detalle_snapshot = models.CharField(
+        max_length=200, blank=True, verbose_name="Detalle",
+        help_text="Descripción de la devengación al momento del pago, para el "
+                   "historial si la fila original se borra más adelante.",
+    )
+    creado = models.DateTimeField(auto_now_add=True, verbose_name="Fecha de creación")
+
+    class Meta:
+        verbose_name = "Aplicación de pago de comisión"
+        verbose_name_plural = "Aplicaciones de pago de comisión"
+        ordering = ['id']
+        constraints = [
+            models.CheckConstraint(
+                # A lo sumo una FK seteada (ninguna = aplicación huérfana, ver docstring).
+                condition=(
+                    (models.Q(reparacion_empleado__isnull=True) | models.Q(confeccion_empleado__isnull=True))
+                    & (models.Q(reparacion_empleado__isnull=True) | models.Q(venta_item_empleado__isnull=True))
+                    & (models.Q(reparacion_empleado__isnull=True) | models.Q(alquiler_item_empleado__isnull=True))
+                    & (models.Q(reparacion_empleado__isnull=True) | models.Q(produccion_empleado__isnull=True))
+                    & (models.Q(confeccion_empleado__isnull=True) | models.Q(venta_item_empleado__isnull=True))
+                    & (models.Q(confeccion_empleado__isnull=True) | models.Q(alquiler_item_empleado__isnull=True))
+                    & (models.Q(confeccion_empleado__isnull=True) | models.Q(produccion_empleado__isnull=True))
+                    & (models.Q(venta_item_empleado__isnull=True) | models.Q(alquiler_item_empleado__isnull=True))
+                    & (models.Q(venta_item_empleado__isnull=True) | models.Q(produccion_empleado__isnull=True))
+                    & (models.Q(alquiler_item_empleado__isnull=True) | models.Q(produccion_empleado__isnull=True))
+                ),
+                name='aplicacion_pago_comision_a_lo_sumo_una_asignacion',
+            ),
+        ]
+
+    @property
+    def asignacion(self):
+        """La fila de asignación cubierta por esta aplicación (la única de las 5
+        FK que no es None), o None si la fila original fue borrada (SET_NULL)."""
+        return (
+            self.reparacion_empleado or self.confeccion_empleado
+            or self.venta_item_empleado or self.alquiler_item_empleado
+            or self.produccion_empleado
+        )
+
+    def __str__(self):
+        return f"{self.pago.codigo} — Bs. {self.monto}"
 
 
 # ============================================================
