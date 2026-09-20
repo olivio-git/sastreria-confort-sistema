@@ -1,11 +1,12 @@
 {% extends 'misastreria/base.html' %}
+{% load l10n %}
 {% block titulo %}{{ empleado }}{% endblock %}
 
 {% block page_header %}
 <div class="container-xl">
   <div class="row g-2 align-items-center">
     <div class="col-auto">
-      <a href="{% url 'lista_empleados' %}" class="btn btn-outline-secondary">
+      <a href="{% url 'lista_empleados' %}" class="btn btn-outline-secondary btn-sm">
         <i data-lucide="arrow-left"></i>Volver
       </a>
     </div>
@@ -13,10 +14,16 @@
       <h2 class="page-title"><i data-lucide="id-card" class="me-2 text-muted"></i>{{ empleado }}</h2>
     </div>
     <div class="col-auto ms-auto d-flex gap-2">
-      <a href="{% url 'exportar_devengaciones_empleado_excel' empleado.id %}" class="btn btn-outline-success" title="Descargar resumen de devengaciones en Excel">
+      <a href="{% url 'exportar_devengaciones_empleado_excel' empleado.id %}?estado=pendientes" class="btn btn-outline-success btn-sm" title="Sólo las devengaciones pendientes o parciales">
+        <i data-lucide="file-spreadsheet"></i>Descargar pendientes
+      </a>
+      <a href="{% url 'exportar_devengaciones_empleado_excel' empleado.id %}?estado=pagadas" class="btn btn-outline-success btn-sm" title="Sólo las devengaciones ya pagadas">
+        <i data-lucide="file-spreadsheet"></i>Descargar pagadas
+      </a>
+      <a href="{% url 'exportar_devengaciones_empleado_excel' empleado.id %}" class="btn btn-outline-success btn-sm" title="Todas las devengaciones">
         <i data-lucide="file-spreadsheet"></i>Excel devengaciones
       </a>
-      <a href="{% url 'editar_empleado' empleado.id %}" class="btn btn-outline-primary">
+      <a href="{% url 'editar_empleado' empleado.id %}" class="btn btn-outline-primary btn-sm">
         <i data-lucide="pencil"></i>Editar
       </a>
     </div>
@@ -27,7 +34,7 @@
 {% block contenido %}
 
 <!-- Info del empleado -->
-<div class="card mb-4">
+<div class="card sc-card-compact mb-3">
   <div class="card-header"><h3 class="card-title">Datos del empleado</h3></div>
   <div class="card-body">
     <div class="datagrid">
@@ -69,23 +76,214 @@
   </div>
 </div>
 
-<div class="row g-4">
+<!-- Comisiones — el módulo más usado del detalle, va arriba de Permisos/Faltas -->
+<div class="card sc-card-compact mb-3">
+  <div class="card-header d-flex align-items-center">
+    <h3 class="card-title d-flex align-items-center gap-1">
+      <i data-lucide="percent" class="text-muted" style="width:1rem;height:1rem"></i>Comisiones
+    </h3>
+    <div class="card-options">
+      {% if saldo_comision > 0 %}
+      <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#modalPagarComision">
+        <i data-lucide="hand-coins"></i>Pagar comisión
+      </button>
+      {% endif %}
+    </div>
+  </div>
+  <div class="card-body">
+
+    <!-- Resumen -->
+    <div class="sc-comision-resumen">
+      <div class="sc-comision-tile sc-comision-tile-devengado">
+        <div class="sc-comision-tile-label">Devengado</div>
+        <div class="sc-comision-tile-valor">Bs. {{ total_devengado|floatformat:2 }}</div>
+      </div>
+      <div class="sc-comision-tile sc-comision-tile-pagado">
+        <div class="sc-comision-tile-label">Pagado</div>
+        <div class="sc-comision-tile-valor">Bs. {{ total_pagado|floatformat:2 }}</div>
+      </div>
+      <div class="sc-comision-tile sc-comision-tile-pendiente{% if saldo_comision <= 0 %} sc-comision-tile-ok{% endif %}">
+        <div class="sc-comision-tile-label">Saldo pendiente</div>
+        <div class="sc-comision-tile-valor">Bs. {{ saldo_comision|floatformat:2 }}</div>
+      </div>
+    </div>
+    {% if no_aplicado_comision > 0 %}
+    <div class="text-muted small mb-3">
+      <i data-lucide="info" style="width:.85rem;height:.85rem" class="me-1"></i>
+      De lo pagado, Bs. {{ no_aplicado_comision|floatformat:2 }} quedan a favor del empleado sin una
+      devengación concreta asociada (pagos anteriores a este cambio, o una devengación reducida después de pagada).
+    </div>
+    {% endif %}
+
+    <!-- Operaciones devengadas -->
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+      <h4 class="m-0 small fw-semibold text-muted text-uppercase">Operaciones devengadas</h4>
+      {% if total_operaciones_comision %}
+      <span class="text-muted small">({{ total_operaciones_comision }})</span>
+      {% endif %}
+    </div>
+
+    <!-- Filtro por estado (cliente-side, default Pendientes) — segmentado y
+         con color de acento propio por estado, más visible que los chips de
+         tipo de abajo, para poder ubicar de un vistazo lo que ya está pagado. -->
+    <div class="sc-filtro-estado mb-2" data-row-filter="tablaDevengadas" data-row-filter-attr="estado">
+      <button type="button" class="btn btn-outline-secondary active" data-value="pendiente parcial">
+        <i data-lucide="clock" style="width:.9rem;height:.9rem"></i>Por pagar
+        <span class="badge">{{ n_pendientes_comision|add:n_parciales_comision }}</span>
+      </button>
+      <button type="button" class="btn btn-outline-secondary" data-value="parcial">
+        <i data-lucide="circle-dashed" style="width:.9rem;height:.9rem"></i>Parciales
+        <span class="badge">{{ n_parciales_comision }}</span>
+      </button>
+      <button type="button" class="btn btn-outline-secondary" data-value="pagada">
+        <i data-lucide="check-circle-2" style="width:.9rem;height:.9rem"></i>Pagadas
+        <span class="badge">{{ n_pagadas_comision }}</span>
+      </button>
+      <button type="button" class="btn btn-outline-secondary" data-value="">
+        <i data-lucide="list" style="width:.9rem;height:.9rem"></i>Todas
+        <span class="badge">{{ total_operaciones_comision }}</span>
+      </button>
+    </div>
+
+    <!-- Leyenda de colores de fila, combinable con el filtro de arriba -->
+    <div class="sc-leyenda-estado">
+      <span><i class="sc-leyenda-dot sc-leyenda-dot-pagada"></i>Pagada</span>
+      <span><i class="sc-leyenda-dot sc-leyenda-dot-parcial"></i>Parcial</span>
+      <span><i class="sc-leyenda-dot sc-leyenda-dot-pendiente"></i>Pendiente</span>
+    </div>
+
+    {% if conteo_comision %}
+    <!-- Filtro por tipo (cliente-side) -->
+    <div class="date-shortcuts flex-wrap mb-2" data-row-filter="tablaDevengadas" data-row-filter-attr="tipo">
+      <button type="button" class="btn btn-outline-secondary active" data-value="">
+        Todos los tipos
+      </button>
+      {% for key, label, n in conteo_comision %}
+      <button type="button" class="btn btn-outline-secondary" data-value="{{ key }}">
+        {{ label }} <span class="text-muted">{{ n }}</span>
+      </button>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="table-responsive mb-4" style="max-height:480px;overflow-y:auto">
+      <table class="table table-sm table-vcenter sc-tabla-compacta" id="tablaDevengadas">
+        <thead>
+          <tr>
+            <th>Tipo</th>
+            <th>Código</th>
+            <th>Fecha</th>
+            <th>Cliente</th>
+            <th class="text-end">Base</th>
+            <th class="text-end">Comisión</th>
+            <th>Estado</th>
+            <th class="text-end">Pagado</th>
+            <th class="text-end">Pendiente</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for o in operaciones_comision %}
+          <tr data-tipo="{{ o.tipo_key }}" data-estado="{{ o.estado }}" class="sc-fila-{{ o.estado }}">
+            <td><span class="badge-estado {{ o.badge }}">{{ o.tipo }}</span></td>
+            <td>
+              {{ o.codigo }}
+              {% if o.detalle %}<div class="text-muted small">{{ o.detalle }}</div>{% endif %}
+            </td>
+            <td>{{ o.fecha|default:"—" }}</td>
+            <td>{{ o.cliente|default:"—" }}</td>
+            <td class="text-end">{% if o.base is not None %}Bs. {{ o.base|floatformat:2 }}{% else %}—{% endif %}</td>
+            <td class="text-end fw-semibold">Bs. {{ o.comision|floatformat:2 }}</td>
+            <td><span class="badge-estado {{ o.estado_badge }}">{{ o.estado_label }}</span></td>
+            <td class="text-end">Bs. {{ o.pagado|floatformat:2 }}</td>
+            <td class="text-end{% if o.pendiente > 0 %} fw-semibold text-danger{% endif %}">Bs. {{ o.pendiente|floatformat:2 }}</td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="9" class="text-center text-muted py-3">
+              <i data-lucide="percent" style="width:1.5rem;height:1.5rem;opacity:.4" class="d-block mx-auto mb-1"></i>
+              Sin comisiones devengadas.
+            </td>
+          </tr>
+          {% endfor %}
+          <tr class="d-none" data-row-filter-empty>
+            <td colspan="9" class="text-center text-muted py-3">Sin operaciones de este filtro.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Historial de pagos -->
+    <h4 class="mb-2 small fw-semibold text-muted text-uppercase">Historial de pagos</h4>
+    <div class="table-responsive" style="max-height:280px;overflow-y:auto">
+      <table class="table table-sm table-vcenter sc-tabla-compacta">
+        <thead>
+          <tr>
+            <th>Código</th>
+            <th>Fecha</th>
+            <th>Forma de pago</th>
+            <th>Vía caja</th>
+            <th>Descripción</th>
+            <th class="text-end">Monto</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in pagos_comision %}
+          <tr>
+            <td>{{ p.codigo }}</td>
+            <td>{{ p.fecha|date:"Y-m-d H:i" }}</td>
+            <td>{{ p.get_forma_pago_display }}</td>
+            <td>
+              {% if p.via_caja %}
+                <span class="badge-estado badge-entregado">Sí</span>
+              {% else %}
+                <span class="badge-estado badge-inactivo">No</span>
+              {% endif %}
+            </td>
+            <td>
+              {{ p.descripcion|default:"—" }}
+              {% if p.aplicaciones_detalle %}
+              <div class="sc-aplicaciones-detalle">
+                <div class="text-muted">{{ p.aplicaciones_detalle|length }} devengaci{{ p.aplicaciones_detalle|length|pluralize:"ón,ones" }}:</div>
+                {% for ap in p.aplicaciones_detalle %}
+                <div>· {{ ap.detalle_snapshot|default:"—" }} — Bs. {{ ap.monto|floatformat:2 }}</div>
+                {% endfor %}
+              </div>
+              {% endif %}
+            </td>
+            <td class="text-end fw-semibold">Bs. {{ p.monto|floatformat:2 }}</td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="6" class="text-center text-muted py-3">
+              <i data-lucide="wallet" style="width:1.5rem;height:1.5rem;opacity:.4" class="d-block mx-auto mb-1"></i>
+              Sin pagos de comisión registrados.
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<div class="row g-3">
 
   <!-- Permisos -->
   <div class="col-lg-6">
-    <div class="card">
+    <div class="card sc-card-compact">
       <div class="card-header d-flex align-items-center">
         <h3 class="card-title d-flex align-items-center gap-1">
           <i data-lucide="calendar" class="text-muted" style="width:1rem;height:1rem"></i>Permisos
         </h3>
         <div class="card-options">
-          <a href="{% url 'crear_permiso' empleado.id %}" class="btn btn-success">
+          <a href="{% url 'crear_permiso' empleado.id %}" class="btn btn-success btn-sm">
             <i data-lucide="plus"></i>Añadir
           </a>
         </div>
       </div>
       <div class="table-responsive">
-        <table class="table table-vcenter card-table">
+        <table class="table table-vcenter card-table sc-tabla-compacta">
           <thead>
             <tr>
               <th>Fecha</th>
@@ -127,19 +325,19 @@
 
   <!-- Faltas -->
   <div class="col-lg-6">
-    <div class="card">
+    <div class="card sc-card-compact">
       <div class="card-header d-flex align-items-center">
         <h3 class="card-title d-flex align-items-center gap-1">
           <i data-lucide="calendar-x" class="text-muted" style="width:1rem;height:1rem"></i>Faltas
         </h3>
         <div class="card-options">
-          <a href="{% url 'crear_falta' empleado.id %}" class="btn btn-success">
+          <a href="{% url 'crear_falta' empleado.id %}" class="btn btn-success btn-sm">
             <i data-lucide="plus"></i>Añadir
           </a>
         </div>
       </div>
       <div class="table-responsive">
-        <table class="table table-vcenter card-table">
+        <table class="table table-vcenter card-table sc-tabla-compacta">
           <thead>
             <tr>
               <th>Fecha</th>
@@ -181,150 +379,9 @@
 
 </div>
 
-<!-- Comisiones -->
-<div class="card mt-4">
-  <div class="card-header d-flex align-items-center">
-    <h3 class="card-title d-flex align-items-center gap-1">
-      <i data-lucide="percent" class="text-muted" style="width:1rem;height:1rem"></i>Comisiones
-    </h3>
-    <div class="card-options">
-      {% if saldo_comision > 0 %}
-      <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modalPagarComision">
-        <i data-lucide="hand-coins"></i>Pagar comisión
-      </button>
-      {% endif %}
-    </div>
-  </div>
-  <div class="card-body">
-
-    <!-- Resumen -->
-    <div class="row g-3 text-center mb-4">
-      <div class="col-4">
-        <div class="text-muted small mb-1">Devengado</div>
-        <div class="fw-bold fs-5">Bs. {{ total_devengado|floatformat:2 }}</div>
-      </div>
-      <div class="col-4">
-        <div class="text-muted small mb-1">Pagado</div>
-        <div class="fw-bold fs-5 text-success">Bs. {{ total_pagado|floatformat:2 }}</div>
-      </div>
-      <div class="col-4">
-        <div class="text-muted small mb-1">Saldo pendiente</div>
-        <div class="fw-bold fs-5 {% if saldo_comision > 0 %}text-danger{% else %}text-success{% endif %}">
-          Bs. {{ saldo_comision|floatformat:2 }}
-        </div>
-      </div>
-    </div>
-
-    <!-- Operaciones devengadas -->
-    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-      <h4 class="m-0 small fw-semibold text-muted text-uppercase">Operaciones devengadas</h4>
-      {% if total_operaciones_comision %}
-      <span class="text-muted small">({{ total_operaciones_comision }})</span>
-      {% endif %}
-    </div>
-
-    {% if conteo_comision %}
-    <!-- Filtro por tipo (cliente-side) -->
-    <div class="date-shortcuts flex-wrap mb-2" data-row-filter="tablaDevengadas" data-row-filter-attr="tipo">
-      <button type="button" class="btn btn-outline-secondary active" data-value="">
-        Todas <span class="text-muted">{{ total_operaciones_comision }}</span>
-      </button>
-      {% for key, label, n in conteo_comision %}
-      <button type="button" class="btn btn-outline-secondary" data-value="{{ key }}">
-        {{ label }} <span class="text-muted">{{ n }}</span>
-      </button>
-      {% endfor %}
-    </div>
-    {% endif %}
-
-    <div class="table-responsive mb-4" style="max-height:520px;overflow-y:auto">
-      <table class="table table-sm table-vcenter" id="tablaDevengadas">
-        <thead>
-          <tr>
-            <th>Tipo</th>
-            <th>Código</th>
-            <th>Fecha</th>
-            <th>Cliente</th>
-            <th class="text-end">Base</th>
-            <th class="text-end">Comisión</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for o in operaciones_comision %}
-          <tr data-tipo="{{ o.tipo_key }}">
-            <td><span class="badge-estado {{ o.badge }}">{{ o.tipo }}</span></td>
-            <td>
-              {{ o.codigo }}
-              {% if o.detalle %}<div class="text-muted small">{{ o.detalle }}</div>{% endif %}
-            </td>
-            <td>{{ o.fecha|default:"—" }}</td>
-            <td>{{ o.cliente|default:"—" }}</td>
-            <td class="text-end">{% if o.base is not None %}Bs. {{ o.base|floatformat:2 }}{% else %}—{% endif %}</td>
-            <td class="text-end fw-semibold">Bs. {{ o.comision|floatformat:2 }}</td>
-          </tr>
-          {% empty %}
-          <tr>
-            <td colspan="6" class="text-center text-muted py-3">
-              <i data-lucide="percent" style="width:1.5rem;height:1.5rem;opacity:.4" class="d-block mx-auto mb-1"></i>
-              Sin comisiones devengadas.
-            </td>
-          </tr>
-          {% endfor %}
-          <tr class="d-none" data-row-filter-empty>
-            <td colspan="6" class="text-center text-muted py-3">Sin operaciones de este tipo.</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <!-- Historial de pagos -->
-    <h4 class="mb-2 small fw-semibold text-muted text-uppercase">Historial de pagos</h4>
-    <div class="table-responsive" style="max-height:260px;overflow-y:auto">
-      <table class="table table-sm table-vcenter">
-        <thead>
-          <tr>
-            <th>Código</th>
-            <th>Fecha</th>
-            <th>Forma de pago</th>
-            <th>Vía caja</th>
-            <th>Descripción</th>
-            <th class="text-end">Monto</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for p in pagos_comision %}
-          <tr>
-            <td>{{ p.codigo }}</td>
-            <td>{{ p.fecha|date:"Y-m-d H:i" }}</td>
-            <td>{{ p.get_forma_pago_display }}</td>
-            <td>
-              {% if p.via_caja %}
-                <span class="badge-estado badge-entregado">Sí</span>
-              {% else %}
-                <span class="badge-estado badge-inactivo">No</span>
-              {% endif %}
-            </td>
-            <td>{{ p.descripcion|default:"—" }}</td>
-            <td class="text-end fw-semibold">Bs. {{ p.monto|floatformat:2 }}</td>
-          </tr>
-          {% empty %}
-          <tr>
-            <td colspan="6" class="text-center text-muted py-3">
-              <i data-lucide="wallet" style="width:1.5rem;height:1.5rem;opacity:.4" class="d-block mx-auto mb-1"></i>
-              Sin pagos de comisión registrados.
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-
-  </div>
-</div>
-
-<!-- Modal: Pagar comisión -->
-<div class="modal fade" id="modalPagarComision" tabindex="-1">
-  <div class="modal-dialog">
+<!-- Modal: Pagar comisión por selección de devengaciones -->
+<div class="modal fade" id="modalPagarComision" tabindex="-1" data-saldo-favor="{{ no_aplicado_comision|unlocalize }}">
+  <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <form method="post" action="{% url 'pagar_comision_empleado' empleado.id %}">
         {% csrf_token %}
@@ -336,12 +393,74 @@
         </div>
         <div class="modal-body">
           <div class="alert alert-info py-2 small mb-3">
-            Saldo de comisión pendiente: <strong>Bs. {{ saldo_comision|floatformat:2 }}</strong>
+            Marca las devengaciones pendientes o parciales que estás pagando. El monto se calcula solo.
           </div>
-          <div class="mb-3">
-            <label class="form-label fw-semibold">{{ pago_form.monto.label }}</label>
-            {{ pago_form.monto }}
+
+          <div class="table-responsive mb-3" style="max-height:320px;overflow-y:auto">
+            <table class="table table-sm table-vcenter sc-tabla-compacta">
+              <thead>
+                <tr>
+                  <th style="width:2rem">
+                    <input type="checkbox" class="form-check-input" id="selTodasComision">
+                  </th>
+                  <th>Tipo</th>
+                  <th>Código</th>
+                  <th>Fecha</th>
+                  <th>Cliente</th>
+                  <th class="text-end">Pendiente</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for o in operaciones_pendientes_comision %}
+                <tr>
+                  <td>
+                    <input type="checkbox" class="form-check-input sel-devengacion" name="sel"
+                           value="{{ o.clave }}" data-pendiente="{{ o.pendiente|unlocalize }}">
+                  </td>
+                  <td><span class="badge-estado {{ o.badge }}">{{ o.tipo }}</span></td>
+                  <td>{{ o.codigo }}{% if o.detalle %} <span class="text-muted small">— {{ o.detalle }}</span>{% endif %}</td>
+                  <td>{{ o.fecha|default:"—" }}</td>
+                  <td>{{ o.cliente|default:"—" }}</td>
+                  <td class="text-end fw-semibold">Bs. {{ o.pendiente|floatformat:2 }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                  <td colspan="6" class="text-center text-muted py-3">
+                    No hay devengaciones pendientes ni parciales para pagar.
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
           </div>
+
+          <div class="sc-comision-resumen mb-3">
+            <div class="sc-comision-tile sc-comision-tile-seleccion">
+              <div class="sc-comision-tile-label">Seleccionadas</div>
+              <div class="sc-comision-tile-valor"><span id="contadorSeleccionComision">0</span></div>
+            </div>
+            <div class="sc-comision-tile sc-comision-tile-seleccion">
+              <div class="sc-comision-tile-label">Total seleccionado</div>
+              <div class="sc-comision-tile-valor">Bs. <span id="totalSeleccionComision">0.00</span></div>
+            </div>
+            {% if no_aplicado_comision > 0 %}
+            <div class="sc-comision-tile sc-comision-tile-seleccion">
+              <div class="sc-comision-tile-label">Saldo a favor</div>
+              <div class="sc-comision-tile-valor">Bs. {{ no_aplicado_comision|floatformat:2 }}</div>
+            </div>
+            {% endif %}
+            <div class="sc-comision-tile sc-comision-tile-seleccion">
+              <div class="sc-comision-tile-label">A pagar</div>
+              <div class="sc-comision-tile-valor">Bs. <span id="aPagarSeleccionComision">0.00</span></div>
+            </div>
+          </div>
+          {% if no_aplicado_comision > 0 %}
+          <div class="text-muted small mb-3">
+            El saldo a favor del empleado se aplica primero a las devengaciones marcadas;
+            sólo la diferencia se registra como pago nuevo.
+          </div>
+          {% endif %}
+
           <div class="mb-3">
             <label class="form-label fw-semibold">{{ pago_form.forma_pago.label }}</label>
             {{ pago_form.forma_pago }}
@@ -359,8 +478,8 @@
           </div>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
-          <button type="submit" class="btn btn-success">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-success btn-sm" id="btnRegistrarPagoComision" disabled>
             <i data-lucide="check"></i>Registrar pago
           </button>
         </div>
@@ -369,4 +488,9 @@
   </div>
 </div>
 
+{% endblock %}
+
+{% block extra_js %}
+{% load static %}
+<script src="{% static 'js/comisiones_empleado.js' %}"></script>
 {% endblock %}

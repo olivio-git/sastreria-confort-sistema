@@ -646,30 +646,64 @@ window.initConjuntoModal = function(modalId, CONJUNTOS, onConfirm) {
 // Uso: contenedor de botones con [data-row-filter="tablaId"] y
 // [data-row-filter-attr="tipo"]; cada botón lleva data-value. Las filas del
 // tbody se filtran por su atributo data-{attr}. Botón con data-value="" = todas.
+//
+// Soporta VARIOS grupos sobre la misma tabla (ej. chips de tipo + chips de
+// estado en Comisiones): el estado de todos los grupos de una tabla se
+// comparte en `table._rowFilterState` ({attr: value}) y una fila sólo se
+// muestra si matchea TODOS los filtros activos (AND entre grupos). El valor
+// inicial de cada grupo es el botón que ya viene con `.active` en el HTML —
+// así el server puede fijar un default distinto de "todas" (p. ej. "pendiente").
 document.querySelectorAll('[data-row-filter]').forEach(function(group) {
-  var table = document.getElementById(group.dataset.rowFilter);
+  var tableId = group.dataset.rowFilter;
+  var table = document.getElementById(tableId);
   if (!table) return;
   var attr = group.dataset.rowFilterAttr || 'tipo';
   var buttons = Array.from(group.querySelectorAll('button[data-value]'));
   var emptyRow = table.querySelector('[data-row-filter-empty]');
 
-  function apply(value) {
+  if (!table._rowFilterState) table._rowFilterState = {};
+  var state = table._rowFilterState;
+  var activo = group.querySelector('button[data-value].active');
+  state[attr] = activo ? activo.dataset.value : '';
+
+  function apply() {
     var visibles = 0;
-    table.querySelectorAll('tbody tr[data-' + attr + ']').forEach(function(row) {
-      var match = !value || row.getAttribute('data-' + attr) === value;
+    Array.from(table.querySelectorAll('tbody > tr')).forEach(function(row) {
+      if (row.hasAttribute('data-row-filter-empty')) return;
+      // Filas sin NINGUNO de los atributos filtrados (p. ej. la del
+      // {% empty %} "Sin comisiones devengadas") no son datos: se dejan
+      // visibles y cuentan como visibles, así no aparece encima el mensaje
+      // genérico "Sin operaciones de este filtro".
+      var filtrable = Object.keys(state).some(function(a) {
+        return row.hasAttribute('data-' + a);
+      });
+      if (!filtrable) {
+        row.style.display = '';
+        visibles++;
+        return;
+      }
+      var match = Object.keys(state).every(function(a) {
+        var val = state[a];
+        if (!val) return true;
+        // data-value admite varios valores separados por espacio
+        // (p. ej. "pendiente parcial" = todo lo que todavía se debe).
+        return val.split(' ').indexOf(row.getAttribute('data-' + a)) !== -1;
+      });
       row.style.display = match ? '' : 'none';
       if (match) visibles++;
     });
     if (emptyRow) emptyRow.classList.toggle('d-none', visibles > 0);
-    buttons.forEach(function(b) {
-      b.classList.toggle('active', b.dataset.value === value);
-    });
   }
 
   group.addEventListener('click', function(e) {
     var btn = e.target.closest('button[data-value]');
-    if (btn) apply(btn.dataset.value);
+    if (!btn) return;
+    state[attr] = btn.dataset.value;
+    buttons.forEach(function(b) { b.classList.toggle('active', b === btn); });
+    apply();
   });
+
+  apply();
 });
 
 // ── Escaneo de etiquetas (pistola HID) ────────────────────────────────────────

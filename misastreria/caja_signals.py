@@ -705,15 +705,22 @@ def registrar_pago_reparacion(reparacion, monto, forma_pago, descripcion, usuari
             _liberar_pagos_reservados('referencia_reparacion', reparacion)
 
 
-def registrar_pago_comision_empleado(empleado, monto, forma_pago, via_caja, descripcion, usuario):
+def registrar_pago_comision_empleado(empleado, monto, forma_pago, via_caja, descripcion, usuario, aplicaciones=None):
     """
     Registra un pago de comisión a un empleado.
     - Siempre crea PagoComisionEmpleado (la fuente de verdad del saldo).
     - Si via_caja=True, además crea CajaMovimiento(concepto='comision_empleado', egreso).
     - Si via_caja=False, NO toca caja (pago fuera de caja).
+    - Si se pasa `aplicaciones` (lista de dicts con 'fk_field', 'asignacion' y
+      'monto'), crea un AplicacionPagoComision por cada una, vinculado a este
+      pago. El llamador (pagar_comision_empleado) es responsable de haber
+      validado y bloqueado (select_for_update) esas filas de asignación ANTES
+      de llamar acá — este servicio no vuelve a validar pertenencia ni saldo,
+      sólo persiste.
     Retorna el PagoComisionEmpleado creado, o None si monto <= 0.
     """
     from django.db import transaction as db_transaction
+    from .models import AplicacionPagoComision
 
     if monto is None or Decimal(str(monto)) <= 0:
         return None
@@ -727,6 +734,13 @@ def registrar_pago_comision_empleado(empleado, monto, forma_pago, via_caja, desc
             descripcion=descripcion or '',
             usuario=usuario,
         )
+        for ap in (aplicaciones or []):
+            AplicacionPagoComision.objects.create(
+                pago=pago,
+                monto=ap['monto'],
+                detalle_snapshot=ap.get('detalle_snapshot', ''),
+                **{ap['fk_field']: ap['asignacion']},
+            )
         if via_caja:
             mov = _crear_mov_auto(
                 concepto='comision_empleado',

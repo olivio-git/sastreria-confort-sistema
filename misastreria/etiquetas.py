@@ -34,7 +34,8 @@ Para los textos, `y` es el BORDE SUPERIOR de la caja de texto, no la línea base
 """
 
 import re
-from datetime import date
+
+from django.utils import timezone
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Unidades
@@ -257,7 +258,7 @@ def datos_muestra(extra=None):
         'precio':     '350 Bs',
         'cliente':    'Juan Pérez',
         'servicio':   '',
-        'fecha':      date.today().strftime('%d/%m/%Y'),
+        'fecha':      timezone.localdate().strftime('%d/%m/%Y'),
         'taller':     NEGOCIO,
     }
     datos.update(extra or {})
