@@ -18,7 +18,7 @@
       </h2>
     </div>
     <div class="col-auto ms-auto d-flex gap-2">
-      {% if venta.estado == 'en_proceso' and saldo > 0 %}
+      {% if saldo > 0 %}
       <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modalCompletarVenta">
         <i data-lucide="check-circle" class="me-1"></i>Completar venta
       </button>
@@ -157,8 +157,14 @@
       </div>
     </div>
 
-    <!-- Formulario de pago (solo si en_proceso) -->
-    {% if venta.estado == 'en_proceso' and saldo > 0 %}
+    {% comment %}
+      La condición mira el SALDO, no el estado. `estado` responde si la
+      mercadería salió (baja) o quedó reservada; el saldo responde si está la
+      plata. Mezclarlos trababa toda venta creada como «efectuada» con pago
+      parcial: sin formulario para cobrar el resto, y con un cartel afirmando
+      que estaba paga. Mismo criterio que reparaciones/detalle.html.
+    {% endcomment %}
+    {% if saldo > 0 %}
     <div class="card mb-3">
       <div class="card-header">
         <h3 class="card-title">Registrar pago</h3>
@@ -195,10 +201,10 @@
         </form>
       </div>
     </div>
-    {% elif venta.estado == 'efectuada' %}
+    {% else %}
     <div class="alert alert-success mb-3">
       <i data-lucide="check-circle" class="me-2"></i>
-      Venta efectuada — completamente pagada.
+      Completamente pagada.
     </div>
     {% endif %}
 
@@ -254,7 +260,7 @@
   </div>
 </div>
 
-{% if venta.estado == 'en_proceso' and saldo > 0 %}
+{% if saldo > 0 %}
 <div class="modal modal-blur fade" id="modalCompletarVenta" tabindex="-1" role="dialog" aria-hidden="true">
   <div class="modal-dialog modal-sm modal-dialog-centered" role="document">
     <div class="modal-content">

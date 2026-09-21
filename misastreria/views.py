@@ -2882,8 +2882,12 @@ def agregar_pago_venta(request, id):
     if request.method != 'POST':
         return HttpResponseNotAllowed(['POST'])
     venta = get_object_or_404(Venta, id=id)
-    if venta.estado == 'efectuada':
-        messages.warning(request, "La venta ya está efectuada.")
+    # El corte lo pone el SALDO, no el estado. Una venta puede crearse como
+    # «efectuada» —la mercadería salió— y quedar con saldo; rechazar por estado
+    # la dejaba sin forma de cobrar el resto. El paso a efectuada lo sigue
+    # disparando registrar_pago_venta cuando el saldo llega a cero.
+    if venta.saldo_pendiente <= 0:
+        messages.warning(request, "La venta ya está completamente pagada.")
         return redirect('detalle_venta', id=venta.id)
     form = PagoVentaForm(request.POST)
     if form.is_valid():
