@@ -379,12 +379,17 @@ window.makeCombobox      = makeCombobox;
 // prendas: array flat de _prenda_items_json (con sku_codigo, sku_nombre, talla, color, condicion, etc.)
 window.makeLocalCombobox = makeLocalCombobox;
 
+// El endpoint SIEMPRE viene del template vía data-endpoint, resuelto con
+// {% url %}. No hay respaldo escrito a mano a propósito: una ruta absoluta acá
+// pierde el prefijo de FORCE_SCRIPT_NAME ('/sistema' en producción), así que
+// funcionaría en local y fallaría sólo en el servidor. Sin respaldo, olvidarse
+// del atributo rompe en local, que es donde se tiene que notar.
 document.querySelectorAll('[data-cliente-search]').forEach(function(input) {
-  makeCombobox(input, input.dataset.clienteSearch, input.dataset.endpoint || '/clientes/buscar/');
+  makeCombobox(input, input.dataset.clienteSearch, input.dataset.endpoint);
 });
 
 document.querySelectorAll('[data-empleado-search]').forEach(function(input) {
-  makeCombobox(input, input.dataset.empleadoSearch, input.dataset.endpoint || '/empleados/buscar/');
+  makeCombobox(input, input.dataset.empleadoSearch, input.dataset.endpoint);
 });
 
 document.querySelectorAll('[data-prenda-inventario-search]').forEach(function(input) {

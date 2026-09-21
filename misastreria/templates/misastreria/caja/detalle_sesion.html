@@ -216,6 +216,7 @@
                           data-bs-toggle="modal"
                           data-bs-target="#modalAnularMov"
                           data-pk="{{ m.pk }}"
+                          data-accion="{% url 'revertir_movimiento_caja' m.pk %}"
                           data-codigo="{{ m.codigo }}"
                           data-monto="{{ m.monto|floatformat:2 }}">
                     <i data-lucide="ban"></i>
@@ -321,8 +322,9 @@
     var btn = e.relatedTarget;
     document.getElementById('modalAnularCodigo').textContent = btn.dataset.codigo;
     document.getElementById('modalAnularMonto').textContent = btn.dataset.monto;
-    document.getElementById('formAnularMov').action =
-      '/caja/movimientos/' + btn.dataset.pk + '/revertir/';
+    // Igual que en prendas: la URL la resuelve Django. Escrita a mano perdía
+    // el prefijo de FORCE_SCRIPT_NAME y la anulación se iba fuera de la app.
+    document.getElementById('formAnularMov').action = btn.dataset.accion;
   });
 </script>
 {% endblock %}

@@ -208,6 +208,7 @@
                 class="btn btn-sm btn-icon btn-ghost-primary"
                 title="Editar"
                 data-edit-item-id="{{ item.id }}"
+                data-edit-item-accion="{% url 'editar_prenda_item' item.id %}"
                 data-edit-item-tipo="{{ item.tipo }}"
                 data-edit-item-ubicacion="{{ item.ubicacion|default:'' }}"
                 data-edit-item-ubicacion-id="{{ item.ubicacion_id|default:'' }}"
@@ -490,7 +491,10 @@
       // Ubicacion: precargar text + hidden
       if (editText)   editText.value   = btn.dataset.editItemUbicacion || '';
       if (editHidden) editHidden.value = btn.dataset.editItemUbicacionId || '';
-      document.getElementById('formEditarItem').action = '/prendas/items/' + id + '/editar/';
+      // La acción viene resuelta por Django: escribirla a mano acá perdía el
+      // prefijo de FORCE_SCRIPT_NAME ('/sistema' en producción) y el submit
+      // caía fuera de la app. En local no se notaba porque no hay prefijo.
+      document.getElementById('formEditarItem').action = btn.dataset.editItemAccion;
       new bootstrap.Modal(document.getElementById('modalEditarItem')).show();
     });
   });
