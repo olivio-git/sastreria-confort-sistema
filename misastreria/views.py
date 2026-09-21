@@ -2922,6 +2922,12 @@ def exportar_recibo_pdf(request, id):
     emp_str = str(venta.empleado) if venta.empleado else '—'
     fec_str = venta.fecha_venta.strftime('%d/%m/%Y')
     cod_str = venta.codigo
+    # El encabezado lleva el estado de la OPERACIÓN, igual que los recibos de
+    # reparación, confección y alquiler. Antes decía 'Completado' escrito fijo:
+    # una venta con saldo pendiente imprimía un recibo que se contradecía solo
+    # —el encabezado afirmaba pago completo y el pie mostraba el saldo—, y el
+    # cliente se llevaba el papel que le daba la razón.
+    est_str = venta.get_estado_display()
 
     left_data = [
         [Paragraph('DATOS DEL CLIENTE', st['sec']), ''],
@@ -2975,7 +2981,7 @@ def exportar_recibo_pdf(request, id):
     right_tbl = _RoundedTable(right_inner)
 
     def on_page(c, doc):
-        _pdf_page_reparacion(c, doc, 'DE VENTA', cod_str, fec_str, '', 'Completado')
+        _pdf_page_reparacion(c, doc, 'DE VENTA', cod_str, fec_str, '', est_str)
 
     doc = SimpleDocTemplate(response, pagesize=A4,
                             topMargin=4.4*cm, bottomMargin=2.4*cm,

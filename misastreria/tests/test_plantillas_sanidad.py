@@ -1,4 +1,4 @@
-"""Chequeos estáticos sobre el árbol de plantillas.
+"""Chequeos estáticos sobre las plantillas y los documentos.
 
 No renderizan nada: leen los archivos. Cubren errores que Django no reporta —
 ni excepción, ni warning, ni traza en el log — y que sólo se descubren mirando
@@ -98,3 +98,40 @@ class UrlsAbsolutasTests(TestCase):
             'URL de la app escrita a mano — pierde el prefijo de '
             'FORCE_SCRIPT_NAME en producción. Usá {% url %} y pasala por un '
             'data-* al JS:\n  ' + '\n  '.join(infractores)))
+
+
+VISTAS = pathlib.Path(__file__).resolve().parent.parent / 'views.py'
+
+
+class EstadoDeRecibosTests(TestCase):
+    def test_ningun_recibo_declara_su_estado_a_mano(self):
+        """El encabezado del recibo muestra el estado REAL de la operación.
+
+        Los cuatro comprobantes comparten `_pdf_page_reparacion`, cuyo último
+        argumento es el estado que sale impreso arriba. Reparación, confección
+        y alquiler le pasan `get_estado_display()`. Venta le pasaba la cadena
+        'Completado', fija.
+
+        El resultado era un papel que se contradecía a sí mismo: el encabezado
+        afirmaba «Completado» mientras el pie del mismo recibo imprimía
+        «Saldo pendiente: Bs. 100,00». Y el cliente se llevaba a su casa la
+        mitad que le daba la razón.
+
+        Ningún test lo veía porque el texto del PDF va comprimido y porque el
+        cálculo del saldo —que estaba bien— se probaba aparte. Se chequea leyendo
+        el código, que es donde la mentira es visible.
+        """
+        fuente = VISTAS.read_text(encoding='utf-8')
+        llamadas = re.findall(r'_pdf_page_reparacion\(\s*c,\s*doc,(.*?)\)\n', fuente)
+        self.assertTrue(llamadas, 'no se encontraron llamadas a _pdf_page_reparacion')
+
+        literales = []
+        for argumentos in llamadas:
+            ultimo = argumentos.rsplit(',', 1)[-1].strip()
+            if re.fullmatch(r"""['"].*['"]""", ultimo):
+                literales.append(ultimo)
+
+        self.assertEqual(literales, [], (
+            'El estado del recibo está escrito a mano: %s. Pasá el estado real '
+            'de la operación (get_estado_display()), o el recibo va a afirmar '
+            'algo que sus propios números desmienten.' % ', '.join(literales)))
