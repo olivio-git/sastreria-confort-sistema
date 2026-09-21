@@ -13,10 +13,13 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase
 
-from misastreria.models import Corte, PrendaInventario, PrendaItem, Venta, VentaItem
+from misastreria.models import (
+    Corte, OrdenProduccion, OrdenProduccionEmpleado, PrendaInventario,
+    PrendaItem, Venta, VentaItem,
+)
 from .factories import (
-    cliente_y_empleado_de_mostrador, make_corte, make_prenda, make_prenda_item,
-    make_venta,
+    cliente_y_empleado_de_mostrador, make_corte, make_empleado,
+    make_orden_produccion, make_prenda, make_prenda_item, make_venta,
 )
 
 
@@ -89,3 +92,30 @@ class LimpiarDatosPruebaTests(TestCase):
     def test_el_proximo_codigo_vuelve_a_prn_001(self):
         self._correr('--confirmar')
         self.assertEqual(PrendaInventario.siguiente_codigo(), 'PRN-001')
+
+    def test_borra_las_ordenes_de_produccion_de_prueba(self):
+        orden = make_orden_produccion(prenda_inventario=self.nueva,
+                                      tipo='stock', cantidad=1)
+        self._correr('--confirmar')
+        self.assertFalse(OrdenProduccion.objects.filter(pk=orden.pk).exists())
+
+    def test_una_orden_con_comision_frena_todo(self):
+        """Una orden con empleados asignados devengó plata de alguien."""
+        orden = make_orden_produccion(prenda_inventario=self.nueva,
+                                      tipo='stock', cantidad=1)
+        OrdenProduccionEmpleado.objects.create(
+            orden=orden, empleado=make_empleado(nombres='Devenga'),
+            responsabilidad='corte', monto_comision_fijo=Decimal('50'))
+
+        with self.assertRaises(CommandError) as ctx:
+            self._correr('--confirmar')
+        self.assertIn('comisión', str(ctx.exception))
+        self.assertTrue(PrendaInventario.objects.filter(codigo='PRN-001').exists(),
+                        'al frenar no tenía que borrar nada')
+
+    def test_no_toca_una_orden_sobre_inventario_archivado(self):
+        orden = make_orden_produccion(prenda_inventario=self.vieja,
+                                      tipo='stock', cantidad=1)
+        self._correr('--confirmar')
+        self.assertTrue(OrdenProduccion.objects.filter(pk=orden.pk).exists(),
+                        'la orden sobre inventario histórico es real')

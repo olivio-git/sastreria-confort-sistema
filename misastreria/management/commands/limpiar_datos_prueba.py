@@ -98,6 +98,8 @@ class Command(BaseCommand):
             alquileres.count(), ', '.join(a.codigo for a in alquileres[:8])))
         self.stdout.write('    cortes a borrar     : %d  %s' % (
             cortes.count(), ', '.join(c.numero for c in cortes[:8])))
+        self.stdout.write('    ordenes a borrar    : %d  %s' % (
+            ordenes.count(), ', '.join(o.codigo for o in ordenes[:8])))
 
         if mezcladas:
             raise CommandError(
@@ -106,11 +108,17 @@ class Command(BaseCommand):
                 + '\n  '.join(mezcladas)
                 + '\n\nQuitales la prenda nueva a mano y volvé a correr el comando.')
 
-        if ordenes.exists():
+        # Una orden con empleados asignados devengó comisión: eso es plata de
+        # alguien y no se borra sin que un humano lo decida. Sin asignaciones,
+        # la orden es sólo el registro de una prueba y cae con el resto.
+        con_comision = [o.codigo for o in ordenes if o.empleados_produccion.exists()]
+        if con_comision:
             raise CommandError(
-                'Hay órdenes de producción apuntando a estos modelos '
-                '(%s). Resolvelas antes: el borrado las dejaría rotas.'
-                % ', '.join(o.codigo for o in ordenes[:5]))
+                'Estas órdenes de producción tienen empleados asignados, así '
+                'que devengaron comisión y no se borran solas:\n  '
+                + '\n  '.join(con_comision)
+                + '\n\nQuitales las asignaciones a mano si de verdad son '
+                  'pruebas, y volvé a correr el comando.')
 
         if not aplicar:
             self.stdout.write(self.style.NOTICE(
@@ -129,6 +137,10 @@ class Command(BaseCommand):
             for alquiler in list(alquileres):
                 alquiler.delete()
 
+            # Antes que las unidades: la orden apunta al MODELO con PROTECT.
+            n_ordenes = ordenes.count()
+            ordenes.delete()
+
             n_items = items.count()
             items.delete()
 
@@ -139,8 +151,8 @@ class Command(BaseCommand):
             cortes.delete()
 
         self.stdout.write(self.style.SUCCESS(
-            '\n  Listo: %d venta(s), %d alquiler(es), %d unidad(es), '
-            '%d modelo(s) y %d corte(s) eliminados.'
-            % (n_ventas, n_alquileres, n_items, n_prendas, n_cortes)))
+            '\n  Listo: %d venta(s), %d alquiler(es), %d orden(es), '
+            '%d unidad(es), %d modelo(s) y %d corte(s) eliminados.'
+            % (n_ventas, n_alquileres, n_ordenes, n_items, n_prendas, n_cortes)))
         self.stdout.write('  El próximo alta será %s.'
                           % PrendaInventario.siguiente_codigo())
