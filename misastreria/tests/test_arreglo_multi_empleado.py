@@ -38,6 +38,7 @@ class GuardarVariosEmpleadosTests(TestCase):
     def _post_venta(self, asignaciones):
         return self.client.post(reverse('crear_venta'), {
             'fecha_venta': date.today().isoformat(), 'estado': 'efectuada',
+            'cliente': str(_cli_mostrador().id), 'empleado': str(_emp_mostrador().id),
             'descuento': '0', 'notas': '',
             'item_prenda_item':       [str(self.item.id)],
             'item_precio':            ['500.00'],
@@ -94,6 +95,7 @@ class GuardarVariosEmpleadosTests(TestCase):
         Perder la comisión de un arreglo en silencio es plata de un empleado."""
         resp = self.client.post(reverse('crear_venta'), {
             'fecha_venta': date.today().isoformat(), 'estado': 'efectuada',
+            'cliente': str(_cli_mostrador().id), 'empleado': str(_emp_mostrador().id),
             'descuento': '0', 'notas': '',
             'item_prenda_item':       [str(self.item.id)],
             'item_precio':            ['500.00'],
@@ -216,3 +218,18 @@ class PreloadNoOfreceArchivadoTests(TestCase):
         self.assertEqual(iniciales, [])
         avisos = ' '.join(m.message for m in resp.context['messages']).lower()
         self.assertIn('no se pudo cargar', avisos)
+
+
+# VentaForm exige cliente y empleado desde que una venta sin cliente deja una
+# deuda sin deudor. Estos tests miden otra cosa, así que usan los de mostrador:
+# el FK `empleado` del servicio no devenga comisión —eso sale de las tablas de
+# asignación—, así que no interfiere con ningún assert.
+from .factories import cliente_y_empleado_de_mostrador as _mostrador
+
+
+def _cli_mostrador():
+    return _mostrador()[0]
+
+
+def _emp_mostrador():
+    return _mostrador()[1]

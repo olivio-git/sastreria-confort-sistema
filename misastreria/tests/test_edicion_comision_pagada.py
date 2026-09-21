@@ -348,6 +348,7 @@ class VentaEdicionComisionPagadaTests(_EdicionComisionPagadaMixin, TestCase):
     def _editar(self, asignaciones):
         data = {
             'fecha_venta': date.today().isoformat(), 'estado': 'efectuada',
+            'cliente': str(_cli_mostrador().id), 'empleado': str(_emp_mostrador().id),
             'descuento': '0', 'notas': '',
             'item_prenda_item':       [str(self.item.id)],
             'item_precio':            ['500.00'],
@@ -459,3 +460,18 @@ class RestriccionAplicacionTests(TestCase):
             AplicacionPagoComision.objects.create(
                 pago=self.pago, monto=Decimal('10'),
                 reparacion_empleado=re_, confeccion_empleado=ce)
+
+
+# VentaForm exige cliente y empleado desde que una venta sin cliente deja una
+# deuda sin deudor. Estos tests miden otra cosa, así que usan los de mostrador:
+# el FK `empleado` del servicio no devenga comisión —eso sale de las tablas de
+# asignación—, así que no interfiere con ningún assert.
+from .factories import cliente_y_empleado_de_mostrador as _mostrador
+
+
+def _cli_mostrador():
+    return _mostrador()[0]
+
+
+def _emp_mostrador():
+    return _mostrador()[1]

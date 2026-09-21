@@ -163,9 +163,10 @@
   </div>
   {% endif %}
 
-  <div class="d-flex justify-content-end gap-2">
+  <div class="d-flex justify-content-end align-items-center gap-2">
+    <span class="text-muted small" id="motivoGuardarBloqueado"></span>
     <a href="{% url 'lista_ventas' %}" class="btn btn-outline-secondary">Cancelar</a>
-    <button type="submit" class="btn btn-primary">
+    <button type="submit" class="btn btn-primary" id="btnGuardarVenta">
       <i data-lucide="check"></i>Guardar
     </button>
   </div>
@@ -487,6 +488,33 @@ window.initConjuntoModal('modalConjuntos', CONJUNTOS, function(conjunto, slotsIn
     alert('Conjunto agregado. Sin existencias: ' + result.faltantes.join(', '));
   }
 });
+
+// ── Cliente y empleado obligatorios ────────────────────────────────────────
+// Sin cliente, una venta con saldo deja una deuda sin deudor. Sin empleado, el
+// trabajo no le devenga comisión a nadie. El botón queda deshabilitado —no
+// oculto— con el motivo al lado: un botón que desaparece hace que la gente
+// llame preguntando dónde está. Esto es comodidad; quien realmente valida es
+// VentaForm, que un POST no puede saltear.
+const btnGuardarVenta = document.getElementById('btnGuardarVenta');
+const motivoBloqueado = document.getElementById('motivoGuardarBloqueado');
+const ocultoCliente   = document.getElementById('id_cliente');
+const ocultoEmpleado  = document.getElementById('id_empleado');
+
+function revisarObligatorios() {
+  if (!btnGuardarVenta) return;
+  const faltan = [];
+  if (ocultoCliente  && !ocultoCliente.value)  faltan.push('cliente');
+  if (ocultoEmpleado && !ocultoEmpleado.value) faltan.push('empleado');
+  btnGuardarVenta.disabled = faltan.length > 0;
+  if (motivoBloqueado) {
+    motivoBloqueado.textContent = faltan.length ? 'Falta ' + faltan.join(' y ') : '';
+  }
+}
+
+[ocultoCliente, ocultoEmpleado].forEach(function(h) {
+  if (h) h.addEventListener('change', revisarObligatorios);
+});
+revisarObligatorios();
 
 // Se arma una sola vez y se reusa: `confirmado` evita que el submit que
 // dispara el propio modal vuelva a frenarse.

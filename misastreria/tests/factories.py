@@ -238,3 +238,26 @@ def asignar_arreglo(item, empleado, monto):
         AlquilerItemEmpleado.objects.create(
             alquiler_item=item, empleado=empleado, monto_comision_fijo=monto)
     return item
+
+
+def cliente_y_empleado_de_mostrador():
+    """Cliente y empleado de relleno para formularios que ahora los exigen.
+
+    `VentaForm` pide cliente y empleado desde que una venta sin cliente deja
+    una deuda sin deudor. Los tests que miden otra cosa —comisiones, stock,
+    cruces de inventario— necesitan pasarlos sin que interfieran con lo que
+    afirman.
+
+    Seguro para los tests de comisión: la comisión sale de las tablas de
+    asignación (VentaItemEmpleado y compañía), no del FK `empleado` del
+    servicio, así que este empleado no devenga nada.
+
+    Se apoya en las factories en vez de `get_or_create` para no repetir acá
+    qué campos exige cada modelo, y busca antes de crear para que llamarla
+    dos veces en el mismo test no choque contra los unique.
+    """
+    cli = (Cliente.objects.filter(nombres='Mostrador').first()
+           or make_cliente(nombres='Mostrador', celular='+59170000002'))
+    emp = (Empleado.objects.filter(nombres='Mostrador').first()
+           or make_empleado(nombres='Mostrador', celular='+59170000001'))
+    return cli, emp

@@ -34,6 +34,8 @@ class GrupoConjuntoVentaTests(TestCase):
         """filas = [(prenda_item, precio, grupo_str)]"""
         data = {
             'fecha_venta': date.today().isoformat(),
+            'cliente': str(_cli_mostrador().id),
+            'empleado': str(_emp_mostrador().id),
             'estado': 'en_proceso',
             'descuento': '0',
             'notas': '',
@@ -150,3 +152,17 @@ class GrupoConjuntoAlquilerTests(TestCase):
         html = self.client.get(reverse('crear_alquiler')).content.decode()
         self.assertIn('nextGrupo: nextGrupo', html)
         self.assertIn('function nextGrupo()', html)
+
+
+# VentaForm exige cliente y empleado desde que una venta sin cliente deja una
+# deuda sin deudor. Este test mide los grupos de conjunto, así que usa los de
+# mostrador: el FK `empleado` del servicio no devenga comisión.
+from .factories import cliente_y_empleado_de_mostrador as _mostrador
+
+
+def _cli_mostrador():
+    return _mostrador()[0]
+
+
+def _emp_mostrador():
+    return _mostrador()[1]

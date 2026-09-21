@@ -219,6 +219,14 @@ class VentaForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # Cliente y empleado son obligatorios aunque el modelo los admita nulos.
+        # El modelo guarda historia —hay registros viejos sin ellos— pero una
+        # venta nueva sin cliente deja una deuda sin deudor, y una sin empleado
+        # no le devenga comisión a nadie. El bloqueo del navegador es sólo
+        # comodidad: el que cuenta es éste, que un POST no puede saltear.
+        for nombre in ('cliente', 'empleado'):
+            if nombre in self.fields:
+                self.fields[nombre].required = True
         for name, field in self.fields.items():
             if 'class' not in field.widget.attrs:
                 is_select = isinstance(field.widget, (forms.Select, forms.SelectMultiple))

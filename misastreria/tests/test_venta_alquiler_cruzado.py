@@ -49,6 +49,8 @@ class GuardarPrendaDeLaOtraLineaTests(TestCase):
 
     def test_se_vende_una_prenda_de_la_linea_de_alquiler(self):
         datos = {'fecha_venta': date.today().isoformat(), 'estado': 'efectuada',
+                 'cliente': str(_cli_mostrador().id),
+                 'empleado': str(_emp_mostrador().id),
                  'descuento': '0', 'notas': ''}
         datos.update(self._fila(self.de_alquiler, '800.00'))
         resp = self.client.post(reverse('crear_venta'), datos)
@@ -103,6 +105,8 @@ class FormularioSinVolcadoDeInventarioTests(TestCase):
 
     def test_editar_embebe_solo_las_prendas_propias(self):
         datos = {'fecha_venta': date.today().isoformat(), 'estado': 'efectuada',
+                 'cliente': str(_cli_mostrador().id),
+                 'empleado': str(_emp_mostrador().id),
                  'descuento': '0', 'notas': '',
                  'item_prenda_item':       [str(self.items[0].id)],
                  'item_precio':            ['100.00'],
@@ -314,3 +318,18 @@ class TopeDeModelosTests(TestCase):
                                  'estado': 'disponible'}).json()['items'][0]
         self.assertEqual(grupo['disponibles'], 30)
         self.assertEqual(len(grupo['unidades']), 30)
+
+
+# VentaForm exige cliente y empleado desde que una venta sin cliente deja una
+# deuda sin deudor. Estos tests miden otra cosa, así que usan los de mostrador:
+# el FK `empleado` del servicio no devenga comisión —eso sale de las tablas de
+# asignación—, así que no interfiere con ningún assert.
+from .factories import cliente_y_empleado_de_mostrador as _mostrador
+
+
+def _cli_mostrador():
+    return _mostrador()[0]
+
+
+def _emp_mostrador():
+    return _mostrador()[1]

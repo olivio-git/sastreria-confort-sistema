@@ -143,6 +143,13 @@ function makeCombobox(input, hiddenId, endpoint) {
     clearBtn.style.display = has ? 'block' : 'none';
     chevron.style.display  = has ? 'none'  : 'block';
     input.style.paddingRight = '2rem';
+    // Avisar que el oculto cambió. Asignar .value por JS no dispara ningún
+    // evento, así que sin esto nadie puede reaccionar a una selección —por
+    // ejemplo, para habilitar el botón de guardar—. `makeLocalCombobox` ya
+    // avisaba; esta versión, la que busca contra el servidor, no, y la
+    // diferencia no tenía motivo. syncUI() es el punto por el que pasan todos
+    // los cambios del oculto: selección, limpieza y tipeo.
+    hidden.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
   clearBtn.addEventListener('click', function() {
