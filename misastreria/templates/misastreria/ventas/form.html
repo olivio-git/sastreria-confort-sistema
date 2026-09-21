@@ -213,6 +213,37 @@
   </tr>
 </template>
 <!-- Modal: Seleccionar conjunto -->
+{% comment %}
+  Aviso de saldo. El sistema permite vender a crédito a propósito, pero hasta
+  ahora un pago corto pasaba sin que nadie lo notara: la venta se registraba,
+  la prenda salía, y el saldo aparecía semanas después. El botón nombra la
+  consecuencia —«Registrar con saldo»— en vez de decir «Aceptar», que se
+  clickea en piloto automático.
+{% endcomment %}
+<div class="modal fade" id="modalSaldoVenta" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title d-flex align-items-center gap-2">
+          <i data-lucide="alert-triangle" class="text-warning"></i>Falta cobrar
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <p class="fs-4 fw-semibold mb-2">Bs <span id="saldoVentaMonto">0,00</span></p>
+        <p class="mb-0">
+          La venta se va a registrar con ese saldo pendiente<span id="saldoVentaCliente"></span>.
+          La prenda sale igual.
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Volver a revisar</button>
+        <button type="button" class="btn btn-warning" id="btnConfirmarSaldoVenta">Registrar con saldo</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal fade" id="modalConjuntos" tabindex="-1">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
@@ -457,12 +488,50 @@ window.initConjuntoModal('modalConjuntos', CONJUNTOS, function(conjunto, slotsIn
   }
 });
 
-document.getElementById('ventaForm').addEventListener('submit', function(e) {
+// Se arma una sola vez y se reusa: `confirmado` evita que el submit que
+// dispara el propio modal vuelva a frenarse.
+let saldoConfirmado = false;
+const formVenta = document.getElementById('ventaForm');
+const modalSaldoEl = document.getElementById('modalSaldoVenta');
+let modalSaldo = null;
+
+function saldoSinCubrir() {
+  if (!pagosContainer) return 0;   // en edición no hay líneas de pago
+  const total = parseFloat(document.getElementById('resTotal').textContent) || 0;
+  let pagado = 0;
+  pagosContainer.querySelectorAll('.pago-monto').forEach(i => { pagado += parseFloat(i.value) || 0; });
+  if (total <= 0) return 0;
+  const falta = total - pagado;
+  // Medio centavo de tolerancia: los montos vienen de sumar floats.
+  return falta > 0.005 ? falta : 0;
+}
+
+if (modalSaldoEl) {
+  document.getElementById('btnConfirmarSaldoVenta').addEventListener('click', function() {
+    saldoConfirmado = true;
+    if (modalSaldo) modalSaldo.hide();
+    formVenta.requestSubmit();
+  });
+}
+
+formVenta.addEventListener('submit', function(e) {
   const validas = [...tbody.querySelectorAll('.item-row')]
     .filter(r => r.querySelector('.item-articulo').value).length;
   if (validas === 0) {
     e.preventDefault();
     alert('Debes agregar al menos una prenda a la venta.');
+    return;
+  }
+
+  const falta = saldoConfirmado ? 0 : saldoSinCubrir();
+  if (falta > 0 && modalSaldoEl) {
+    e.preventDefault();
+    document.getElementById('saldoVentaMonto').textContent = falta.toFixed(2).replace('.', ',');
+    const cliente = document.querySelector('[data-cliente-search]');
+    const nombre = cliente ? cliente.value.trim() : '';
+    document.getElementById('saldoVentaCliente').textContent = nombre ? ' a nombre de ' + nombre : '';
+    if (!modalSaldo) modalSaldo = new bootstrap.Modal(modalSaldoEl);
+    modalSaldo.show();
   }
 });
 </script>
