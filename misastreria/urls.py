@@ -102,6 +102,7 @@ urlpatterns = [
     path('prendas/editar/<int:id>/', views.editar_prenda, name='editar_prenda'),
     path('prendas/eliminar/<int:id>/', views.eliminar_prenda, name='eliminar_prenda'),
     path('prendas/items/<int:id>/editar/', views.editar_prenda_item, name='editar_prenda_item'),
+    path('cortes/buscar/', views.buscar_cortes, name='buscar_cortes'),
     path('prendas/items/<int:id>/baja/', views.baja_prenda_item, name='baja_prenda_item'),
     path('prendas/items/buscar/', views.buscar_prenda_items, name='buscar_prenda_items'),
     path('prendas/items/escanear/', views.escanear_prenda_item, name='escanear_prenda_item'),

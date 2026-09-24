@@ -1,3 +1,4 @@
+import re
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.contrib.auth.models import User
@@ -5,6 +6,11 @@ from django.db import IntegrityError, models, transaction
 from django.core.validators import EmailValidator, RegexValidator, MinValueValidator, MaxValueValidator
 from django.utils import timezone
 from django.core.exceptions import ValidationError
+
+
+MENSAJE_SIGLA_NUMERO = (
+    '«%s» parece un número de corte. El número lo asigna el sistema solo; '
+    'la sigla es un apodo opcional, por ejemplo AZUL-LANA.')
 
 
 def calcular_precio_alquiler(base, min_pct, veces_alquilado, max_usos_efectivo):
@@ -549,6 +555,21 @@ class Corte(models.Model):
 
     def __str__(self):
         return f"{self.numero} · {self.sigla}" if self.sigla else self.numero
+
+    # «C-002», «c002», «C 2»: un número de corte tipeado en la casilla de la
+    # sigla. Pasó en producción: la secretaria buscó dónde poner el número, no
+    # lo encontró —lo asigna el sistema— y lo escribió en la primera casilla.
+    # Quedó el corte «C-001 · C-002», un corte cuyo apodo es otro corte.
+    _SIGLA_CON_FORMA_DE_NUMERO = re.compile(r'^C\s*-?\s*\d+$', re.IGNORECASE)
+
+    @classmethod
+    def sigla_parece_numero(cls, sigla):
+        return bool(cls._SIGLA_CON_FORMA_DE_NUMERO.match((sigla or '').strip()))
+
+    def clean(self):
+        super().clean()
+        if self.sigla_parece_numero(self.sigla):
+            raise ValidationError({'sigla': MENSAJE_SIGLA_NUMERO % self.sigla})
 
     @classmethod
     def mas_reciente_usado(cls):

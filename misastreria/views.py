@@ -4593,15 +4593,11 @@ def detalle_prenda(request, id):
         'baja':       items.filter(estado='baja').count(),
         'total':      items.count(),
     }
-    cortes = Corte.objects.all()
-    corte_default = Corte.mas_reciente_usado()
     return render(request, 'misastreria/prendas/detalle.html', {
         'prenda':  prenda,
         'items':   items,
         'resumen': resumen,
         'ubicacion_opts': list(UbicacionItem.objects.values('id', 'nombre')),
-        'cortes':         cortes,
-        'corte_default_id': corte_default.id if corte_default else '',
     })
 
 
@@ -4619,14 +4615,6 @@ def editar_prenda_item(request, id):
             item.ubicacion = None
         item.condicion = request.POST.get('condicion', item.condicion)
         item.tipo      = request.POST.get('tipo', item.tipo)
-        corte_id = request.POST.get('corte', '').strip()
-        if corte_id:
-            try:
-                item.corte = Corte.objects.get(id=int(corte_id))
-            except (ValueError, Corte.DoesNotExist):
-                item.corte = None
-        else:
-            item.corte = None
         item.notas     = request.POST.get('notas', '').strip()
         max_usos_raw = request.POST.get('max_usos', '').strip()
         if max_usos_raw == '':
@@ -4640,7 +4628,13 @@ def editar_prenda_item(request, id):
                 pass  # silently keep current value on invalid input
         if item.max_usos and item.max_usos <= item.veces_alquilado:
             messages.warning(request, f'El máx. de usos ({item.max_usos}) es menor o igual a los usos actuales ({item.veces_alquilado}).')
-        item.save(update_fields=['ubicacion', 'condicion', 'tipo', 'notas', 'max_usos', 'corte', 'actualizado'])
+        with transaction.atomic():
+            corte, error_corte = _resolver_corte(request.POST)
+            if error_corte:
+                messages.error(request, error_corte)
+                return redirect('detalle_prenda', id=item.prenda_id)
+            item.corte = corte
+            item.save(update_fields=['ubicacion', 'condicion', 'tipo', 'notas', 'max_usos', 'corte', 'actualizado'])
         messages.success(request, f'Item {item.codigo_item} actualizado.')
         return redirect('detalle_prenda', id=item.prenda_id)
     return redirect('detalle_prenda', id=item.prenda_id)
@@ -4690,6 +4684,77 @@ def items_proximos_baja(request):
     })
 
 
+def _resolver_corte(post):
+    """El corte que pide un formulario de unidades: (corte o None, error o None).
+
+    Lo usan «Agregar unidades» y «Editar unidad», que antes resolvían el corte
+    cada uno a su manera —la edición ni siquiera podía crear uno—.
+
+    `corte_modo` elige: 'existente' (el id en `corte`), 'nuevo' (se crea acá,
+    así que hay que llamarla dentro de la transacción del que guarda: si algo
+    falla después, el corte no queda huérfano) o 'ninguno'.
+
+    Sin `corte_modo` se asume el formulario anterior al selector, que mandaba
+    sólo el id: puede quedar una pestaña abierta durante un deploy.
+
+    Un id inexistente deja la unidad sin corte en vez de fallar: es lo que ya
+    hacía, y hay tests que lo fijan.
+    """
+    modo = (post.get('corte_modo') or '').strip()
+    corte_id = (post.get('corte') or '').strip()
+    if not modo:
+        modo = 'existente' if corte_id else 'ninguno'
+
+    if modo == 'existente':
+        if not corte_id:
+            return None, None
+        try:
+            return Corte.objects.get(id=int(corte_id)), None
+        except (ValueError, Corte.DoesNotExist):
+            return None, None
+
+    if modo == 'nuevo':
+        sigla = (post.get('nuevo_corte_sigla') or '').strip()
+        if Corte.sigla_parece_numero(sigla):
+            from .models import MENSAJE_SIGLA_NUMERO
+            return None, MENSAJE_SIGLA_NUMERO % sigla
+        # Corte.save() normaliza la sigla y recorta sigla/tela a su largo.
+        return Corte.objects.create(
+            sigla=sigla, tela=post.get('nuevo_corte_tela', '')), None
+
+    return None, None
+
+
+@login_required
+def buscar_cortes(request):
+    """Cortes para el selector, buscando en el servidor.
+
+    El selector era un <select> con todos los cortes: con cincuenta ya no se
+    puede usar, y cada página los cargaba enteros. Devuelve los más recientes
+    primero, con cuántas unidades tiene cada uno —ayuda a reconocer una tanda—
+    y el número que tendría un corte nuevo, para mostrarlo antes de crearlo.
+    """
+    LIMITE = 30
+    q = request.GET.get('q', '').strip()
+    qs = Corte.objects.annotate(unidades=Count('items')).order_by('-id')
+    if q:
+        qs = qs.filter(Q(numero__icontains=q) | Q(sigla__icontains=q) | Q(tela__icontains=q))
+    filas = list(qs[:LIMITE + 1])
+    return JsonResponse({
+        'resultados': [{
+            'id': c.id,
+            'numero': c.numero,
+            'sigla': c.sigla,
+            'tela': c.tela,
+            'fecha': c.fecha.strftime('%d/%m/%Y') if c.fecha else '',
+            'unidades': c.unidades,
+            'texto': str(c),
+        } for c in filas[:LIMITE]],
+        'hay_mas': len(filas) > LIMITE,
+        'siguiente': Corte.siguiente_numero(),
+    })
+
+
 @login_required
 def agregar_items_prenda(request, id):
     prenda = get_object_or_404(PrendaInventario, id=id)
@@ -4711,27 +4776,13 @@ def agregar_items_prenda(request, id):
         except (ValueError, UbicacionItem.DoesNotExist):
             pass
 
-    # Corte: "existente" reusa un Corte ya creado, "nuevo" crea el siguiente
-    # C-### dentro de la misma transacción que las unidades, "ninguno" (o
-    # cualquier valor no reconocido, p. ej. si no hay cortes todavía) deja
-    # las unidades sin corte.
-    corte_modo = request.POST.get('corte_modo', 'ninguno').strip()
-    corte_obj = None
-
     with transaction.atomic():
-        if corte_modo == 'existente':
-            corte_id = request.POST.get('corte', '').strip()
-            if corte_id:
-                try:
-                    corte_obj = Corte.objects.get(id=int(corte_id))
-                except (ValueError, Corte.DoesNotExist):
-                    corte_obj = None
-        elif corte_modo == 'nuevo':
-            # Corte.save() normaliza y recorta sigla/tela a su max_length.
-            corte_obj = Corte.objects.create(
-                sigla=request.POST.get('nuevo_corte_sigla', ''),
-                tela=request.POST.get('nuevo_corte_tela', ''),
-            )
+        # El corte nuevo se crea acá adentro, junto con las unidades: si algo
+        # falla, no queda un corte vacío en la lista.
+        corte_obj, error_corte = _resolver_corte(request.POST)
+        if error_corte:
+            messages.error(request, error_corte)
+            return redirect('detalle_prenda', id=prenda.id)
 
         for _ in range(cantidad):
             pi = PrendaItem.objects.create(

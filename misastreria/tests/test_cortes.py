@@ -7,7 +7,10 @@ cortadas de un mismo rollo, sin importar a qué SKU pertenezcan. Se cubre:
   - normalización de la sigla
   - __str__
   - alta en lote (agregar_items_prenda) con corte existente / nuevo / ninguno
-  - default de "corte existente" = el usado por la última unidad registrada
+  - el formulario arranca en "sin corte" (antes sugería el último usado)
+  - una sigla con forma de número de corte se rechaza
+  - "Editar unidad" puede crear un corte nuevo
+  - buscador de cortes para el selector
   - datos de etiqueta (corte / corte_sigla), vacíos cuando no hay corte
   - filtro de inventario por corte
   - PROTECT al borrar un corte con unidades asociadas
@@ -167,13 +170,28 @@ class AgregarItemsPrendaTests(TestCase):
         items = PrendaItem.objects.filter(prenda=self.prenda)
         self.assertTrue(all(i.corte_id is None for i in items))
 
-    def test_modal_ofrece_como_default_el_ultimo_corte_usado(self):
-        otro_prenda = make_prenda(nombre='Pantalón')
-        viejo = make_corte()
-        nuevo = make_corte()
-        make_prenda_item(prenda=otro_prenda, corte=nuevo)
-        resp = self.client.get(reverse('detalle_prenda', args=[self.prenda.id]))
-        self.assertEqual(resp.context['corte_default_id'], nuevo.id)
+    def test_el_formulario_arranca_sin_corte(self):
+        """Antes venía preseleccionado el último corte usado.
+
+        Así terminaron 13 prendas —corbatas, camisas, sacos, zapatos— en el
+        mismo corte: nadie lo eligió, lo heredaron. Con «sin corte» por
+        defecto, no mirar deja el campo vacío, que es el error barato.
+        """
+        make_prenda_item(prenda=make_prenda(nombre='Pantalón'), corte=make_corte())
+        html = self.client.get(
+            reverse('detalle_prenda', args=[self.prenda.id])).content.decode()
+        self.assertIn('id="agr_corte_picker"', html)
+        bloque = html[html.index('id="agr_corte_picker"'):]
+        bloque = bloque[:bloque.index('data-corte-abrir')]
+        self.assertIn('name="corte_modo" value="ninguno"', bloque)
+        self.assertIn('name="corte" value=""', bloque)
+
+    def test_sigla_con_forma_de_numero_no_crea_nada(self):
+        resp = self._post(corte_modo='nuevo', nuevo_corte_sigla='C-002', follow=True)
+        self.assertContains(resp, 'parece un número de corte')
+        self.assertFalse(Corte.objects.exists(), 'no tenía que crear el corte')
+        self.assertFalse(PrendaItem.objects.filter(prenda=self.prenda).exists(),
+                         'no tenía que crear las unidades')
 
 
 class EditarCorteDeUnidadTests(TestCase):
@@ -414,3 +432,113 @@ class RecorteDeLongitudTests(TestCase):
         corte = PrendaItem.objects.get(prenda=prenda).corte
         self.assertEqual(corte.sigla, 'X' * 12)
         self.assertEqual(corte.tela, 'y' * 100)
+
+
+class SiglaConFormaDeNumeroTests(TestCase):
+    """«C-001 · C-002»: la secretaria escribió el número en la casilla de la sigla."""
+
+    def test_detecta_las_variantes(self):
+        for sigla in ('C-002', 'c-002', 'C002', 'c2', 'C 2', ' C-10 '):
+            with self.subTest(sigla=sigla):
+                self.assertTrue(Corte.sigla_parece_numero(sigla))
+
+    def test_deja_pasar_siglas_normales(self):
+        for sigla in ('', 'AZUL-LANA', 'SG12', 'CASIMIR', 'C-AZUL', '12', 'CUELLO2'):
+            with self.subTest(sigla=sigla):
+                self.assertFalse(Corte.sigla_parece_numero(sigla))
+
+    def test_clean_la_rechaza(self):
+        from django.core.exceptions import ValidationError
+        corte = Corte(sigla='C-002')
+        with self.assertRaises(ValidationError):
+            corte.full_clean(exclude=['numero'])
+
+
+class EditarUnidadCreaCorteTests(TestCase):
+    """Desde «Editar unidad» ahora se puede crear un corte, no sólo elegirlo."""
+
+    def setUp(self):
+        self.client.force_login(make_user())
+        self.item = make_prenda_item()
+
+    def _post(self, **data):
+        payload = {'condicion': 'nueva', 'tipo': 'alquiler'}
+        payload.update(data)
+        return self.client.post(
+            reverse('editar_prenda_item', args=[self.item.id]), payload, follow=True)
+
+    def test_crea_el_siguiente_corte_y_lo_asigna(self):
+        make_corte()  # C-001 ya existe
+        self._post(corte_modo='nuevo', nuevo_corte_sigla='azul-lana',
+                   nuevo_corte_tela='Casimir azul')
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.corte.numero, 'C-002')
+        self.assertEqual(self.item.corte.sigla, 'AZUL-LANA')
+        self.assertEqual(self.item.corte.tela, 'Casimir azul')
+
+    def test_sigla_con_forma_de_numero_no_guarda_nada(self):
+        self.item.notas = 'antes'
+        self.item.save(update_fields=['notas'])
+        resp = self._post(corte_modo='nuevo', nuevo_corte_sigla='C-002', notas='después')
+        self.assertContains(resp, 'parece un número de corte')
+        self.item.refresh_from_db()
+        self.assertIsNone(self.item.corte_id)
+        self.assertEqual(self.item.notas, 'antes', 'no tenía que guardar la edición')
+        self.assertFalse(Corte.objects.exists())
+
+    def test_modo_existente(self):
+        corte = make_corte()
+        self._post(corte_modo='existente', corte=corte.id)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.corte_id, corte.id)
+
+    def test_modo_ninguno_quita_el_corte(self):
+        self.item.corte = make_corte()
+        self.item.save(update_fields=['corte'])
+        self._post(corte_modo='ninguno', corte='')
+        self.item.refresh_from_db()
+        self.assertIsNone(self.item.corte_id)
+
+
+class BuscarCortesTests(TestCase):
+
+    def setUp(self):
+        self.client.force_login(make_user())
+
+    def _get(self, q=''):
+        return self.client.get(reverse('buscar_cortes'), {'q': q}).json()
+
+    def test_devuelve_los_mas_nuevos_primero_con_sus_unidades(self):
+        viejo = make_corte(sigla='AZUL')
+        nuevo = make_corte(sigla='BEIGE')
+        make_prenda_item(corte=nuevo)
+        make_prenda_item(corte=nuevo)
+        data = self._get()
+        self.assertEqual([c['numero'] for c in data['resultados']],
+                         [nuevo.numero, viejo.numero])
+        self.assertEqual(data['resultados'][0]['unidades'], 2)
+        self.assertEqual(data['resultados'][1]['unidades'], 0)
+
+    def test_busca_por_numero_sigla_y_tela(self):
+        make_corte(sigla='AZUL', tela='Casimir')
+        make_corte(sigla='BEIGE', tela='Lino')
+        self.assertEqual(len(self._get('azul')['resultados']), 1)
+        self.assertEqual(len(self._get('lino')['resultados']), 1)
+        self.assertEqual(len(self._get('C-00')['resultados']), 2)
+
+    def test_informa_el_numero_del_proximo_corte(self):
+        make_corte()
+        make_corte()
+        self.assertEqual(self._get()['siguiente'], 'C-003')
+
+    def test_avisa_cuando_hay_mas_de_los_que_muestra(self):
+        for _ in range(31):
+            make_corte()
+        data = self._get()
+        self.assertEqual(len(data['resultados']), 30)
+        self.assertTrue(data['hay_mas'])
+
+    def test_pide_login(self):
+        self.client.logout()
+        resp = self.client.get(reverse('buscar_cortes'))
+        self.assertEqual(resp.status_code, 302)

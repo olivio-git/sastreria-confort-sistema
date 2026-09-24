@@ -215,7 +215,8 @@
                 data-edit-item-condicion="{{ item.condicion }}"
                 data-edit-item-notas="{{ item.notas|default:'' }}"
                 data-edit-item-maxusos="{{ item.max_usos|default:'' }}"
-                data-edit-item-corte="{{ item.corte_id|default:'' }}">
+                data-edit-item-corte="{{ item.corte_id|default:'' }}"
+                data-edit-item-corte-texto="{{ item.corte|default:'' }}">
                 <i data-lucide="pencil"></i>
               </button>
               {% if item.estado == 'disponible' %}
@@ -308,13 +309,17 @@
             <div class="form-text">Máx. alquileres antes de baja sugerida</div>
           </div>
           <div class="mb-3">
-            <label for="edit_corte" class="form-label">Corte <span class="text-muted small">(opcional)</span></label>
-            <select id="edit_corte" name="corte" class="form-select">
-              <option value="">Sin corte</option>
-              {% for c in cortes %}
-                <option value="{{ c.id }}">{{ c }}</option>
-              {% endfor %}
-            </select>
+            <label class="form-label">Corte <span class="text-muted small">(opcional)</span></label>
+            <div class="d-flex align-items-center gap-2" data-corte-picker id="edit_corte_picker">
+              <input type="hidden" name="corte_modo" value="ninguno">
+              <input type="hidden" name="corte" value="">
+              <input type="hidden" name="nuevo_corte_sigla" value="">
+              <input type="hidden" name="nuevo_corte_tela" value="">
+              <div class="form-control text-truncate text-muted" data-corte-texto>Sin corte</div>
+              <button type="button" class="btn btn-outline-secondary flex-shrink-0" data-corte-abrir>
+                <i data-lucide="search"></i>Elegir
+              </button>
+            </div>
           </div>
           <div class="mb-3">
             <label for="edit_notas" class="form-label">Notas</label>
@@ -385,36 +390,16 @@
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">Corte <span class="text-muted">(opcional)</span></label>
-
-            <div class="form-check">
-              <input class="form-check-input" type="radio" name="corte_modo" id="agr_corte_modo_existente"
-                     value="existente" {% if cortes %}checked{% endif %} {% if not cortes %}disabled{% endif %}>
-              <label class="form-check-label" for="agr_corte_modo_existente">Usar corte existente</label>
-            </div>
-            <div id="agr_corte_existente_wrap" class="ms-4 mb-2" {% if not cortes %}style="display:none"{% endif %}>
-              <select class="form-select form-select-sm" id="agr_corte" name="corte">
-                {% for c in cortes %}
-                  <option value="{{ c.id }}" {% if c.id == corte_default_id %}selected{% endif %}>{{ c }}</option>
-                {% endfor %}
-              </select>
-            </div>
-
-            <div class="form-check">
-              <input class="form-check-input" type="radio" name="corte_modo" id="agr_corte_modo_nuevo" value="nuevo">
-              <label class="form-check-label" for="agr_corte_modo_nuevo">Nuevo corte</label>
-            </div>
-            <div id="agr_corte_nuevo_wrap" class="ms-4 mb-2" style="display:none">
-              <input type="text" class="form-control form-control-sm mb-1" id="agr_nuevo_corte_sigla"
-                     name="nuevo_corte_sigla" placeholder="Sigla (opcional, ej. AZUL-LANA)" maxlength="12">
-              <input type="text" class="form-control form-control-sm" id="agr_nuevo_corte_tela"
-                     name="nuevo_corte_tela" placeholder="Tela / color (opcional)" maxlength="100">
-            </div>
-
-            <div class="form-check">
-              <input class="form-check-input" type="radio" name="corte_modo" id="agr_corte_modo_ninguno"
-                     value="ninguno" {% if not cortes %}checked{% endif %}>
-              <label class="form-check-label" for="agr_corte_modo_ninguno">Sin corte</label>
+            <label class="form-label">Corte <span class="text-muted small">(opcional)</span></label>
+            <div class="d-flex align-items-center gap-2" data-corte-picker id="agr_corte_picker">
+              <input type="hidden" name="corte_modo" value="ninguno">
+              <input type="hidden" name="corte" value="">
+              <input type="hidden" name="nuevo_corte_sigla" value="">
+              <input type="hidden" name="nuevo_corte_tela" value="">
+              <div class="form-control text-truncate text-muted" data-corte-texto>Sin corte</div>
+              <button type="button" class="btn btn-outline-secondary flex-shrink-0" data-corte-abrir>
+                <i data-lucide="search"></i>Elegir
+              </button>
             </div>
           </div>
           <div class="mb-3">
@@ -455,10 +440,79 @@
     </div>
   </div>
 </div>
+{% comment %}
+  Selector de corte. Reemplaza al <select> con todos los cortes, que con
+  cincuenta ya no se podía usar: busca en el servidor y muestra una tabla para
+  comparar —número, sigla, tela, fecha, unidades—, que es lo que hace falta para
+  reconocer una tanda. Lo comparten «Agregar unidades» y «Editar unidad».
+
+  El corte nuevo NO se crea al tocar el botón: se anota en el formulario y se
+  crea al guardarlo, en la misma transacción que las unidades. Así, armar uno
+  y cancelar no deja un corte vacío en esta lista.
+{% endcomment %}
+<div class="modal fade" id="modalCorte" tabindex="-1" data-endpoint="{% url 'buscar_cortes' %}">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title d-flex align-items-center gap-2">
+          <i data-lucide="scissors"></i>Elegir corte
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-header py-2">
+        <input type="search" class="form-control" id="corteBuscar"
+               placeholder="Buscar por número, sigla o tela…" autocomplete="off">
+      </div>
+      <div class="modal-body p-0">
+        <table class="table table-sm table-hover table-vcenter mb-0 sc-tabla-cortes">
+          <thead class="sticky-top">
+            <tr>
+              <th>Número</th><th>Sigla</th><th>Tela</th><th>Fecha</th>
+              <th class="text-end">Unid.</th>
+            </tr>
+          </thead>
+          <tbody id="corteFilas"></tbody>
+        </table>
+        <div class="text-muted small text-center py-3" id="corteVacio" style="display:none"></div>
+      </div>
+      <div class="modal-footer flex-column align-items-stretch gap-2">
+        <div id="corteNuevoWrap" style="display:none">
+          <div class="small mb-2">
+            Se va a crear el <strong id="corteSiguiente">—</strong>.
+            <span class="text-muted">El número lo pone el sistema.</span>
+          </div>
+          <div class="row g-2">
+            <div class="col-md-5">
+              <input type="text" class="form-control form-control-sm" id="corteNuevoSigla"
+                     maxlength="12" placeholder="Sigla / apodo (opcional, ej. AZUL-LANA)">
+            </div>
+            <div class="col-md-5">
+              <input type="text" class="form-control form-control-sm" id="corteNuevoTela"
+                     maxlength="100" placeholder="Tela / color (opcional)">
+            </div>
+            <div class="col-md-2 d-grid">
+              <button type="button" class="btn btn-primary btn-sm" id="corteNuevoUsar">Usar</button>
+            </div>
+          </div>
+          <div class="text-danger small mt-1" id="corteNuevoError" style="display:none"></div>
+        </div>
+        <div class="d-flex align-items-center justify-content-between gap-2">
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="corteSinCorte">Sin corte</button>
+          <span class="text-muted small" id="corteHayMas"></span>
+          <button type="button" class="btn btn-outline-primary btn-sm" id="corteNuevoToggle">
+            <i data-lucide="plus"></i>Crear corte nuevo
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
 {% load static %}
+<script src="{% static 'js/selector_corte.js' %}"></script>
 <script>
 (function() {
   var opts = {{ ubicacion_opts|default:"[]"|safe }}.map(function(u) {
@@ -486,7 +540,10 @@
       document.getElementById('edit_tipo').value      = btn.dataset.editItemTipo || 'alquiler';
       document.getElementById('edit_condicion').value = btn.dataset.editItemCondicion || 'nueva';
       document.getElementById('edit_max_usos').value  = btn.dataset.editItemMaxusos || '';
-      document.getElementById('edit_corte').value     = btn.dataset.editItemCorte || '';
+      window.selectorCorteSetear(document.getElementById('edit_corte_picker'),
+        btn.dataset.editItemCorte
+          ? { modo: 'existente', id: btn.dataset.editItemCorte, texto: btn.dataset.editItemCorteTexto }
+          : { modo: 'ninguno' });
       document.getElementById('edit_notas').value     = btn.dataset.editItemNotas || '';
       // Ubicacion: precargar text + hidden
       if (editText)   editText.value   = btn.dataset.editItemUbicacion || '';
@@ -496,20 +553,6 @@
       // caía fuera de la app. En local no se notaba porque no hay prefijo.
       document.getElementById('formEditarItem').action = btn.dataset.editItemAccion;
       new bootstrap.Modal(document.getElementById('modalEditarItem')).show();
-    });
-  });
-
-  // Toggle del selector de corte en "Agregar items": sólo se muestra el
-  // select de "corte existente" o los inputs de "nuevo corte" según el modo
-  // elegido — el resto queda oculto para no confundir con campos que no
-  // aplican a esa elección.
-  var agrCorteExistenteWrap = document.getElementById('agr_corte_existente_wrap');
-  var agrCorteNuevoWrap     = document.getElementById('agr_corte_nuevo_wrap');
-  document.querySelectorAll('input[name="corte_modo"]').forEach(function(radio) {
-    radio.addEventListener('change', function() {
-      var modo = radio.value;
-      agrCorteExistenteWrap.style.display = modo === 'existente' ? '' : 'none';
-      agrCorteNuevoWrap.style.display     = modo === 'nuevo'     ? '' : 'none';
     });
   });
 

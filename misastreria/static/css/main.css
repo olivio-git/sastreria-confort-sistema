@@ -853,3 +853,9 @@ svg.lucide { flex-shrink: 0; vertical-align: middle; }
 [data-bs-theme="dark"] .sc-fila-pendiente > td { background-color: rgba(245, 158, 11, .14); color: var(--tblr-body-color); }
 [data-bs-theme="dark"] .sc-fila-parcial   > td { background-color: rgba(6, 182, 212, .16); color: var(--tblr-body-color); }
 [data-bs-theme="dark"] .sc-fila-pagada    > td { background-color: rgba(16, 185, 129, .14); color: var(--tblr-body-color); }
+
+/* Selector de corte (prendas/detalle.html): filas elegibles con un clic. */
+.sc-tabla-cortes tbody tr { cursor: pointer; }
+.sc-tabla-cortes tbody tr:hover > td { background-color: rgba(37, 99, 235, .12); }
+.sc-tabla-cortes th:first-child, .sc-tabla-cortes td:first-child { padding-left: 1rem; }
+.sc-tabla-cortes th:last-child,  .sc-tabla-cortes td:last-child  { padding-right: 1rem; }
