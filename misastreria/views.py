@@ -1439,6 +1439,10 @@ def crear_modelo_confeccion(request):
 def buscar_prenda_inventario(request):
     q = request.GET.get('q', '').strip()
     qs = PrendaInventario.objects.filter(estado='ACT').order_by('nombre')
+    # «Mover a otro SKU» sólo acepta destinos del catálogo numerado: ni los
+    # SKU apartados (TMP-) que se están vaciando, ni los archivados (H-).
+    if request.GET.get('solo_catalogo'):
+        qs = qs.filter(codigo__startswith=PrendaInventario.PREFIJO + '-')
     if q:
         qs = qs.filter(
             Q(nombre__icontains=q) | Q(codigo__icontains=q) |
@@ -4638,6 +4642,69 @@ def editar_prenda_item(request, id):
         messages.success(request, f'Item {item.codigo_item} actualizado.')
         return redirect('detalle_prenda', id=item.prenda_id)
     return redirect('detalle_prenda', id=item.prenda_id)
+
+
+@login_required
+def mover_prenda_item(request, id):
+    """Pasa una unidad a otro SKU; sus reservas, alquileres y ventas la siguen.
+
+    Nace para ordenar el catálogo: la secretaria cargó cada prenda a medida
+    que salía para un cliente, y los dueños quieren numerar desde PRN-001 en
+    orden —todos los sacos negros primero—. Las 14 ya cargadas se apartan a
+    TMP- y, al llegar a cada una mientras etiquetan, se MUEVEN al SKU correcto
+    en vez de cargarse otra vez. Cargarla de nuevo la duplicaría: quedaría una
+    reservada y otra «disponible» que se le puede alquilar a otra persona.
+
+    Sirve también para corregir una unidad cargada en el SKU equivocado (una
+    talla 52 que era 50): talla, color y precio viven en el SKU, no en la
+    unidad, así que la corrección ES moverla.
+
+    Las operaciones apuntan a la unidad por id y guardan su propio precio, así
+    que moverla no cambia ninguna reserva ni ningún importe. Lo que cambia es
+    el código: toma el siguiente del SKU destino (PRN-004-ITM-03).
+    """
+    item = get_object_or_404(PrendaItem.objects.select_related('prenda'), id=id)
+    origen = item.prenda
+    if request.method != 'POST':
+        return redirect('detalle_prenda', id=origen.id)
+
+    if origen.codigo.startswith('H-'):
+        messages.error(request, 'Las unidades archivadas (H-) son historia y no se mueven.')
+        return redirect('detalle_prenda', id=origen.id)
+
+    try:
+        destino = PrendaInventario.objects.get(id=int(request.POST.get('destino', '')))
+    except (TypeError, ValueError, PrendaInventario.DoesNotExist):
+        messages.error(request, 'Elegí el SKU al que querés mover la unidad.')
+        return redirect('detalle_prenda', id=origen.id)
+
+    if destino.id == origen.id:
+        messages.error(request, f'{item.codigo_item} ya pertenece a {destino.codigo}.')
+        return redirect('detalle_prenda', id=origen.id)
+    if (destino.estado != 'ACT'
+            or not destino.codigo.startswith(PrendaInventario.PREFIJO + '-')):
+        messages.error(request, f'Sólo se puede mover a un SKU activo del catálogo '
+                                f'({PrendaInventario.PREFIJO}-…). {destino.codigo} no lo es.')
+        return redirect('detalle_prenda', id=origen.id)
+
+    with transaction.atomic():
+        codigo_viejo = item.codigo_item
+        item.prenda = destino
+        item.codigo_item = PrendaItem.siguiente_codigo(destino)
+        item.save(update_fields=['prenda', 'codigo_item', 'actualizado'])
+
+        # Un SKU apartado que se quedó sin unidades ya cumplió su función.
+        origen_borrado = None
+        if (origen.codigo.startswith(PrendaInventario.PREFIJO_APARTADO + '-')
+                and not origen.items.exists()):
+            origen_borrado = origen.codigo
+            origen.delete()
+
+    mensaje = f'{codigo_viejo} ahora es {item.codigo_item} ({destino}).'
+    if origen_borrado:
+        mensaje += f' {origen_borrado} quedó vacío y se eliminó.'
+    messages.success(request, mensaje)
+    return redirect('detalle_prenda', id=destino.id)
 
 
 @login_required

@@ -219,6 +219,16 @@
                 data-edit-item-corte-texto="{{ item.corte|default:'' }}">
                 <i data-lucide="pencil"></i>
               </button>
+              {% if prenda.codigo|slice:":2" != "H-" %}
+              <button type="button"
+                class="btn btn-sm btn-icon btn-ghost-secondary"
+                title="Mover a otro SKU"
+                data-mover-item-codigo="{{ item.codigo_item }}"
+                data-mover-item-estado="{{ item.get_estado_display }}"
+                data-mover-accion="{% url 'mover_prenda_item' item.id %}">
+                <i data-lucide="arrow-right-left"></i>
+              </button>
+              {% endif %}
               {% if item.estado == 'disponible' %}
                 {% if item.tipo == 'alquiler' %}
                 <a href="{% url 'crear_alquiler' %}?item={{ item.id }}"
@@ -441,6 +451,44 @@
   </div>
 </div>
 {% comment %}
+  Mover una unidad a otro SKU. Talla, color y precio viven en el SKU, así que
+  corregir una unidad cargada en el SKU equivocado es moverla. Las reservas y
+  ventas la siguen: apuntan a la unidad, no al código.
+{% endcomment %}
+<div class="modal fade" id="modalMoverItem" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" id="formMoverItem">
+        {% csrf_token %}
+        <div class="modal-header">
+          <h5 class="modal-title d-flex align-items-center gap-2">
+            <i data-lucide="arrow-right-left"></i>Mover <span id="moverItemCodigo"></span>
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <label class="form-label">SKU de destino</label>
+          <div style="position:relative">
+            <input type="text" class="form-control" id="moverDestinoTexto"
+                   placeholder="Buscar por código, nombre, talla o color…" autocomplete="off">
+            <input type="hidden" name="destino" id="moverDestino" value="">
+          </div>
+          <div class="form-hint mt-2">
+            La unidad toma el siguiente código del SKU elegido. Estado actual:
+            <strong id="moverItemEstado"></strong>. Si tiene una reserva, un
+            alquiler o una venta, la sigue sin cambios.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="btnMoverItem" disabled>Mover</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% comment %}
   Selector de corte. Reemplaza al <select> con todos los cortes, que con
   cincuenta ya no se podía usar: busca en el servidor y muestra una tabla para
   comparar —número, sigla, tela, fecha, unidades—, que es lo que hace falta para
@@ -553,6 +601,31 @@
       // caía fuera de la app. En local no se notaba porque no hay prefijo.
       document.getElementById('formEditarItem').action = btn.dataset.editItemAccion;
       new bootstrap.Modal(document.getElementById('modalEditarItem')).show();
+    });
+  });
+
+  // Mover unidad a otro SKU. El buscador pide sólo el catálogo numerado
+  // (?solo_catalogo=1): ni los SKU apartados TMP- ni los archivados H-.
+  var modalMover   = document.getElementById('modalMoverItem');
+  var moverTexto   = document.getElementById('moverDestinoTexto');
+  var moverOculto  = document.getElementById('moverDestino');
+  var btnMover     = document.getElementById('btnMoverItem');
+  var modalMoverBs = null;
+  makeCombobox(moverTexto, 'moverDestino',
+               '{% url "buscar_prenda_inventario" %}?solo_catalogo=1');
+  moverOculto.addEventListener('change', function() {
+    btnMover.disabled = !moverOculto.value;
+  });
+  document.querySelectorAll('[data-mover-accion]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.getElementById('formMoverItem').action = btn.dataset.moverAccion;
+      document.getElementById('moverItemCodigo').textContent = btn.dataset.moverItemCodigo;
+      document.getElementById('moverItemEstado').textContent = btn.dataset.moverItemEstado;
+      moverTexto.value = '';
+      moverOculto.value = '';
+      btnMover.disabled = true;
+      if (!modalMoverBs) modalMoverBs = new bootstrap.Modal(modalMover);
+      modalMoverBs.show();
     });
   });
 

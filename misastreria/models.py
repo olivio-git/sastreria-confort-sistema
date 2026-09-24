@@ -416,6 +416,10 @@ class PrendaInventario(models.Model):
         return self.items.filter(estado='disponible').count()
 
     PREFIJO = 'PRN'
+    # SKU apartados de la numeración mientras se reordena el catálogo: no
+    # cuentan para siguiente_codigo(), así que el próximo alta vuelve a PRN-001.
+    # Ver el comando `apartar_prendas` y la vista `mover_prenda_item`.
+    PREFIJO_APARTADO = 'TMP'
 
     @classmethod
     def siguiente_codigo(cls):
