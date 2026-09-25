@@ -666,6 +666,64 @@ def etiquetas_prenda_pdf(request, id):
         return _sin_plantilla(request)
 
 
+def _zpl_de_lote(lote):
+    """El ZPL de un lote de etiquetas con la plantilla activa, para el puente.
+
+    Los botones de imprimir de la prenda y de cada unidad generaban un PDF, que
+    el navegador mandaba a la térmica por el driver de Windows. Ese camino no
+    usa la calibración guardada en el sistema —encuadre, oscuridad,
+    velocidad—, el driver agrega sus márgenes y su tamaño de hoja, y rasteriza
+    el texto a 203 dpi: la etiqueta salía corrida, recortada a la izquierda y
+    abajo, y con la letra serruchada. El diseñador, en cambio, ya imprimía por
+    ZPL y salía bien.
+
+    Ahora todos imprimen igual: el servidor arma el ZPL con la misma plantilla
+    y la misma configuración que el diseñador, y el navegador se lo pasa al
+    puente. El PDF queda sólo para mirar.
+
+    Devuelve un JsonResponse `{ok, zpl}` o `{ok: False, error}`.
+    """
+    try:
+        plantilla = _plantilla_activa()
+    except SinPlantilla:
+        return JsonResponse({'ok': False, 'error':
+            'No hay ninguna plantilla de etiqueta cargada. Creá una en el diseñador.'},
+            status=400)
+    try:
+        for valores in lote:
+            etiquetas.validar_elementos(plantilla.elementos, valores, plantilla.ancho_puntos)
+    except etiquetas.DatoNoImprimible as exc:
+        return JsonResponse({'ok': False, 'error': str(exc)}, status=400)
+    zpl = etiquetas_zpl.render_lote(
+        plantilla.elementos,
+        ancho=plantilla.ancho_puntos,
+        alto=plantilla.alto_puntos,
+        lote=lote,
+        config=ConfiguracionImpresora.cargar(),
+    )
+    return JsonResponse({'ok': True, 'zpl': zpl, 'cantidad': len(lote)})
+
+
+@login_required
+def zpl_etiqueta_item(request, id):
+    """ZPL de la etiqueta de UNA unidad, para imprimirla por el puente."""
+    item = get_object_or_404(
+        PrendaItem.objects.select_related('prenda', 'ubicacion', 'corte'), id=id)
+    return _zpl_de_lote([etiquetas.datos_de_item(item)])
+
+
+@login_required
+def zpl_etiquetas_prenda(request, id):
+    """ZPL de las etiquetas de todas las unidades activas de un SKU."""
+    prenda = get_object_or_404(PrendaInventario, id=id)
+    items = list(prenda.items.exclude(estado='baja')
+                 .select_related('prenda', 'ubicacion', 'corte').order_by('codigo_item'))
+    if not items:
+        return JsonResponse({'ok': False, 'error':
+            'No hay unidades activas para imprimir.'}, status=400)
+    return _zpl_de_lote([etiquetas.datos_de_item(it) for it in items])
+
+
 @login_required
 def etiqueta_reparacion_pdf(request, id):
     from .models import Reparacion

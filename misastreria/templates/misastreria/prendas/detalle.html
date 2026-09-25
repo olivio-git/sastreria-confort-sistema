@@ -18,9 +18,15 @@
       </h2>
     </div>
     <div class="col-auto ms-auto d-flex gap-2">
-      <a href="{% url 'exportar_etiquetas_prenda_pdf' prenda.id %}" class="btn btn-outline-secondary" target="_blank"
-         title="Imprimir una etiqueta por cada unidad activa de este SKU">
+      <button type="button" class="btn btn-outline-secondary"
+              data-imprimir-etiqueta="{% url 'zpl_etiquetas_prenda' prenda.id %}"
+              data-pdf="{% url 'exportar_etiquetas_prenda_pdf' prenda.id %}"
+              title="Imprimir en la térmica una etiqueta por cada unidad activa de este SKU">
         <i data-lucide="tags" class="me-1"></i>Etiquetas
+      </button>
+      <a href="{% url 'exportar_etiquetas_prenda_pdf' prenda.id %}" class="btn btn-outline-secondary" target="_blank"
+         title="Ver cómo quedan las etiquetas (sólo para mirar: impreso desde el navegador sale corrido)">
+        <i data-lucide="file-text" class="me-1"></i>Ver PDF
       </a>
       <a href="{% url 'kardex_inventario' prenda.id %}" class="btn btn-outline-info">
         <i class="bi bi-clock-history me-1"></i>Kardex
@@ -199,11 +205,13 @@
                  title="Ver kardex del item">
                 <i class="bi bi-clock-history"></i>
               </a>
-              <a href="{% url 'exportar_etiqueta_item_pdf' item.id %}"
-                 class="btn btn-sm btn-icon btn-ghost-secondary" target="_blank"
+              <button type="button"
+                 class="btn btn-sm btn-icon btn-ghost-secondary"
+                 data-imprimir-etiqueta="{% url 'zpl_etiqueta_item' item.id %}"
+                 data-pdf="{% url 'exportar_etiqueta_item_pdf' item.id %}"
                  title="Imprimir etiqueta de esta unidad">
                 <i data-lucide="tag"></i>
-              </a>
+              </button>
               <button type="button"
                 class="btn btn-sm btn-icon btn-ghost-primary"
                 title="Editar"
@@ -561,6 +569,8 @@
 {% block extra_js %}
 {% load static %}
 <script src="{% static 'js/selector_corte.js' %}"></script>
+<script src="{% static 'js/etiquetas_puente.js' %}"></script>
+<script src="{% static 'js/imprimir_etiquetas.js' %}"></script>
 <script>
 (function() {
   var opts = {{ ubicacion_opts|default:"[]"|safe }}.map(function(u) {

@@ -111,6 +111,8 @@ urlpatterns = [
     path('prendas/<int:id>/detalle/', views.detalle_prenda, name='detalle_prenda'),
     path('prendas/items/<int:id>/etiqueta/', views_etiquetas.etiqueta_item_pdf, name='exportar_etiqueta_item_pdf'),
     path('prendas/<int:id>/etiquetas/', views_etiquetas.etiquetas_prenda_pdf, name='exportar_etiquetas_prenda_pdf'),
+    path('prendas/items/<int:id>/etiqueta/zpl/', views_etiquetas.zpl_etiqueta_item, name='zpl_etiqueta_item'),
+    path('prendas/<int:id>/etiquetas/zpl/', views_etiquetas.zpl_etiquetas_prenda, name='zpl_etiquetas_prenda'),
     # Etiquetas — calibración contra el rollo físico
     path('etiquetas/calibrar/', views_etiquetas.calibrar, name='etiquetas_calibrar'),
     path('etiquetas/calibrar/muestra/', views_etiquetas.etiqueta_demo_pdf, name='exportar_etiqueta_demo_pdf'),
