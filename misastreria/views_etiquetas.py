@@ -815,6 +815,10 @@ def fijar_impresora(request):
         config.velocidad = int(request.POST.get('velocidad') or 4)
         config.desplazamiento_x = Decimal(request.POST.get('desplazamiento_x') or '0')
         config.desplazamiento_y = Decimal(request.POST.get('desplazamiento_y') or '0')
+        # Sólo si viene: una pestaña abierta desde antes de que existiera el
+        # campo no lo manda, y eso no tiene que borrar el margen ya ajustado.
+        if 'margen_arriba' in request.POST:
+            config.margen_arriba = Decimal(request.POST.get('margen_arriba') or '0')
     except (TypeError, ValueError, InvalidOperation):
         return fallar("Los ajustes tienen que ser números.")
 

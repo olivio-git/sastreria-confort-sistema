@@ -322,13 +322,18 @@ def render(elementos, ancho=None, alto=None, datos=None, copias=1, config=None):
     ancho = int(ancho or etiquetas.ANCHO_DEFECTO)
     alto = int(alto or etiquetas.ALTO_DEFECTO)
     datos = etiquetas.datos_muestra(datos) if datos is None else datos
-    corrimiento = _corrimiento(config)
+    dx, dy = _corrimiento(config)
+    # Cinta extra del lado del título (ConfiguracionImpresora.margen_arriba):
+    # el diseño baja y la etiqueta se alarga lo mismo, así la impresora saca
+    # más cinta en blanco después del título y abajo no se pierde nada.
+    extra = int(getattr(config, 'margen_arriba_puntos', 0) or 0) if config else 0
+    corrimiento = (dx, dy + extra)
 
     partes = [
         '^XA',                  # arranca la etiqueta
         *_ajustes_cabezal(config),
         f'^PW{max(1, ancho)}',  # ancho de impresión
-        f'^LL{max(1, alto)}',   # largo de etiqueta
+        f'^LL{max(1, alto + extra)}',   # largo de etiqueta
         '^LH0,0',               # origen arriba a la izquierda
         '^CI28',                # entrada en UTF-8
     ]

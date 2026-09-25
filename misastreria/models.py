@@ -2292,6 +2292,22 @@ class ConfiguracionImpresora(models.Model):
         help_text="Positivo baja el diseño; negativo lo sube.",
     )
 
+    # ── Cinta extra del lado del título ─────────────────────────────────────
+    # Se imprime de a una etiqueta y se corta con tijera en la boca de la
+    # impresora. El título sale último, así que al terminar queda pegado a la
+    # boca: el corte pasaba casi encima de él y no quedaba margen para coser.
+    # Este margen corre el diseño hacia abajo y alarga la etiqueta la misma
+    # cantidad: la impresora saca más cinta en blanco después del título, y
+    # nada se come por abajo. Es un ajuste del rollo y de la costura, no del
+    # diseño, así que vale para todas las plantillas y no se ve en el editor.
+    margen_arriba = models.DecimalField(
+        max_digits=4, decimal_places=1, default=0,
+        validators=[MinValueValidator(0), MaxValueValidator(40)],
+        verbose_name="Cinta extra arriba (mm)",
+        help_text="Cinta en blanco que se agrega arriba de cada etiqueta, "
+                  "para cortar y coser sin tocar el título.",
+    )
+
     # ── Tipo de papel ───────────────────────────────────────────────────────
     # Vacío significa «no mandar ^MN y usar lo que la impresora tenga guardado»,
     # que es como venía funcionando. Se declara sólo si el usuario lo elige,
@@ -2324,6 +2340,8 @@ class ConfiguracionImpresora(models.Model):
         texto = f"Oscuridad {self.oscuridad:+d}, {self.velocidad} ips, {modo}"
         if self.desplazamiento_x or self.desplazamiento_y:
             texto += f", corrido {self.desplazamiento_x:+g}/{self.desplazamiento_y:+g} mm"
+        if self.margen_arriba:
+            texto += f", {self.margen_arriba:g} mm extra arriba"
         return texto
 
     @property
@@ -2333,6 +2351,10 @@ class ConfiguracionImpresora(models.Model):
     @property
     def desplazamiento_y_puntos(self):
         return round(float(self.desplazamiento_y) * 203 / 25.4)
+
+    @property
+    def margen_arriba_puntos(self):
+        return round(float(self.margen_arriba or 0) * 203 / 25.4)
 
     @classmethod
     def cargar(cls):

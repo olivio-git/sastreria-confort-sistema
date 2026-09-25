@@ -77,6 +77,17 @@ decide si guarda con POST normal o por fetch.
   </div>
 
   <div class="col-md-4">
+    <label class="form-label" for="et-margen-arriba">Cinta extra arriba (mm)</label>
+    <input type="number" class="form-control" id="et-margen-arriba"
+           name="margen_arriba" min="0" max="40" step="1"
+           value="{{ config.margen_arriba|floatformat:0 }}">
+    <small class="form-hint">
+      Cinta en blanco después del título, para cortar y coser sin tocarlo.
+      Probá con 10 y ajustá.
+    </small>
+  </div>
+
+  <div class="col-md-4">
     <label class="form-label" for="et-tipo-papel">Tipo de papel</label>
     <select class="form-select" id="et-tipo-papel" name="tipo_papel">
       {% for valor, etiqueta in config.PAPEL_CHOICES %}

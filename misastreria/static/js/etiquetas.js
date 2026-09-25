@@ -2207,6 +2207,7 @@
     campos.append('velocidad', document.getElementById('et-velocidad').value);
     campos.append('desplazamiento_x', document.getElementById('et-desp-x').value);
     campos.append('desplazamiento_y', document.getElementById('et-desp-y').value);
+    campos.append('margen_arriba', document.getElementById('et-margen-arriba').value);
     campos.append('tipo_papel', document.getElementById('et-tipo-papel').value);
     // Un checkbox destildado no viaja: el servidor lee la ausencia como «no».
     if (document.getElementById('et-usa-ribbon').checked) {
