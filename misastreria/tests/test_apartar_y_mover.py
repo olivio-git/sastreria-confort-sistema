@@ -173,6 +173,9 @@ class MoverPrendaItemTests(TestCase):
 
 
 class BuscadorSoloCatalogoTests(TestCase):
+    def setUp(self):
+        self.client.force_login(make_user())
+
     def test_excluye_apartados_y_archivados(self):
         make_prenda(codigo='PRN-001', nombre='Saco negro')
         make_prenda(codigo='TMP-004', nombre='Saco negro viejo')

@@ -7,6 +7,7 @@ from django.db.models.functions import Coalesce, Greatest
 from django.db import transaction, IntegrityError
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.auth.decorators import login_required
+from .permisos import permission_required, any_permission_required
 from django.views.decorators.http import require_POST
 from django.utils import timezone as django_tz
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
@@ -94,6 +95,7 @@ def _fmt_dt(dt, fmt='%d/%m/%Y %H:%M', vacio=''):
 
 
 @login_required
+@permission_required('misastreria.acceder_sistema')
 def dashboard(request):
     prendas_alerta = PrendaInventario.objects.annotate(
         stock_total=Count('items', filter=~Q(items__estado='baja')),
@@ -146,6 +148,7 @@ def dashboard(request):
     })
 
 @login_required
+@permission_required('misastreria.view_empleado')
 def lista_empleados(request):
     empleado_id = request.GET.get('empleado_id', '').strip()
     activo = request.GET.get('activo', '')
@@ -175,6 +178,7 @@ def lista_empleados(request):
     })
 
 @login_required
+@permission_required('misastreria.add_empleado')
 def crear_empleado(request):
     if request.method == 'POST':
         form = EmpleadoForm(request.POST)
@@ -189,6 +193,7 @@ def crear_empleado(request):
     })
 
 @login_required
+@permission_required('misastreria.change_empleado')
 def editar_empleado(request, id):
     empleado = get_object_or_404(Empleado, id=id)
     if request.method == 'POST':
@@ -205,6 +210,7 @@ def editar_empleado(request, id):
     })
 
 @login_required
+@permission_required('misastreria.delete_empleado')
 def eliminar_empleado(request, id):
     empleado = get_object_or_404(Empleado, id=id)
     if request.method == 'POST':
@@ -647,6 +653,7 @@ def _devengaciones_empleado(empleado):
 
 
 @login_required
+@permission_required('misastreria.view_empleado')
 def detalle_empleado(request, id):
     empleado = get_object_or_404(Empleado, id=id)
     permisos = empleado.permisos.order_by('-fecha_permiso')
@@ -674,6 +681,7 @@ _FILL_ESTADO_EXCEL = {
 
 
 @login_required
+@permission_required('misastreria.view_empleado')
 def exportar_devengaciones_empleado_excel(request, id):
     """Resumen descargable (Excel) de las devengaciones de un empleado:
     operaciones devengadas (ganancias), sólo-pagadas e historial de pagos.
@@ -919,6 +927,7 @@ def exportar_devengaciones_empleado_excel(request, id):
 
 
 @login_required
+@permission_required('misastreria.change_empleado')
 def crear_permiso(request, empleado_id):
     empleado = get_object_or_404(Empleado, id=empleado_id)
     if request.method == 'POST':
@@ -933,6 +942,7 @@ def crear_permiso(request, empleado_id):
     return render(request, 'misastreria/empleados/crear_permiso.html', {'form': form, 'empleado': empleado})
 
 @login_required
+@permission_required('misastreria.change_empleado')
 def crear_falta(request, empleado_id):
     empleado = get_object_or_404(Empleado, id=empleado_id)
     if request.method == 'POST':
@@ -947,6 +957,7 @@ def crear_falta(request, empleado_id):
     return render(request, 'misastreria/empleados/crear_falta.html', {'form': form, 'empleado': empleado})
 
 @login_required
+@permission_required('misastreria.change_empleado')
 def eliminar_permiso(request, id):
     permiso = get_object_or_404(Permiso, id=id)
     empleado_id = permiso.empleado.id
@@ -955,6 +966,7 @@ def eliminar_permiso(request, id):
     return redirect('detalle_empleado', id=empleado_id)
 
 @login_required
+@permission_required('misastreria.change_empleado')
 def eliminar_falta(request, id):
     falta = get_object_or_404(Falta, id=id)
     empleado_id = falta.empleado.id
@@ -988,6 +1000,7 @@ def _resolver_clave_devengacion(empleado, tipo_key, id_asignacion):
 
 
 @login_required
+@permission_required('misastreria.change_empleado')
 def pagar_comision_empleado(request, empleado_id):
     """Registra un pago de comisión cubriendo devengaciones puntuales.
 
@@ -1121,6 +1134,7 @@ def pagar_comision_empleado(request, empleado_id):
 
 
 @login_required
+@permission_required('misastreria.view_empleado')
 def reporte_dias_trabajados(request):
     hoy_reporte = django_tz.localdate()
     year = int(request.GET.get('year', hoy_reporte.year))
@@ -1180,6 +1194,7 @@ def reporte_dias_trabajados(request):
     })
 
 @login_required
+@permission_required('misastreria.view_cliente')
 def lista_clientes(request):
     cliente_id = request.GET.get('cliente_id', '').strip()
     desde      = request.GET.get('desde', '')
@@ -1207,6 +1222,7 @@ def lista_clientes(request):
     })
 
 @login_required
+@permission_required('misastreria.add_cliente')
 def crear_cliente(request):
     if request.method == 'POST':
         form = ClienteForm(request.POST)
@@ -1219,6 +1235,7 @@ def crear_cliente(request):
     return render(request, 'misastreria/clientes/form.html', {'form': form, 'titulo': 'Crear Cliente'})
 
 @login_required
+@permission_required('misastreria.change_cliente')
 def editar_cliente(request, id):
     cliente = get_object_or_404(Cliente, id=id)
     if request.method == 'POST':
@@ -1232,6 +1249,7 @@ def editar_cliente(request, id):
     return render(request, 'misastreria/clientes/form.html', {'form': form, 'titulo': 'Editar Cliente'})
 
 @login_required
+@permission_required('misastreria.delete_cliente')
 def eliminar_cliente(request, id):
     cliente = get_object_or_404(Cliente, id=id)
     if request.method == 'POST':
@@ -1240,6 +1258,8 @@ def eliminar_cliente(request, id):
         return redirect('lista_clientes')
     return render(request, 'misastreria/clientes/eliminar.html', {'cliente': cliente})
 
+@login_required
+@any_permission_required('misastreria.add_reparacion', 'misastreria.add_venta')
 def buscar_empleados(request):
     q = request.GET.get('q', '').strip()
     qs = Empleado.objects.filter(activo=True).filter(
@@ -1252,6 +1272,8 @@ def buscar_empleados(request):
     return JsonResponse(data, safe=False)
 
 
+@login_required
+@any_permission_required('misastreria.add_cliente', 'misastreria.add_reparacion', 'misastreria.add_venta', 'misastreria.add_confeccion', 'misastreria.add_alquiler')
 def buscar_clientes(request):
     q = request.GET.get('q', '').strip()
     qs = Cliente.objects.filter(
@@ -1264,6 +1286,8 @@ def buscar_clientes(request):
     return JsonResponse(data, safe=False)
 
 
+@login_required
+@any_permission_required('misastreria.add_reparacion', 'misastreria.add_venta', 'misastreria.add_confeccion', 'misastreria.add_alquiler')
 def buscar_tipo_prenda(request):
     q = request.GET.get('q', '').strip()
     qs = TipoPrenda.objects.filter(nombre__icontains=q).order_by('nombre')
@@ -1275,6 +1299,8 @@ def buscar_tipo_prenda(request):
     )
 
 
+@login_required
+@any_permission_required('misastreria.add_reparacion', 'misastreria.add_venta', 'misastreria.add_confeccion', 'misastreria.add_alquiler')
 def crear_tipo_prenda(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'method not allowed'}, status=405)
@@ -1286,6 +1312,8 @@ def crear_tipo_prenda(request):
     return JsonResponse({'id': tp.id, 'nombre': tp.nombre, 'plantilla': tp.plantilla})
 
 
+@login_required
+@any_permission_required('misastreria.add_reparacion')
 def buscar_tipo_reparacion(request):
     q = request.GET.get('q', '').strip()
     qs = TipoReparacion.objects.filter(nombre__icontains=q).order_by('nombre')
@@ -1297,6 +1325,8 @@ def buscar_tipo_reparacion(request):
     )
 
 
+@login_required
+@any_permission_required('misastreria.add_reparacion')
 def crear_tipo_reparacion(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'method not allowed'}, status=405)
@@ -1307,6 +1337,8 @@ def crear_tipo_reparacion(request):
     return JsonResponse({'id': tr.id, 'nombre': tr.nombre})
 
 
+@login_required
+@any_permission_required('misastreria.add_alquiler')
 def buscar_estado_alquiler(request):
     q = request.GET.get('q', '').strip()
     qs = EstadoAlquiler.objects.filter(nombre__icontains=q).order_by('nombre')
@@ -1318,6 +1350,8 @@ def buscar_estado_alquiler(request):
     )
 
 
+@login_required
+@any_permission_required('misastreria.add_alquiler')
 def crear_estado_alquiler(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'method not allowed'}, status=405)
@@ -1331,6 +1365,8 @@ def crear_estado_alquiler(request):
     return JsonResponse({'nombre': e.nombre, 'display': e.nombre.replace('_', ' ').title(), 'color': e.color})
 
 
+@login_required
+@any_permission_required('misastreria.add_insumo')
 def buscar_unidad_medida(request):
     q = request.GET.get('q', '').strip()
     qs = UnidadMedida.objects.filter(nombre__icontains=q).order_by('nombre')
@@ -1342,6 +1378,8 @@ def buscar_unidad_medida(request):
     )
 
 
+@login_required
+@any_permission_required('misastreria.add_insumo')
 def crear_unidad_medida(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'method not allowed'}, status=405)
@@ -1352,6 +1390,8 @@ def crear_unidad_medida(request):
     return JsonResponse({'id': u.id, 'nombre': u.nombre})
 
 
+@login_required
+@any_permission_required('misastreria.add_empleado')
 def buscar_tipo_contrato(request):
     q = request.GET.get('q', '').strip()
     qs = TipoContrato.objects.filter(nombre__icontains=q).order_by('nombre')
@@ -1363,6 +1403,8 @@ def buscar_tipo_contrato(request):
     )
 
 
+@login_required
+@any_permission_required('misastreria.add_empleado')
 def crear_tipo_contrato(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'method not allowed'}, status=405)
@@ -1373,6 +1415,8 @@ def crear_tipo_contrato(request):
     return JsonResponse({'id': t.id, 'nombre': t.nombre})
 
 
+@login_required
+@any_permission_required('misastreria.add_prendainventario', 'misastreria.change_prendainventario')
 def buscar_ubicacion_item(request):
     q = request.GET.get('q', '').strip()
     qs = UbicacionItem.objects.filter(nombre__icontains=q).order_by('nombre')
@@ -1384,6 +1428,8 @@ def buscar_ubicacion_item(request):
     )
 
 
+@login_required
+@any_permission_required('misastreria.add_prendainventario', 'misastreria.change_prendainventario')
 def crear_ubicacion_item(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'method not allowed'}, status=405)
@@ -1394,6 +1440,8 @@ def crear_ubicacion_item(request):
     return JsonResponse({'id': u.id, 'nombre': u.nombre})
 
 
+@login_required
+@any_permission_required('misastreria.add_insumo')
 def buscar_tipo_material(request):
     q = request.GET.get('q', '').strip()
     qs = TipoMaterial.objects.filter(nombre__icontains=q).order_by('nombre')
@@ -1405,6 +1453,8 @@ def buscar_tipo_material(request):
     )
 
 
+@login_required
+@any_permission_required('misastreria.add_insumo')
 def crear_tipo_material(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'method not allowed'}, status=405)
@@ -1415,6 +1465,8 @@ def crear_tipo_material(request):
     return JsonResponse({'id': t.id, 'nombre': t.nombre})
 
 
+@login_required
+@any_permission_required('misastreria.add_confeccion')
 def buscar_modelo_confeccion(request):
     q = request.GET.get('q', '').strip()
     qs = ModeloConfeccion.objects.filter(nombre__icontains=q).order_by('nombre')
@@ -1426,6 +1478,8 @@ def buscar_modelo_confeccion(request):
     )
 
 
+@login_required
+@any_permission_required('misastreria.add_confeccion')
 def crear_modelo_confeccion(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'method not allowed'}, status=405)
@@ -1436,6 +1490,8 @@ def crear_modelo_confeccion(request):
     return JsonResponse({'id': m.nombre, 'nombre': m.nombre})
 
 
+@login_required
+@any_permission_required('misastreria.add_venta', 'misastreria.add_alquiler', 'misastreria.add_prendainventario')
 def buscar_prenda_inventario(request):
     q = request.GET.get('q', '').strip()
     qs = PrendaInventario.objects.filter(estado='ACT').order_by('nombre')
@@ -1454,6 +1510,8 @@ def buscar_prenda_inventario(request):
     return JsonResponse(data, safe=False)
 
 
+@login_required
+@any_permission_required('misastreria.add_confeccion')
 def buscar_confeccion(request):
     q = request.GET.get('q', '').strip()
     qs = Confeccion.objects.filter(estado__in=['pendiente', 'en_proceso']).select_related('cliente').order_by('-creado')
@@ -1469,6 +1527,7 @@ def buscar_confeccion(request):
 
 
 @login_required
+@permission_required('misastreria.view_cliente')
 def historial_cliente(request, id):
     cliente      = get_object_or_404(Cliente, id=id)
     reparaciones = cliente.reparaciones.order_by('-creado')
@@ -1496,6 +1555,7 @@ def historial_cliente(request, id):
     })
 
 @login_required
+@permission_required('misastreria.view_reparacion')
 def lista_reparaciones(request):
     q = request.GET.get('q', '').strip()
     estado = request.GET.get('estado', '').strip()
@@ -1816,6 +1876,7 @@ def _guardar_items_reparacion(reparacion, post):
 
 
 @login_required
+@permission_required('misastreria.add_reparacion')
 def crear_reparacion(request):
     if request.method == 'POST':
         form = ReparacionForm(request.POST)
@@ -1845,6 +1906,7 @@ def crear_reparacion(request):
     })
 
 @login_required
+@permission_required('misastreria.change_reparacion')
 def editar_reparacion(request, id):
     reparacion = get_object_or_404(Reparacion, id=id)
     if request.method == 'POST':
@@ -1889,6 +1951,7 @@ def editar_reparacion(request, id):
     })
 
 @login_required
+@permission_required('misastreria.delete_reparacion')
 def eliminar_reparacion(request, id):
     reparacion = get_object_or_404(Reparacion, id=id)
     if request.method == 'POST':
@@ -1900,6 +1963,7 @@ def eliminar_reparacion(request, id):
     return render(request, 'misastreria/reparaciones/eliminar.html', {'reparacion': reparacion})
 
 @login_required
+@permission_required('misastreria.view_reparacion')
 @login_required
 def detalle_reparacion(request, id):
     from .forms import PagoReparacionForm
@@ -1923,6 +1987,7 @@ def detalle_reparacion(request, id):
 
 
 @login_required
+@permission_required('misastreria.registrar_cobro')
 def agregar_pago_reparacion(request, id):
     from .forms import PagoReparacionForm
     from .caja_signals import registrar_pago_reparacion
@@ -1953,6 +2018,7 @@ def agregar_pago_reparacion(request, id):
 
 
 @login_required
+@permission_required('misastreria.cambiar_estado_taller')
 def reparacion_en_proceso(request, id):
     reparacion = get_object_or_404(Reparacion, id=id)
     if request.method == 'POST' and reparacion.estado == 'pendiente':
@@ -1963,6 +2029,7 @@ def reparacion_en_proceso(request, id):
 
 
 @login_required
+@permission_required('misastreria.cambiar_estado_taller')
 def marcar_entregado(request, id):
     reparacion = get_object_or_404(Reparacion, id=id)
     if request.method == 'POST':
@@ -2325,6 +2392,7 @@ def _pdf_sig_tbl(st, page_w):
 
 
 @login_required
+@permission_required('misastreria.view_reparacion')
 def exportar_recibo_reparacion_pdf(request, id):
     reparacion = get_object_or_404(Reparacion, id=id)
     items = list(reparacion.items.select_related('tipo_prenda', 'tipo_reparacion'))
@@ -2424,6 +2492,7 @@ def exportar_recibo_reparacion_pdf(request, id):
     return response
 
 @login_required
+@permission_required('misastreria.view_venta')
 def lista_ventas(request):
     q           = request.GET.get('q', '').strip()
     cliente_id  = request.GET.get('cliente_id', '').strip()
@@ -2722,6 +2791,7 @@ def _registrar_pagos_venta(venta, post, usuario, descripcion_default, saldo_max)
 
 
 @login_required
+@permission_required('misastreria.add_venta')
 def crear_venta(request):
     if request.method == 'POST':
         form = VentaForm(request.POST)
@@ -2780,6 +2850,7 @@ def crear_venta(request):
 
 
 @login_required
+@permission_required('misastreria.change_venta')
 def editar_venta(request, id):
     venta = get_object_or_404(Venta, id=id)
     if request.method == 'POST':
@@ -2843,6 +2914,7 @@ def editar_venta(request, id):
 
 
 @login_required
+@permission_required('misastreria.delete_venta')
 def eliminar_venta(request, id):
     venta = get_object_or_404(Venta, id=id)
     if request.method == 'POST':
@@ -2859,6 +2931,7 @@ def eliminar_venta(request, id):
 
 
 @login_required
+@permission_required('misastreria.view_venta')
 def detalle_venta(request, id):
     from .forms import PagoVentaForm
     venta = get_object_or_404(Venta, id=id)
@@ -2879,6 +2952,7 @@ def detalle_venta(request, id):
 
 
 @login_required
+@permission_required('misastreria.registrar_cobro')
 def agregar_pago_venta(request, id):
     from .forms import PagoVentaForm
     from .caja_signals import registrar_pago_venta
@@ -2916,6 +2990,7 @@ def agregar_pago_venta(request, id):
 
 
 @login_required
+@permission_required('misastreria.view_venta')
 def exportar_recibo_pdf(request, id):
     venta = get_object_or_404(Venta, id=id)
     response = HttpResponse(content_type='application/pdf')
@@ -3011,6 +3086,7 @@ def exportar_recibo_pdf(request, id):
     return response
 
 @login_required
+@any_permission_required('misastreria.add_venta', 'misastreria.add_alquiler')
 def get_precio_articulo(request):
     articulo_id = request.GET.get('articulo_id')
     try:
@@ -3020,6 +3096,7 @@ def get_precio_articulo(request):
         return JsonResponse({'error': 'Artículo no encontrado'}, status=404)
 
 @login_required
+@permission_required('misastreria.view_confeccion')
 def lista_confecciones(request):
     q           = request.GET.get('q', '').strip()
     tipo_prenda = request.GET.get('tipo_prenda', '').strip()
@@ -3180,6 +3257,7 @@ def _registrar_pagos_confeccion(confeccion, post, usuario, descripcion_default, 
 
 
 @login_required
+@permission_required('misastreria.add_confeccion')
 def crear_confeccion(request):
     if request.method == 'POST':
         form = ConfeccionForm(request.POST)
@@ -3234,6 +3312,7 @@ def crear_confeccion(request):
     })
 
 @login_required
+@permission_required('misastreria.change_confeccion')
 def editar_confeccion(request, id):
     confeccion = get_object_or_404(Confeccion, id=id)
     if request.method == 'POST':
@@ -3266,6 +3345,7 @@ def editar_confeccion(request, id):
     })
 
 @login_required
+@permission_required('misastreria.view_confeccion')
 def detalle_confeccion(request, id):
     from .forms import PagoConfeccionForm
     confeccion = get_object_or_404(Confeccion, id=id)
@@ -3286,6 +3366,7 @@ def detalle_confeccion(request, id):
 
 
 @login_required
+@permission_required('misastreria.registrar_cobro')
 def agregar_pago_confeccion(request, id):
     from .forms import PagoConfeccionForm
     from django.http import HttpResponseNotAllowed
@@ -3321,6 +3402,7 @@ def agregar_pago_confeccion(request, id):
 
 
 @login_required
+@permission_required('misastreria.delete_confeccion')
 def eliminar_confeccion(request, id):
     confeccion = get_object_or_404(Confeccion, id=id)
     if request.method == 'POST':
@@ -3336,6 +3418,7 @@ def eliminar_confeccion(request, id):
     return render(request, 'misastreria/confecciones/eliminar.html', {'confeccion': confeccion})
 
 @login_required
+@permission_required('misastreria.cambiar_estado_taller')
 def confeccion_en_proceso(request, id):
     confeccion = get_object_or_404(Confeccion, id=id)
     if request.method == 'POST' and confeccion.estado == 'pendiente':
@@ -3345,6 +3428,7 @@ def confeccion_en_proceso(request, id):
     return redirect('detalle_confeccion', id=confeccion.id)
 
 @login_required
+@permission_required('misastreria.cambiar_estado_taller')
 def entregar_confeccion(request, id):
     confeccion = get_object_or_404(Confeccion, id=id)
     if confeccion.estado == 'entregado':
@@ -3374,6 +3458,7 @@ def entregar_confeccion(request, id):
     })
 
 @login_required
+@permission_required('misastreria.view_confeccion')
 def exportar_recibo_confeccion_pdf(request, id):
     confeccion = get_object_or_404(Confeccion, id=id)
     response = HttpResponse(content_type='application/pdf')
@@ -3490,6 +3575,7 @@ def exportar_recibo_confeccion_pdf(request, id):
     return response
 
 @login_required
+@permission_required('misastreria.view_alquiler')
 def lista_alquileres(request):
     q          = request.GET.get('q', '').strip()
     estado     = request.GET.get('estado', '').strip()
@@ -3666,6 +3752,7 @@ def _guardar_items_alquiler(alquiler, post_data, estado_anterior=None):
 
 
 @login_required
+@permission_required('misastreria.add_alquiler')
 def crear_alquiler(request):
     if request.method == 'POST':
         form = AlquilerForm(request.POST)
@@ -3721,6 +3808,7 @@ def crear_alquiler(request):
 
 
 @login_required
+@permission_required('misastreria.change_alquiler')
 def editar_alquiler(request, id):
     alquiler = get_object_or_404(Alquiler, id=id)
     if request.method == 'POST':
@@ -3936,6 +4024,7 @@ def _prendas_json_de_items(ids):
 
 
 @login_required
+@permission_required('misastreria.delete_alquiler')
 def eliminar_alquiler(request, id):
     alquiler = get_object_or_404(Alquiler, id=id)
     if request.method == 'POST':
@@ -3953,6 +4042,7 @@ def eliminar_alquiler(request, id):
 
 
 @login_required
+@permission_required('misastreria.change_alquiler')
 def devolver_alquiler(request, id):
     alquiler = get_object_or_404(Alquiler, id=id)
     if alquiler.estado == 'reservado':
@@ -4001,6 +4091,7 @@ def devolver_alquiler(request, id):
 
 
 @login_required
+@permission_required('misastreria.change_alquiler')
 def confirmar_reserva(request, id):
     alquiler = get_object_or_404(Alquiler, id=id)
     if alquiler.estado != 'reservado':
@@ -4019,6 +4110,7 @@ def confirmar_reserva(request, id):
 
 
 @login_required
+@permission_required('misastreria.change_alquiler')
 def cambiar_unidad_alquiler(request, id):
     """Cambia una prenda del alquiler por otra unidad del MISMO modelo.
 
@@ -4145,6 +4237,7 @@ def cambiar_unidad_alquiler(request, id):
 
 
 @login_required
+@permission_required('misastreria.view_alquiler')
 def exportar_comprobante_alquiler_pdf(request, id):
     alquiler = get_object_or_404(Alquiler, id=id)
     response = HttpResponse(content_type='application/pdf')
@@ -4272,6 +4365,7 @@ def exportar_comprobante_alquiler_pdf(request, id):
 
 
 @login_required
+@permission_required('misastreria.view_alquiler')
 def detalle_alquiler(request, id):
     from .forms import PagoAlquilerForm
     alquiler = get_object_or_404(Alquiler, id=id)
@@ -4296,6 +4390,7 @@ def detalle_alquiler(request, id):
 
 
 @login_required
+@permission_required('misastreria.registrar_cobro')
 def agregar_pago_alquiler(request, id):
     from .forms import PagoAlquilerForm
     from .caja_signals import registrar_pago_alquiler
@@ -4337,6 +4432,7 @@ def agregar_pago_alquiler(request, id):
 
 
 @login_required
+@permission_required('misastreria.registrar_cobro')
 def agregar_recargo_alquiler(request, id):
     """Cobra un recargo (mora por devolución tardía) e ingresa a caja con su
     forma de pago. Es un ingreso extra, independiente del saldo del alquiler."""
@@ -4366,6 +4462,7 @@ def agregar_recargo_alquiler(request, id):
 
 
 @login_required
+@permission_required('misastreria.view_transaccion')
 def lista_transacciones(request):
     q = request.GET.get('q', '').strip()
     tipo_transaccion = request.GET.get('tipo_transaccion', '').strip()
@@ -4424,6 +4521,7 @@ def lista_transacciones(request):
 
 
 @login_required
+@permission_required('misastreria.add_transaccion')
 def crear_transaccion(request):
     if request.method == 'POST':
         form = TransaccionForm(request.POST)
@@ -4441,6 +4539,7 @@ def crear_transaccion(request):
     })
 
 @login_required
+@permission_required('misastreria.change_transaccion')
 def editar_transaccion(request, id):
     transaccion = get_object_or_404(Transaccion, id=id)
     if request.method == 'POST':
@@ -4460,6 +4559,7 @@ def editar_transaccion(request, id):
     })
 
 @login_required
+@permission_required('misastreria.delete_transaccion')
 def eliminar_transaccion(request, id):
     transaccion = get_object_or_404(Transaccion, id=id)
     if request.method == 'POST':
@@ -4469,6 +4569,7 @@ def eliminar_transaccion(request, id):
     return render(request, 'misastreria/transacciones/eliminar.html', {'transaccion': transaccion})
 
 @login_required
+@permission_required('misastreria.view_prendainventario')
 def lista_prendas(request):
     q      = request.GET.get('q', '').strip()
     tipo   = request.GET.get('tipo', '').strip()
@@ -4534,6 +4635,7 @@ def lista_prendas(request):
 
 
 @login_required
+@permission_required('misastreria.add_prendainventario')
 def crear_prenda(request):
     if request.method == 'POST':
         form = PrendaInventarioForm(request.POST)
@@ -4550,6 +4652,7 @@ def crear_prenda(request):
 
 
 @login_required
+@permission_required('misastreria.change_prendainventario')
 def editar_prenda(request, id):
     prenda = get_object_or_404(PrendaInventario, id=id)
     if request.method == 'POST':
@@ -4568,6 +4671,7 @@ def editar_prenda(request, id):
 
 
 @login_required
+@permission_required('misastreria.delete_prendainventario')
 def eliminar_prenda(request, id):
     prenda = get_object_or_404(PrendaInventario, id=id)
     if request.method == 'POST':
@@ -4581,6 +4685,7 @@ def eliminar_prenda(request, id):
 
 
 @login_required
+@permission_required('misastreria.view_prendainventario')
 def detalle_prenda(request, id):
     from django.db.models import Count, Q as Qfilter
     prenda = get_object_or_404(
@@ -4606,6 +4711,7 @@ def detalle_prenda(request, id):
 
 
 @login_required
+@permission_required('misastreria.change_prendainventario')
 def editar_prenda_item(request, id):
     item = get_object_or_404(PrendaItem, id=id)
     if request.method == 'POST':
@@ -4645,6 +4751,7 @@ def editar_prenda_item(request, id):
 
 
 @login_required
+@permission_required('misastreria.change_prendainventario')
 def mover_prenda_item(request, id):
     """Pasa una unidad a otro SKU; sus reservas, alquileres y ventas la siguen.
 
@@ -4708,6 +4815,7 @@ def mover_prenda_item(request, id):
 
 
 @login_required
+@permission_required('misastreria.change_prendainventario')
 def baja_prenda_item(request, id):
     item = get_object_or_404(PrendaItem, id=id)
     if request.method == 'POST':
@@ -4724,6 +4832,7 @@ def baja_prenda_item(request, id):
 
 
 @login_required
+@permission_required('misastreria.view_prendainventario')
 def items_proximos_baja(request):
     estado_filter = request.GET.get('estado', 'todos').strip()
 
@@ -4793,6 +4902,7 @@ def _resolver_corte(post):
 
 
 @login_required
+@any_permission_required('misastreria.view_corte')
 def buscar_cortes(request):
     """Cortes para el selector, buscando en el servidor.
 
@@ -4823,6 +4933,7 @@ def buscar_cortes(request):
 
 
 @login_required
+@permission_required('misastreria.change_prendainventario')
 def agregar_items_prenda(request, id):
     prenda = get_object_or_404(PrendaInventario, id=id)
     if request.method != 'POST':
@@ -4871,6 +4982,7 @@ def agregar_items_prenda(request, id):
 
 
 @login_required
+@permission_required('misastreria.view_insumo')
 def lista_insumos(request):
     q            = request.GET.get('q', '').strip()
     tipo_material= request.GET.get('tipo_material', '').strip()
@@ -4904,6 +5016,7 @@ def lista_insumos(request):
 
 
 @login_required
+@permission_required('misastreria.add_insumo')
 def crear_insumo(request):
     if request.method == 'POST':
         form = InsumoForm(request.POST)
@@ -4922,6 +5035,7 @@ def crear_insumo(request):
 
 
 @login_required
+@permission_required('misastreria.change_insumo')
 def editar_insumo(request, id):
     insumo = get_object_or_404(Insumo, id=id)
     if request.method == 'POST':
@@ -4942,6 +5056,7 @@ def editar_insumo(request, id):
 
 
 @login_required
+@permission_required('misastreria.delete_insumo')
 def eliminar_insumo(request, id):
     insumo = get_object_or_404(Insumo, id=id)
     if request.method == 'POST':
@@ -4951,6 +5066,7 @@ def eliminar_insumo(request, id):
     return render(request, 'misastreria/insumos/eliminar.html', {'insumo': insumo})
 
 @login_required
+@permission_required('misastreria.ver_reportes')
 def reporte_empleados(request):
     form = EmpleadoReporteForm(request.GET or None)
     
@@ -4995,6 +5111,7 @@ def reporte_empleados(request):
 
 
 @login_required
+@permission_required('misastreria.ver_reportes')
 def exportar_empleados_pdf(request):
     form = EmpleadoReporteForm(request.GET or None)
     empleados = Empleado.objects.all()
@@ -5045,6 +5162,7 @@ def exportar_empleados_pdf(request):
     return response
 
 @login_required
+@permission_required('misastreria.ver_reportes')
 def exportar_empleados_excel(request):
     # **Optimización:** Usar annotate para contar faltas y permisos en una sola consulta
     empleados_qs = Empleado.objects.all().annotate(
@@ -5117,6 +5235,7 @@ def exportar_empleados_excel(request):
 # --- INICIO de funciones de Reporte de CLIENTES (ACTUALIZADO) ---
 
 @login_required
+@permission_required('misastreria.ver_reportes')
 def reporte_clientes(request):
     form = ClienteReporteForm(request.GET or None)
     
@@ -5376,6 +5495,7 @@ pdfmetrics.registerFont(TTFont('DejaVuSans', FONT_PATH))
 
 
 @login_required
+@permission_required('misastreria.ver_reportes')
 def reporte_reparaciones(request):
     form = ReparacionReporteForm(request.GET or None)
     
@@ -5438,6 +5558,7 @@ def reporte_reparaciones(request):
 
 
 @login_required
+@permission_required('misastreria.ver_reportes')
 def exportar_reparaciones_pdf(request, reparaciones_data, filtros_aplicados):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter,
@@ -5541,6 +5662,7 @@ def exportar_reparaciones_pdf(request, reparaciones_data, filtros_aplicados):
 
 
 @login_required
+@permission_required('misastreria.ver_reportes')
 def exportar_reparaciones_excel(request, reparaciones_data, filtros_aplicados):
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -5677,6 +5799,7 @@ def exportar_reparaciones_excel(request, reparaciones_data, filtros_aplicados):
     wb.save(response)
     return response
 @login_required
+@permission_required('misastreria.ver_reportes')
 def reporte_ventas(request):
     ventas = Venta.objects.prefetch_related('items__prenda_item__prenda').all()
     clientes = Cliente.objects.all()
@@ -5999,6 +6122,7 @@ def exportar_reporte_ventas_excel(request, ventas, fecha_desde, fecha_hasta, tot
     return response
 
 @login_required
+@permission_required('misastreria.ver_reportes')
 def reporte_articulos(request):
     # Obtén todos los artículos o aplica filtros si los tienes
     articulos = PrendaInventario.objects.all().order_by('nombre')
@@ -6009,6 +6133,7 @@ def reporte_articulos(request):
     return render(request, 'misastreria/reportes/articulos.html', context)
 
 @login_required
+@permission_required('misastreria.ver_reportes')
 def reporte_confecciones(request):
     confecciones = Confeccion.objects.all()
     clientes = Cliente.objects.all()
@@ -6364,6 +6489,7 @@ def exportar_reporte_confecciones_excel(request, confecciones, fecha_desde, fech
 # --- INICIO de funciones de Reporte de ALQUILERES (NUEVO) ---
 
 @login_required
+@permission_required('misastreria.ver_reportes')
 def reporte_alquileres(request):
     alquileres = Alquiler.objects.prefetch_related('items__prenda_item__prenda').all()
     clientes = Cliente.objects.all()
@@ -6665,6 +6791,7 @@ def exportar_reporte_alquileres_excel(request, alquileres, fecha_desde, fecha_ha
 # --- FIN de funciones de Reporte de Alquileres ---
 
 @login_required
+@permission_required('misastreria.ver_reportes')
 def reporte_transacciones(request):
     periodo = request.GET.get('periodo', '').strip() or 'mes'
     hoy_txn = django_tz.localdate()
@@ -7039,6 +7166,7 @@ def exportar_reporte_transacciones_excel(request, transacciones, fecha_desde, fe
 # --- FIN de funciones de Reporte de Transacciones ---
 
 @login_required
+@permission_required('misastreria.ver_reportes')
 def reporte_inventario(request):
     q      = request.GET.get('q', '').strip()
     tipo   = request.GET.get('tipo', '').strip()
@@ -7081,6 +7209,7 @@ def reporte_inventario(request):
 
 
 @login_required
+@permission_required('misastreria.ver_reportes')
 def reporte_stock(request):
     prendas = PrendaInventario.objects.filter(estado='ACT').annotate(
         items_alquiler=Count('items', filter=Q(items__tipo='alquiler') & ~Q(items__estado='baja')),
@@ -7089,6 +7218,7 @@ def reporte_stock(request):
     return render(request, 'misastreria/reportes/stock.html', {'prendas': prendas})
 
 @login_required
+@permission_required('misastreria.ver_reportes')
 def reporte_ingresos(request):
     return redirect('kardex_financiero', permanent=True)
 
@@ -7140,6 +7270,7 @@ def _insumos_json():
 
 
 @login_required
+@permission_required('misastreria.view_ordenproduccion')
 def lista_ordenes(request):
     q       = request.GET.get('q', '').strip()
     estado  = request.GET.get('estado', '').strip()
@@ -7189,6 +7320,7 @@ def lista_ordenes(request):
 
 
 @login_required
+@permission_required('misastreria.add_ordenproduccion')
 def crear_orden(request):
     if request.method == 'POST':
         form = OrdenProduccionForm(request.POST)
@@ -7214,6 +7346,7 @@ def crear_orden(request):
 
 
 @login_required
+@permission_required('misastreria.change_ordenproduccion')
 def editar_orden(request, id):
     orden = get_object_or_404(OrdenProduccion, id=id)
     if request.method == 'POST':
@@ -7243,6 +7376,7 @@ def editar_orden(request, id):
 
 
 @login_required
+@permission_required('misastreria.delete_ordenproduccion')
 def eliminar_orden(request, id):
     orden = get_object_or_404(OrdenProduccion, id=id)
     if request.method == 'POST':
@@ -7281,6 +7415,7 @@ def _crear_items_desde_orden(orden):
 
 
 @login_required
+@permission_required('misastreria.change_ordenproduccion')
 def avanzar_estado_orden(request, id):
     orden = get_object_or_404(OrdenProduccion, id=id)
 
@@ -7318,6 +7453,7 @@ def avanzar_estado_orden(request, id):
 # === Kardex ===
 
 @login_required
+@permission_required('misastreria.ver_reportes')
 def kardex_item(request, codigo_item):
     item = get_object_or_404(
         PrendaItem.objects.select_related('prenda'),
@@ -7346,6 +7482,7 @@ def kardex_item(request, codigo_item):
 
 
 @login_required
+@permission_required('misastreria.ver_reportes')
 def kardex_inventario(request, prenda_id):
     prenda = get_object_or_404(
         PrendaInventario.objects.annotate(
@@ -7397,6 +7534,7 @@ def kardex_inventario(request, prenda_id):
 
 
 @login_required
+@permission_required('misastreria.ver_reportes_caja')
 def kardex_financiero(request):
     hoy = django_tz.localdate()
     desde_default = hoy.replace(day=1).isoformat()
@@ -8201,6 +8339,7 @@ def _yoy_comparativa(fecha_inicio, fecha_fin):
 # ============================================================
 
 @login_required
+@permission_required('misastreria.ver_analitica')
 def analitica_items(request):
     today = django_tz.localdate()
     fecha_fin_default = today
@@ -8248,6 +8387,7 @@ def analitica_items(request):
 
 
 @login_required
+@permission_required('misastreria.ver_analitica')
 def analitica_empleados(request):
     today = django_tz.localdate()
     fecha_fin_default = today
@@ -8282,6 +8422,7 @@ def analitica_empleados(request):
 
 
 @login_required
+@permission_required('misastreria.ver_analitica')
 def analitica_clientes_ltv(request):
     today = django_tz.localdate()
     fecha_fin_default = today
@@ -8326,6 +8467,7 @@ def analitica_clientes_ltv(request):
 
 
 @login_required
+@permission_required('misastreria.ver_analitica')
 def analitica_operativas(request):
     today = django_tz.localdate()
     fecha_fin_default = today
@@ -8359,6 +8501,7 @@ def analitica_operativas(request):
 
 
 @login_required
+@permission_required('misastreria.ver_analitica')
 def analitica_comparativas(request):
     today = django_tz.localdate()
     periodo = request.GET.get('periodo', 'this_month')
@@ -8417,6 +8560,7 @@ def analitica_comparativas(request):
 
 
 @login_required
+@permission_required('misastreria.ver_analitica')
 def estacionalidad(request):
     hoy = django_tz.localdate()
 
@@ -8473,6 +8617,7 @@ def estacionalidad(request):
 
 
 @login_required
+@permission_required('misastreria.ver_analitica')
 def prendas_temporada(request):
     hoy = django_tz.localdate()
 
@@ -9213,6 +9358,7 @@ def _kardex_donut_chart(movimientos_qs):
 # ============================================================
 
 @login_required
+@permission_required('misastreria.operar_caja')
 def lista_movimientos_caja(request):
     q = request.GET.get('q', '').strip()
     tipo = request.GET.get('tipo', '').strip()
@@ -9301,6 +9447,7 @@ def lista_movimientos_caja(request):
 
 
 @login_required
+@permission_required('misastreria.operar_caja')
 def crear_movimiento_caja(request):
     sesion_activa = CajaSesion.objects.filter(estado='abierta').first()
     next_sesion = request.GET.get('sesion', '') or request.POST.get('next_sesion', '')
@@ -9333,6 +9480,7 @@ def crear_movimiento_caja(request):
 
 
 @login_required
+@permission_required('misastreria.operar_caja')
 def detalle_movimiento_caja(request, pk):
     movimiento = get_object_or_404(
         CajaMovimiento.objects.select_related(
@@ -9355,6 +9503,7 @@ def detalle_movimiento_caja(request, pk):
 
 
 @login_required
+@permission_required('misastreria.operar_caja')
 @require_POST
 def revertir_movimiento_caja(request, pk):
     movimiento = get_object_or_404(CajaMovimiento, pk=pk)
@@ -9407,6 +9556,7 @@ def revertir_movimiento_caja(request, pk):
 # ============================================================
 
 @login_required
+@permission_required('misastreria.ver_reportes_caja')
 def lista_sesiones_caja(request):
     qs = CajaSesion.objects.order_by('-fecha_apertura')
     total = qs.count()
@@ -9419,6 +9569,7 @@ def lista_sesiones_caja(request):
 
 
 @login_required
+@permission_required('misastreria.abrir_caja')
 def abrir_sesion_caja(request):
     sesion_existente = CajaSesion.objects.filter(estado='abierta').first()
 
@@ -9455,6 +9606,7 @@ def abrir_sesion_caja(request):
 
 
 @login_required
+@permission_required('misastreria.ver_reportes_caja')
 def detalle_sesion_caja(request, pk):
     sesion = get_object_or_404(CajaSesion.objects.select_related('usuario_apertura', 'usuario_cierre'), pk=pk)
     movimientos = CajaMovimiento.objects.filter(sesion=sesion, via_caja=True).select_related(
@@ -9475,6 +9627,7 @@ def detalle_sesion_caja(request, pk):
 
 
 @login_required
+@permission_required('misastreria.ver_reportes_caja')
 def export_detalle_sesion_excel(request, pk):
     from decimal import Decimal
     sesion = get_object_or_404(CajaSesion.objects.select_related('usuario_apertura', 'usuario_cierre'), pk=pk)
@@ -9823,6 +9976,7 @@ def export_detalle_sesion_excel(request, pk):
 
 
 @login_required
+@permission_required('misastreria.operar_caja')
 def cerrar_sesion_caja(request, pk):
     sesion = get_object_or_404(CajaSesion, pk=pk, estado='abierta')
 
@@ -9894,12 +10048,14 @@ def cerrar_sesion_caja(request, pk):
 # ============================================================
 
 @login_required
+@permission_required('misastreria.ver_reportes_caja')
 def resumen_caja(request):
     ctx = _build_resumen_context(request)
     return render(request, 'misastreria/caja/resumen_caja.html', ctx)
 
 
 @login_required
+@permission_required('misastreria.ver_reportes_caja')
 def export_resumen_caja_pdf(request):
     ctx = _build_resumen_context(request)
     buffer = BytesIO()
@@ -10002,6 +10158,7 @@ def export_resumen_caja_pdf(request):
 
 
 @login_required
+@permission_required('misastreria.ver_reportes_caja')
 def export_resumen_caja_excel(request):
     ctx = _build_resumen_context(request)
 
@@ -10085,6 +10242,7 @@ def export_resumen_caja_excel(request):
 # ============================================================
 
 @login_required
+@permission_required('misastreria.view_tipogasto')
 def lista_tipo_gasto(request):
     q = request.GET.get('q', '').strip()
     activo = request.GET.get('activo', '').strip()
@@ -10110,6 +10268,7 @@ def lista_tipo_gasto(request):
 
 
 @login_required
+@permission_required('misastreria.add_tipogasto')
 def crear_tipo_gasto(request):
     if request.method == 'POST':
         form = TipoGastoForm(request.POST)
@@ -10129,6 +10288,7 @@ def crear_tipo_gasto(request):
 
 
 @login_required
+@permission_required('misastreria.change_tipogasto')
 def editar_tipo_gasto(request, pk):
     tipo = get_object_or_404(TipoGasto, pk=pk)
     if request.method == 'POST':
@@ -10150,6 +10310,7 @@ def editar_tipo_gasto(request, pk):
 
 
 @login_required
+@permission_required('misastreria.delete_tipogasto')
 @require_POST
 def eliminar_tipo_gasto(request, pk):
     tipo = get_object_or_404(TipoGasto, pk=pk)
@@ -10167,6 +10328,7 @@ def eliminar_tipo_gasto(request, pk):
 # ============================================================
 
 @login_required
+@permission_required('misastreria.view_conjunto')
 def lista_conjuntos(request):
     q = request.GET.get('q', '').strip()
     activo = request.GET.get('activo', '').strip()
@@ -10190,6 +10352,7 @@ def lista_conjuntos(request):
 
 
 @login_required
+@permission_required('misastreria.add_conjunto')
 def crear_conjunto(request):
     if request.method == 'POST':
         form = ConjuntoForm(request.POST)
@@ -10217,6 +10380,7 @@ def crear_conjunto(request):
 
 
 @login_required
+@permission_required('misastreria.change_conjunto')
 def editar_conjunto(request, pk):
     conjunto = get_object_or_404(Conjunto, pk=pk)
     if request.method == 'POST':
@@ -10245,6 +10409,7 @@ def editar_conjunto(request, pk):
 
 
 @login_required
+@permission_required('misastreria.delete_conjunto')
 def eliminar_conjunto(request, pk):
     conjunto = get_object_or_404(Conjunto, pk=pk)
     if request.method == 'POST':
@@ -10257,6 +10422,8 @@ def eliminar_conjunto(request, pk):
     })
 
 
+@login_required
+@permission_required('misastreria.acceder_sistema')
 def buscar_prenda_items(request):
     q = request.GET.get('q', '').strip()
     qs = PrendaItem.objects.exclude(estado='baja').select_related('prenda').order_by('codigo_item')
@@ -10279,6 +10446,7 @@ def buscar_prenda_items(request):
 
 
 @login_required
+@permission_required('misastreria.acceder_sistema')
 def escanear_prenda_item(request):
     """Resuelve un código escaneado con la pistola a un PrendaItem concreto.
 

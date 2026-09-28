@@ -1,0 +1,25 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Sin permiso{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title"><i data-lucide="shield-off" class="me-2 text-muted"></i>Sin permiso</h2>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+<div class="card">
+  <div class="card-body">
+    <div class="empty-state">
+      <i data-lucide="lock" class="d-block"></i>
+      No tenés permiso para acceder a esta página.
+      <br>
+      Si creés que deberías tenerlo, pedile a un Administrador que revise tu rol.
+    </div>
+  </div>
+</div>
+{% endblock %}
