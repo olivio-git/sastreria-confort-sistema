@@ -37,6 +37,7 @@ from misastreria.caja_signals import (
     _ajustar_total_en_caja,
     _reversar_movimientos_activos,
 )
+from misastreria.caja_turno import CajaSinSesionError
 from misastreria.models import CajaMovimiento, Alquiler, Reparacion, Confeccion, Venta
 from .factories import (
     make_user, make_alquiler, make_alquiler_item, make_prenda_item,
@@ -103,14 +104,16 @@ class RegistrarAlquilerEnCajaTests(TestCase):
             _movs_activos(alquiler=self.alquiler, concepto='alquiler_cobro').count(), 0
         )
 
-    def test_sin_sesion_abierta_crea_movimiento_sin_sesion(self):
-        """Sin sesión activa, el movimiento se crea con sesion=None."""
+    def test_sin_sesion_abierta_rechaza_el_cobro(self):
+        """Sin sesión activa, NO se crea un movimiento huérfano (sesion=None)
+        — se corta con CajaSinSesionError (fix del bug de movimientos
+        huérfanos; antes esto silenciosamente creaba el movimiento igual)."""
         self.sesion.estado = 'cerrada'
         self.sesion.save()
-        registrar_alquiler_en_caja(self.alquiler, adelanto=Decimal('50.00'))
+        with self.assertRaises(CajaSinSesionError):
+            registrar_alquiler_en_caja(self.alquiler, adelanto=Decimal('50.00'))
         mov = _movs_activos(alquiler=self.alquiler, concepto='alquiler_cobro').first()
-        self.assertIsNotNone(mov)
-        self.assertIsNone(mov.sesion)
+        self.assertIsNone(mov)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -394,17 +397,16 @@ class RegistrarVentaEnCajaTests(TestCase):
         )
         self.venta.recalcular_totales()
 
-    def test_venta_sin_sesion_crea_mov_con_sesion_none(self):
-        """Sin sesión abierta, registrar_venta_en_caja crea movimiento con sesion=None.
-        El sistema no bloquea cobros fuera de sesión — permite registrarlos y asignarlos
-        manualmente a una sesión posterior.
-        """
+    def test_venta_sin_sesion_rechaza_el_cobro(self):
+        """Sin sesión abierta, registrar_venta_en_caja NO crea un movimiento
+        huérfano — levanta CajaSinSesionError (fix del bug de movimientos
+        huérfanos con sesion=None)."""
         self.sesion.estado = 'cerrada'
         self.sesion.save()
-        registrar_venta_en_caja(self.venta)
+        with self.assertRaises(CajaSinSesionError):
+            registrar_venta_en_caja(self.venta)
         mov = _movs_activos(venta=self.venta, concepto='venta_cobro').first()
-        self.assertIsNotNone(mov)
-        self.assertIsNone(mov.sesion)
+        self.assertIsNone(mov)
 
     def test_venta_con_sesion_crea_mov(self):
         registrar_venta_en_caja(self.venta)

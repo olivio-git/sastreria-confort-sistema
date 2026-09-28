@@ -21,7 +21,7 @@ from misastreria.models import (
 from .factories import (
     make_empleado, make_cliente, make_reparacion, make_confeccion,
     make_alquiler, make_prenda, make_prenda_item,
-    make_tipo_prenda, make_tipo_reparacion, make_user,
+    make_tipo_prenda, make_tipo_reparacion, make_user, make_sesion_caja,
 )
 
 
@@ -137,6 +137,10 @@ class ReparacionViewTests(BaseViewTest):
         self.assertEqual(rep.estado, 'en_proceso')
 
     def test_marcar_entregado_post(self):
+        # Saldo pendiente > 0: entregar cobra el saldo, así que hace falta
+        # el propio turno de caja abierto (regla: quien entrega con saldo
+        # pendiente necesita poder cobrarlo).
+        make_sesion_caja(usuario=self.user)
         rep = make_reparacion()
         resp = self.client.post(reverse('marcar_entregado', kwargs={'id': rep.pk}))
         self.assertIn(resp.status_code, (302, 200))
@@ -147,6 +151,7 @@ class ReparacionViewTests(BaseViewTest):
         """El cobro del saldo al entregar debe usar la forma de pago elegida (QR),
         no el default efectivo. Regresión del bug 'aparece en efectivo'."""
         from misastreria.models import CajaMovimiento
+        make_sesion_caja(usuario=self.user)
         rep = make_reparacion(total=Decimal('40.00'))
         self.client.post(
             reverse('marcar_entregado', kwargs={'id': rep.pk}),
@@ -185,6 +190,8 @@ class ConfeccionViewTests(BaseViewTest):
         self.assertEqual(c.estado, 'en_proceso')
 
     def test_entregar_confeccion_post(self):
+        # Saldo pendiente > 0: entregar cobra el saldo, hace falta turno propio.
+        make_sesion_caja(usuario=self.user)
         c = make_confeccion()
         resp = self.client.post(reverse('entregar_confeccion', kwargs={'id': c.pk}))
         self.assertIn(resp.status_code, (302, 200))

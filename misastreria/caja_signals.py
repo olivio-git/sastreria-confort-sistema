@@ -10,6 +10,7 @@ from django.dispatch import receiver
 from django.utils import timezone
 
 from .models import Alquiler, Venta, Confeccion, Reparacion, CajaSesion, CajaMovimiento, PagoComisionEmpleado
+from .caja_turno import CajaSinSesionError
 
 
 # ============================================================
@@ -33,6 +34,14 @@ def _reversar_movimientos_activos(*, referencia_field, instance, usuario=None):
     for mov in CajaMovimiento.objects.filter(**filtro).exclude(concepto='anulacion_cobro'):
         if mov.fue_reversado:
             continue
+        if sesion is None:
+            # Sin caja abierta no hay dónde asentar el reverso: mejor fallar
+            # ruidosamente acá (bloquea el borrado) que dejar el reverso
+            # huérfano con sesion=None.
+            raise CajaSinSesionError(
+                f"No se puede eliminar «{instance}»: tiene movimientos de caja activos "
+                "y no hay ninguna caja abierta para reversarlos."
+            )
         tipo_reverso = 'egreso' if mov.tipo == 'ingreso' else 'ingreso'
         with db_transaction.atomic():
             reverso = CajaMovimiento.objects.create(
@@ -124,10 +133,26 @@ def _crear_mov_auto(*, concepto, monto, forma_pago, descripcion, via_caja=True, 
     Helper centralizado para crear movimientos automáticos.
     Checks idempotency via the referencia_* + concepto + movimiento_reverso__isnull=True query.
     Note: callers perform the idempotency check before calling this function.
+
+    Defensa en profundidad: cuando el movimiento SÍ va a afectar la caja
+    (`via_caja=True`, el default), nunca se crea con sesion=None — esa era la
+    fuente de los movimientos huérfanos. Las vistas deben validar el turno
+    ANTES de llegar acá (`caja_turno.verificar_turno_cobro`) para mostrar un
+    mensaje amable; si de todos modos se llega hasta acá sin sesión (ej.
+    señal disparada desde el admin de Django o un shell), se corta acá con
+    CajaSinSesionError.
+
+    `via_caja=False` es la reserva intencional: un pago que se registra pero
+    todavía NO cuenta para el saldo de ninguna sesión (se "libera" después,
+    ver `_liberar_pagos_reservados`) — sesion=None ahí es el diseño, no un bug.
     """
     if monto is None or Decimal(str(monto)) <= 0:
         return None
     sesion = _sesion_activa()
+    if sesion is None and via_caja:
+        raise CajaSinSesionError(
+            f"No se puede registrar '{concepto}': no hay ninguna caja abierta."
+        )
     return CajaMovimiento.objects.create(
         sesion=sesion,
         tipo=CajaMovimiento.concepto_tipo(concepto),
@@ -324,6 +349,10 @@ def _ajustar_garantia_alquiler_en_caja(instance):
     if not is_monetary:
         if existing and not existing.fue_reversado:
             sesion = _sesion_activa()
+            if sesion is None:
+                raise CajaSinSesionError(
+                    f"No se puede quitar la garantía de {instance.codigo}: no hay ninguna caja abierta."
+                )
             with db_transaction.atomic():
                 reverso = CajaMovimiento.objects.create(
                     sesion=sesion,
@@ -346,6 +375,10 @@ def _ajustar_garantia_alquiler_en_caja(instance):
             return
         # Reverse old and create new
         sesion = _sesion_activa()
+        if sesion is None:
+            raise CajaSinSesionError(
+                f"No se puede ajustar la garantía de {instance.codigo}: no hay ninguna caja abierta."
+            )
         with db_transaction.atomic():
             reverso = CajaMovimiento.objects.create(
                 sesion=sesion,
@@ -385,6 +418,10 @@ def registrar_devolucion_garantia_alquiler(instance, monto_devuelto, usuario=Non
     ).exists():
         return
     sesion = _sesion_activa()
+    if sesion is None:
+        raise CajaSinSesionError(
+            f"No se puede devolver la garantía de {instance.codigo}: no hay ninguna caja abierta."
+        )
     CajaMovimiento.objects.create(
         sesion=sesion,
         tipo='egreso',

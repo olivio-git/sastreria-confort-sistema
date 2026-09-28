@@ -45,6 +45,7 @@ from openpyxl.utils import get_column_letter
 from io import BytesIO # Para manejar el archivo en memoria
 from . import kardex_events
 from . import etiquetas
+from . import caja_turno
 FONT_PATH = os.path.join(settings.BASE_DIR, 'misastreria', 'static', 'font', 'DejaVuSans.ttf')
 
 
@@ -92,6 +93,43 @@ def _fmt_dt(dt, fmt='%d/%m/%Y %H:%M', vacio=''):
     if django_tz.is_aware(dt):
         dt = django_tz.localtime(dt)
     return dt.strftime(fmt)
+
+
+def _puede_cobrar_o_avisar(request):
+    """Guardia de cobro compartida por agregar_pago_venta/reparacion: exige
+    una caja abierta a nombre de `request.user` (Administrador incluido). Si
+    falla, deja el mensaje de error listo (vía `messages`) y devuelve False —
+    el llamador debe cortar sin persistir nada.
+    """
+    try:
+        caja_turno.verificar_turno_cobro(request.user)
+    except caja_turno.TurnoCajaError as exc:
+        messages.error(request, str(exc))
+        return False
+    return True
+
+
+def _requiere_turno_cobro(post):
+    """True si el POST trae al menos una línea de pago con monto > 0 y
+    `via_caja` activado — es decir, si de verdad va a intentar tocar la caja
+    real (y no sólo reservar el pago con via_caja=False)."""
+    if not bool(post.get('via_caja')):
+        return False
+    lineas, _errores = _parsear_lineas_pago(post)
+    return any(monto > 0 for monto, _forma in lineas)
+
+
+def caja_turno_disponible(user, form):
+    """Igual que `_puede_cobrar_o_avisar`, pero para vistas que re-renderizan
+    el formulario con errores en vez de redirigir con `messages` (ej.
+    agregar_pago_alquiler). Agrega el error como no-field-error del form.
+    """
+    try:
+        caja_turno.verificar_turno_cobro(user)
+    except caja_turno.TurnoCajaError as exc:
+        form.add_error(None, str(exc))
+        return False
+    return True
 
 
 @login_required
@@ -1998,18 +2036,22 @@ def agregar_pago_reparacion(request, id):
     form = PagoReparacionForm(request.POST)
     if form.is_valid():
         monto = form.cleaned_data['monto']
+        via_caja = form.cleaned_data.get('via_caja', True)
         saldo = reparacion.saldo_pendiente
         if monto > saldo:
             messages.error(request, f"El pago excede el saldo pendiente de Bs {saldo:.2f}.")
+        elif via_caja and not _puede_cobrar_o_avisar(request):
+            pass
         else:
-            registrar_pago_reparacion(
-                reparacion,
-                monto,
-                form.cleaned_data['forma_pago'],
-                form.cleaned_data.get('descripcion', ''),
-                request.user,
-                via_caja=form.cleaned_data.get('via_caja', True),
-            )
+            with transaction.atomic():
+                registrar_pago_reparacion(
+                    reparacion,
+                    monto,
+                    form.cleaned_data['forma_pago'],
+                    form.cleaned_data.get('descripcion', ''),
+                    request.user,
+                    via_caja=via_caja,
+                )
             messages.success(request, f"Pago de Bs {monto:.2f} registrado.")
     else:
         for err in form.errors.values():
@@ -2034,6 +2076,16 @@ def marcar_entregado(request, id):
     reparacion = get_object_or_404(Reparacion, id=id)
     if request.method == 'POST':
         if reparacion.estado != 'entregado':
+            if reparacion.saldo_pendiente > 0:
+                try:
+                    caja_turno.verificar_turno_cobro(request.user)
+                except caja_turno.TurnoCajaError:
+                    messages.error(
+                        request,
+                        f"La reparación {reparacion.codigo} tiene saldo pendiente; "
+                        "lo entrega quien tenga la caja abierta.",
+                    )
+                    return redirect('detalle_reparacion', id=reparacion.id)
             from .models import FORMA_PAGO_CHOICES
             forma_pago = (request.POST.get('forma_pago') or '').strip()
             formas_validas = {c[0] for c in FORMA_PAGO_CHOICES}
@@ -2768,6 +2820,80 @@ def _empleados_arreglo_json():
     ])
 
 
+def _items_desde_post(post_data):
+    """Reconstruye `items_existentes` (mismo formato que arman editar_venta/
+    editar_alquiler para el JSON que lee el JS) a partir del POST crudo, SIN
+    tocar la base de datos.
+
+    Se usa para volver a mostrar las filas de items que el operador ya había
+    cargado cuando crear/editar venta o alquiler se re-renderiza por un error
+    — form inválido o turno de caja rechazado (ver `verificar_turno_cobro`).
+    Antes de esto, cualquier POST fallido dejaba la tabla de items vacía y
+    había que volver a escanear todo de cero.
+    """
+    prenda_item_ids     = post_data.getlist('item_prenda_item')
+    precios             = post_data.getlist('item_precio')
+    grupos              = post_data.getlist('item_grupo_conjunto')
+    tipo_reparacion_ids = post_data.getlist('item_tipo_reparacion')
+    precios_reparacion  = post_data.getlist('item_precio_reparacion')
+    empleado_ids        = post_data.getlist('item_empleado')
+    montos_comision     = post_data.getlist('item_monto_comision')
+    asignaciones_crudas = post_data.getlist('item_asignaciones')
+
+    filas = []
+    todos_los_empleados_ids = set()
+    for i, (pi_id, precio_str, grupo_str, tr_id, prec_rep_str, emp_id, monto_str) in enumerate(
+        zip_longest(
+            prenda_item_ids, precios, grupos, tipo_reparacion_ids, precios_reparacion,
+            empleado_ids, montos_comision, fillvalue=''
+        )
+    ):
+        if not pi_id:
+            continue
+        try:
+            precio_unitario = float(Decimal(precio_str)) if precio_str else 0.0
+        except Exception:
+            precio_unitario = 0.0
+        try:
+            grupo = int(grupo_str) or None
+        except (TypeError, ValueError):
+            grupo = None
+        try:
+            precio_reparacion = float(Decimal(prec_rep_str)) if prec_rep_str else 0.0
+        except Exception:
+            precio_reparacion = 0.0
+        try:
+            tipo_reparacion_id = int(tr_id) if tr_id else None
+        except (TypeError, ValueError):
+            tipo_reparacion_id = None
+        try:
+            prenda_item_id = int(pi_id)
+        except (TypeError, ValueError):
+            continue
+        asignaciones_raw = _parse_asignaciones_arreglo(
+            asignaciones_crudas[i] if i < len(asignaciones_crudas) else '', emp_id, monto_str)
+        todos_los_empleados_ids.update(emp for emp, _m in asignaciones_raw)
+        filas.append({
+            'prenda_item_id': prenda_item_id,
+            'precio_unitario': precio_unitario,
+            'grupo_conjunto': grupo,
+            'tipo_reparacion_id': tipo_reparacion_id,
+            'precio_reparacion': precio_reparacion,
+            '_asignaciones_raw': asignaciones_raw,
+        })
+
+    nombres_por_id = {
+        e.id: str(e) for e in Empleado.objects.filter(id__in=todos_los_empleados_ids)
+    }
+    for fila in filas:
+        crudas = fila.pop('_asignaciones_raw')
+        fila['asignaciones'] = [
+            {'empleado_id': emp, 'empleado_nombre': nombres_por_id.get(emp, ''), 'monto': float(monto)}
+            for emp, monto in crudas
+        ]
+    return filas
+
+
 def _registrar_pagos_venta(venta, post, usuario, descripcion_default, saldo_max):
     """Registra pagos divididos de una venta (cada línea → venta_pago/venta_saldo).
     Valida que el total no exceda saldo_max. Devuelve (total_registrado, errores).
@@ -2793,6 +2919,7 @@ def _registrar_pagos_venta(venta, post, usuario, descripcion_default, saldo_max)
 @login_required
 @permission_required('misastreria.add_venta')
 def crear_venta(request):
+    items_preload = []
     if request.method == 'POST':
         form = VentaForm(request.POST)
         if form.is_valid():
@@ -2800,42 +2927,57 @@ def crear_venta(request):
             # automáticamente: el cobro viene solo de las líneas de pago de abajo
             # (una o varias formas de pago), y lo no cobrado queda como saldo a
             # completar en el detalle.
-            venta = form.save()
-            estado_items = 'reservado' if venta.estado == 'en_proceso' else 'baja'
-            errores = _guardar_items_venta(venta, request.POST, estado_items=estado_items)
-            # Pago inicial: una o varias formas de pago (pagos divididos). Opcional.
-            _total, pago_errores = _registrar_pagos_venta(
-                venta, request.POST, request.user,
-                f"Pago venta {venta.codigo}", saldo_max=venta.total,
-            )
-            if pago_errores:
-                messages.warning(request, f"Venta {venta.codigo} creada, pero el pago no se registró: {'; '.join(pago_errores)}")
-            elif errores:
-                messages.warning(request, 'Venta creada con advertencias: ' + '; '.join(errores))
+            #
+            # Todo el bloque de escritura (venta + items + pago) va en UNA sola
+            # transacción: si no hay turno de caja propio para cobrar, NADA se
+            # persiste. Guardar la venta igual (sin cobro) dejaría la mercadería
+            # afuera (items en 'baja'/'reservado') sin plata registrada — el
+            # mismo hueco que se está cerrando en esta fase.
+            try:
+                with transaction.atomic():
+                    if _requiere_turno_cobro(request.POST):
+                        caja_turno.verificar_turno_cobro(request.user)
+                    venta = form.save()
+                    estado_items = 'reservado' if venta.estado == 'en_proceso' else 'baja'
+                    errores = _guardar_items_venta(venta, request.POST, estado_items=estado_items)
+                    # Pago inicial: una o varias formas de pago (pagos divididos). Opcional.
+                    _total, pago_errores = _registrar_pagos_venta(
+                        venta, request.POST, request.user,
+                        f"Pago venta {venta.codigo}", saldo_max=venta.total,
+                    )
+            except caja_turno.TurnoCajaError as exc:
+                form.add_error(None, str(exc))
             else:
-                messages.success(request, f"Venta {venta.codigo} creada exitosamente.")
-            return redirect('detalle_venta', id=venta.id)
+                if pago_errores:
+                    messages.warning(request, f"Venta {venta.codigo} creada, pero el pago no se registró: {'; '.join(pago_errores)}")
+                elif errores:
+                    messages.warning(request, 'Venta creada con advertencias: ' + '; '.join(errores))
+                else:
+                    messages.success(request, f"Venta {venta.codigo} creada exitosamente.")
+                return redirect('detalle_venta', id=venta.id)
         else:
             messages.error(request, 'Por favor corrige los errores del formulario.')
+        # Re-render tras error (form inválido o turno rechazado): reconstruye
+        # las filas de items que el operador ya había cargado, no las pierde.
+        items_preload = _items_desde_post(request.POST)
     else:
         form = VentaForm()
-    items_preload = []
-    item_id = request.GET.get('item')
-    if item_id:
-        try:
-            # Sin filtro de tipo: la prenda se carga venga de la línea que venga.
-            pi = PrendaItem.objects.select_related('prenda').get(
-                id=item_id, estado='disponible', prenda__estado='ACT',
-                conjunto_slots__isnull=True)
-            items_preload = [{'prenda_item_id': pi.id, 'precio_unitario': float(pi.prenda.precio), 'grupo_conjunto': None}]
-        except PrendaItem.DoesNotExist:
-            # Fallar en silencio dejaba al empleado escaneando sin entender por
-            # qué no pasaba nada.
-            messages.warning(
-                request,
-                "La prenda escaneada no se pudo cargar: no está disponible o "
-                "forma parte de un conjunto."
-            )
+        item_id = request.GET.get('item')
+        if item_id:
+            try:
+                # Sin filtro de tipo: la prenda se carga venga de la línea que venga.
+                pi = PrendaItem.objects.select_related('prenda').get(
+                    id=item_id, estado='disponible', prenda__estado='ACT',
+                    conjunto_slots__isnull=True)
+                items_preload = [{'prenda_item_id': pi.id, 'precio_unitario': float(pi.prenda.precio), 'grupo_conjunto': None}]
+            except PrendaItem.DoesNotExist:
+                # Fallar en silencio dejaba al empleado escaneando sin entender por
+                # qué no pasaba nada.
+                messages.warning(
+                    request,
+                    "La prenda escaneada no se pudo cargar: no está disponible o "
+                    "forma parte de un conjunto."
+                )
     return render(request, 'misastreria/ventas/form.html', {
         'form': form,
         'titulo': 'Nueva Venta',
@@ -2853,37 +2995,48 @@ def crear_venta(request):
 @permission_required('misastreria.change_venta')
 def editar_venta(request, id):
     venta = get_object_or_404(Venta, id=id)
+    items_desde_post = None
     if request.method == 'POST':
         form = VentaForm(request.POST, instance=venta)
         if form.is_valid():
             old_total = venta.total
-            venta = form.save()
-            estado_items = 'reservado' if venta.estado == 'en_proceso' else 'baja'
-            errores = _guardar_items_venta(venta, request.POST, estado_items=estado_items)
             from .caja_signals import _ajustar_total_en_caja
-            _ajustar_total_en_caja(
-                referencia_field='referencia_venta',
-                instance=venta,
-                concepto_cobro='venta_ajuste',
-                nuevo_total=venta.total,
-                old_total=old_total,
-                forma_pago=getattr(venta, 'forma_pago', 'efectivo') or 'efectivo',
-                cliente=getattr(venta, 'cliente', None),
-            )
-            if errores:
-                messages.warning(request, 'Actualizado con advertencias: ' + '; '.join(errores))
+            try:
+                with transaction.atomic():
+                    venta = form.save()
+                    estado_items = 'reservado' if venta.estado == 'en_proceso' else 'baja'
+                    errores = _guardar_items_venta(venta, request.POST, estado_items=estado_items)
+                    _ajustar_total_en_caja(
+                        referencia_field='referencia_venta',
+                        instance=venta,
+                        concepto_cobro='venta_ajuste',
+                        nuevo_total=venta.total,
+                        old_total=old_total,
+                        forma_pago=getattr(venta, 'forma_pago', 'efectivo') or 'efectivo',
+                        cliente=getattr(venta, 'cliente', None),
+                    )
+            except caja_turno.TurnoCajaError as exc:
+                form.add_error(
+                    None,
+                    f"No se pudo devolver el excedente: {exc} La edición no se guardó.",
+                )
+                items_desde_post = _items_desde_post(request.POST)
             else:
-                messages.success(request, 'Venta actualizada correctamente.')
-            return redirect('detalle_venta', id=venta.id)
+                if errores:
+                    messages.warning(request, 'Actualizado con advertencias: ' + '; '.join(errores))
+                else:
+                    messages.success(request, 'Venta actualizada correctamente.')
+                return redirect('detalle_venta', id=venta.id)
         else:
             messages.error(request, 'Por favor corrige los errores del formulario.')
+            items_desde_post = _items_desde_post(request.POST)
     else:
         form = VentaForm(instance=venta)
     # Ídem editar_alquiler: sólo lo propio, el resto a demanda.
     prendas_json = _prendas_json_de_items(
         list(venta.items.values_list('prenda_item_id', flat=True)))
 
-    items_existentes = [
+    items_existentes = items_desde_post if items_desde_post is not None else [
         {
             'prenda_item_id': item.prenda_item_id,
             'precio_unitario': float(item.precio_unitario),
@@ -2970,18 +3123,22 @@ def agregar_pago_venta(request, id):
     form = PagoVentaForm(request.POST)
     if form.is_valid():
         monto = form.cleaned_data['monto']
+        via_caja = form.cleaned_data.get('via_caja', True)
         saldo = venta.saldo_pendiente
         if monto > saldo:
             messages.error(request, f"El pago excede el saldo pendiente de Bs {saldo:.2f}.")
+        elif via_caja and not _puede_cobrar_o_avisar(request):
+            pass
         else:
-            registrar_pago_venta(
-                venta,
-                monto,
-                form.cleaned_data['forma_pago'],
-                form.cleaned_data.get('descripcion', ''),
-                request.user,
-                via_caja=form.cleaned_data.get('via_caja', True),
-            )
+            with transaction.atomic():
+                registrar_pago_venta(
+                    venta,
+                    monto,
+                    form.cleaned_data['forma_pago'],
+                    form.cleaned_data.get('descripcion', ''),
+                    request.user,
+                    via_caja=via_caja,
+                )
             messages.success(request, f"Pago de Bs {monto:.2f} registrado.")
     else:
         for err in form.errors.values():
@@ -3250,9 +3407,15 @@ def _registrar_pagos_confeccion(confeccion, post, usuario, descripcion_default, 
     if saldo_max is not None and total > saldo_max:
         return Decimal('0'), [f"El pago (Bs {total:.2f}) excede el saldo pendiente de Bs {saldo_max:.2f}."]
     via_caja = bool(post.get('via_caja'))
+    if via_caja:
+        try:
+            caja_turno.verificar_turno_cobro(usuario)
+        except caja_turno.TurnoCajaError as exc:
+            return Decimal('0'), [str(exc)]
     descripcion = (post.get('descripcion') or '').strip() or descripcion_default
-    for monto, forma in lineas:
-        registrar_pago_confeccion(confeccion, monto, forma, descripcion, usuario, via_caja=via_caja)
+    with transaction.atomic():
+        for monto, forma in lineas:
+            registrar_pago_confeccion(confeccion, monto, forma, descripcion, usuario, via_caja=via_caja)
     return total, []
 
 
@@ -3435,6 +3598,16 @@ def entregar_confeccion(request, id):
         messages.error(request, 'La confección ya está marcada como entregada.')
         return redirect('lista_confecciones')
     if request.method == 'POST':
+        if confeccion.saldo_pendiente > 0:
+            try:
+                caja_turno.verificar_turno_cobro(request.user)
+            except caja_turno.TurnoCajaError:
+                messages.error(
+                    request,
+                    f"La confección {confeccion.codigo} tiene saldo pendiente; "
+                    "lo entrega quien tenga la caja abierta.",
+                )
+                return redirect('detalle_confeccion', id=confeccion.id)
         from dateutil.relativedelta import relativedelta
         from datetime import date
         forma_pago = request.POST.get('forma_pago', 'efectivo')
@@ -3754,45 +3927,57 @@ def _guardar_items_alquiler(alquiler, post_data, estado_anterior=None):
 @login_required
 @permission_required('misastreria.add_alquiler')
 def crear_alquiler(request):
+    items_preload = []
     if request.method == 'POST':
         form = AlquilerForm(request.POST)
         if form.is_valid():
-            alquiler = form.save()
-            errores = _guardar_items_alquiler(alquiler, request.POST)
             from decimal import Decimal
-            from .caja_signals import registrar_alquiler_en_caja, registrar_garantia_alquiler_en_caja, registrar_pago_alquiler
+            from .caja_signals import registrar_alquiler_en_caja, registrar_garantia_alquiler_en_caja
             adelanto = form.cleaned_data.get('adelanto') or Decimal('0')
-            if adelanto > (alquiler.total or Decimal('0')):
-                adelanto = alquiler.total or Decimal('0')
-            forma = form.cleaned_data.get('forma_pago') or 'efectivo'
-            registrar_alquiler_en_caja(alquiler, adelanto=adelanto, forma_pago=forma)
-            registrar_garantia_alquiler_en_caja(alquiler)
-            if errores:
-                messages.warning(request, 'Alquiler creado con advertencias: ' + '; '.join(errores))
+            garantia_monto = form.cleaned_data.get('garantia_monto') or Decimal('0')
+            garantia_tipo = form.cleaned_data.get('garantia_tipo') or ''
+            hay_cobro = adelanto > 0 or (
+                garantia_tipo in ('efectivo', 'qr', 'transferencia') and garantia_monto > 0
+            )
+            try:
+                with transaction.atomic():
+                    if hay_cobro:
+                        caja_turno.verificar_turno_cobro(request.user)
+                    alquiler = form.save()
+                    errores = _guardar_items_alquiler(alquiler, request.POST)
+                    adelanto_efectivo = min(adelanto, alquiler.total or Decimal('0'))
+                    forma = form.cleaned_data.get('forma_pago') or 'efectivo'
+                    registrar_alquiler_en_caja(alquiler, adelanto=adelanto_efectivo, forma_pago=forma)
+                    registrar_garantia_alquiler_en_caja(alquiler)
+            except caja_turno.TurnoCajaError as exc:
+                form.add_error(None, str(exc))
             else:
-                messages.success(request, f"Alquiler {alquiler.codigo} creado exitosamente.")
-            return redirect('detalle_alquiler', id=alquiler.id)
+                if errores:
+                    messages.warning(request, 'Alquiler creado con advertencias: ' + '; '.join(errores))
+                else:
+                    messages.success(request, f"Alquiler {alquiler.codigo} creado exitosamente.")
+                return redirect('detalle_alquiler', id=alquiler.id)
         else:
             messages.error(request, 'Por favor corrige los errores del formulario.')
+        items_preload = _items_desde_post(request.POST)
     else:
         form = AlquilerForm()
-    items_preload = []
-    item_id = request.GET.get('item')
-    if item_id:
-        try:
-            # Sin filtro de tipo: la prenda se carga venga de la línea que venga.
-            pi = PrendaItem.objects.select_related('prenda').get(
-                id=item_id, estado='disponible', prenda__estado='ACT',
-                conjunto_slots__isnull=True)
-            items_preload = [{'prenda_item_id': pi.id, 'precio_unitario': float(pi.prenda.precio), 'grupo_conjunto': None}]
-        except PrendaItem.DoesNotExist:
-            # Fallar en silencio dejaba al empleado escaneando sin entender por
-            # qué no pasaba nada.
-            messages.warning(
-                request,
-                "La prenda escaneada no se pudo cargar: no está disponible o "
-                "forma parte de un conjunto."
-            )
+        item_id = request.GET.get('item')
+        if item_id:
+            try:
+                # Sin filtro de tipo: la prenda se carga venga de la línea que venga.
+                pi = PrendaItem.objects.select_related('prenda').get(
+                    id=item_id, estado='disponible', prenda__estado='ACT',
+                    conjunto_slots__isnull=True)
+                items_preload = [{'prenda_item_id': pi.id, 'precio_unitario': float(pi.prenda.precio), 'grupo_conjunto': None}]
+            except PrendaItem.DoesNotExist:
+                # Fallar en silencio dejaba al empleado escaneando sin entender por
+                # qué no pasaba nada.
+                messages.warning(
+                    request,
+                    "La prenda escaneada no se pudo cargar: no está disponible o "
+                    "forma parte de un conjunto."
+                )
     return render(request, 'misastreria/alquileres/form.html', {
         'form': form,
         'titulo': 'Nuevo Alquiler',
@@ -3811,31 +3996,42 @@ def crear_alquiler(request):
 @permission_required('misastreria.change_alquiler')
 def editar_alquiler(request, id):
     alquiler = get_object_or_404(Alquiler, id=id)
+    items_desde_post = None
     if request.method == 'POST':
         estado_anterior = alquiler.estado
         form = AlquilerForm(request.POST, instance=alquiler)
         if form.is_valid():
             old_total = alquiler.total
-            alquiler = form.save()
-            errores = _guardar_items_alquiler(alquiler, request.POST, estado_anterior=estado_anterior)
             from .caja_signals import _ajustar_total_en_caja, _ajustar_garantia_alquiler_en_caja
-            _ajustar_total_en_caja(
-                referencia_field='referencia_alquiler',
-                instance=alquiler,
-                concepto_cobro='alquiler_ajuste',
-                nuevo_total=alquiler.total,
-                old_total=old_total,
-                forma_pago=getattr(alquiler, 'forma_pago', 'efectivo') or 'efectivo',
-                cliente=getattr(alquiler, 'cliente', None),
-            )
-            _ajustar_garantia_alquiler_en_caja(alquiler)
-            if errores:
-                messages.warning(request, 'Actualizado con advertencias: ' + '; '.join(errores))
+            try:
+                with transaction.atomic():
+                    alquiler = form.save()
+                    errores = _guardar_items_alquiler(alquiler, request.POST, estado_anterior=estado_anterior)
+                    _ajustar_total_en_caja(
+                        referencia_field='referencia_alquiler',
+                        instance=alquiler,
+                        concepto_cobro='alquiler_ajuste',
+                        nuevo_total=alquiler.total,
+                        old_total=old_total,
+                        forma_pago=getattr(alquiler, 'forma_pago', 'efectivo') or 'efectivo',
+                        cliente=getattr(alquiler, 'cliente', None),
+                    )
+                    _ajustar_garantia_alquiler_en_caja(alquiler)
+            except caja_turno.TurnoCajaError as exc:
+                form.add_error(
+                    None,
+                    f"No se pudo ajustar la caja: {exc} La edición no se guardó.",
+                )
+                items_desde_post = _items_desde_post(request.POST)
             else:
-                messages.success(request, 'Alquiler actualizado correctamente.')
-            return redirect('lista_alquileres')
+                if errores:
+                    messages.warning(request, 'Actualizado con advertencias: ' + '; '.join(errores))
+                else:
+                    messages.success(request, 'Alquiler actualizado correctamente.')
+                return redirect('lista_alquileres')
         else:
             messages.error(request, 'Por favor corrige los errores del formulario.')
+            items_desde_post = _items_desde_post(request.POST)
     else:
         form = AlquilerForm(instance=alquiler)
     # El formulario arranca sabiendo sólo las prendas que ya tiene cargadas;
@@ -3846,7 +4042,7 @@ def editar_alquiler(request, id):
         list(alquiler.items.values_list('prenda_item_id', flat=True)))
 
     # Construir ITEMS_INICIALES para el template
-    items_iniciales = [
+    items_iniciales = items_desde_post if items_desde_post is not None else [
         {
             'prenda_item_id': item.prenda_item_id,
             'precio_unitario': float(item.precio_unitario),
@@ -4401,18 +4597,22 @@ def agregar_pago_alquiler(request, id):
     form = PagoAlquilerForm(request.POST)
     if form.is_valid():
         monto = form.cleaned_data['monto']
+        via_caja = form.cleaned_data.get('via_caja', True)
         saldo = alquiler.saldo_pendiente
         if monto > saldo:
             form.add_error('monto', f"El pago excede el saldo pendiente de Bs {saldo:.2f}.")
+        elif via_caja and not caja_turno_disponible(request.user, form):
+            pass
         else:
-            registrar_pago_alquiler(
-                alquiler,
-                monto,
-                form.cleaned_data['forma_pago'],
-                form.cleaned_data.get('descripcion', ''),
-                request.user,
-                via_caja=form.cleaned_data.get('via_caja', True),
-            )
+            with transaction.atomic():
+                registrar_pago_alquiler(
+                    alquiler,
+                    monto,
+                    form.cleaned_data['forma_pago'],
+                    form.cleaned_data.get('descripcion', ''),
+                    request.user,
+                    via_caja=via_caja,
+                )
             messages.success(request, f"Pago de Bs {monto:.2f} registrado correctamente.")
             return redirect('detalle_alquiler', id=id)
     items = alquiler.items.select_related('prenda_item__prenda').all()
@@ -4444,14 +4644,18 @@ def agregar_recargo_alquiler(request, id):
     alquiler = get_object_or_404(Alquiler, id=id)
     form = PagoAlquilerForm(request.POST)
     if form.is_valid():
-        registrar_recargo_alquiler(
-            alquiler,
-            form.cleaned_data['monto'],
-            form.cleaned_data['forma_pago'],
-            form.cleaned_data.get('descripcion', ''),
-            request.user,
-            via_caja=form.cleaned_data.get('via_caja', True),
-        )
+        via_caja = form.cleaned_data.get('via_caja', True)
+        if via_caja and not _puede_cobrar_o_avisar(request):
+            return redirect('detalle_alquiler', id=id)
+        with transaction.atomic():
+            registrar_recargo_alquiler(
+                alquiler,
+                form.cleaned_data['monto'],
+                form.cleaned_data['forma_pago'],
+                form.cleaned_data.get('descripcion', ''),
+                request.user,
+                via_caja=via_caja,
+            )
         messages.success(
             request,
             f"Recargo de Bs {form.cleaned_data['monto']:.2f} registrado para {alquiler.codigo}.",
@@ -7552,6 +7756,10 @@ def kardex_financiero(request):
         reverso_de__isnull=True,
         via_caja=True,
     ).exclude(concepto__in=['apertura_caja', 'sobrante_caja', 'faltante_caja'])
+    # Cajero ve sólo lo cobrado en SUS turnos; Administrador (supervisar_caja)
+    # ve el total de la tienda (spec: "Reportes caja ... Cajero own sessions only").
+    if not caja_turno.puede_supervisar(request.user):
+        movimientos_qs = movimientos_qs.filter(sesion__usuario_apertura=request.user)
 
     total_ingresos = movimientos_qs.filter(tipo='ingreso').aggregate(t=Sum('monto'))['t'] or Decimal('0')
     total_egresos = movimientos_qs.filter(tipo='egreso').aggregate(t=Sum('monto'))['t'] or Decimal('0')
@@ -7667,6 +7875,11 @@ def _build_resumen_context(request):
         reverso_de__isnull=True,
         via_caja=True,
     ).exclude(concepto__in=['apertura_caja', 'sobrante_caja', 'faltante_caja', 'garantia_alquiler', 'garantia_devolucion'])
+    supervisa = caja_turno.puede_supervisar(request.user)
+    if not supervisa:
+        # Cajero ve sólo el resumen de SUS propios turnos (spec: "Reportes
+        # caja ... Cajero own sessions only"); Administrador ve todo.
+        base_qs = base_qs.filter(sesion__usuario_apertura=request.user)
 
     total_ingresos = base_qs.filter(tipo='ingreso').aggregate(t=Sum('monto'))['t'] or Decimal('0')
     total_egresos = base_qs.filter(tipo='egreso').aggregate(t=Sum('monto'))['t'] or Decimal('0')
@@ -7720,6 +7933,10 @@ def _build_resumen_context(request):
         fecha__date__lte=hasta,
         via_caja=True,
     ).select_related('sesion', 'cliente', 'tipo_gasto').order_by('-fecha')
+
+    if not supervisa:
+        sesiones_periodo = sesiones_periodo.filter(usuario_apertura=request.user)
+        movimientos_detalle = movimientos_detalle.filter(sesion__usuario_apertura=request.user)
 
     return {
         'desde': desde,
@@ -9449,10 +9666,14 @@ def lista_movimientos_caja(request):
 @login_required
 @permission_required('misastreria.operar_caja')
 def crear_movimiento_caja(request):
-    sesion_activa = CajaSesion.objects.filter(estado='abierta').first()
     next_sesion = request.GET.get('sesion', '') or request.POST.get('next_sesion', '')
 
     if request.method == 'POST':
+        try:
+            sesion_activa = caja_turno.verificar_turno_cobro(request.user)
+        except caja_turno.TurnoCajaError as exc:
+            messages.error(request, str(exc))
+            return redirect('lista_sesiones_caja')
         form = CajaMovimientoManualForm(request.POST)
         if form.is_valid():
             movimiento = form.save(commit=False)
@@ -9468,6 +9689,7 @@ def crear_movimiento_caja(request):
         else:
             messages.error(request, "Por favor corrige los errores del formulario.")
     else:
+        sesion_activa = caja_turno.sesion_abierta()
         form = CajaMovimientoManualForm()
 
     return render(request, 'misastreria/caja/form_movimiento.html', {
@@ -9530,7 +9752,18 @@ def revertir_movimiento_caja(request, pk):
 
     tipo_reverso = 'egreso' if movimiento.tipo == 'ingreso' else 'ingreso'
 
-    sesion_activa = CajaSesion.objects.filter(estado='abierta').first()
+    try:
+        sesion_activa = caja_turno.verificar_turno_cobro(request.user)
+    except caja_turno.TurnoCajaError as exc:
+        messages.error(request, str(exc))
+        return redirect('detalle_movimiento_caja', pk=pk)
+
+    if movimiento.sesion_id != sesion_activa.id and not caja_turno.puede_supervisar(request.user):
+        messages.error(
+            request,
+            "Sólo podés revertir movimientos de tu propio turno (o ser Administrador).",
+        )
+        return redirect('detalle_movimiento_caja', pk=pk)
 
     with transaction.atomic():
         reverso = CajaMovimiento.objects.create(
@@ -9559,6 +9792,8 @@ def revertir_movimiento_caja(request, pk):
 @permission_required('misastreria.ver_reportes_caja')
 def lista_sesiones_caja(request):
     qs = CajaSesion.objects.order_by('-fecha_apertura')
+    if not caja_turno.puede_supervisar(request.user):
+        qs = qs.filter(usuario_apertura=request.user)
     total = qs.count()
     paginator = Paginator(qs, 15)
     page_obj = paginator.get_page(request.GET.get('page'))
@@ -9609,6 +9844,9 @@ def abrir_sesion_caja(request):
 @permission_required('misastreria.ver_reportes_caja')
 def detalle_sesion_caja(request, pk):
     sesion = get_object_or_404(CajaSesion.objects.select_related('usuario_apertura', 'usuario_cierre'), pk=pk)
+    if not caja_turno.puede_ver_sesion(request.user, sesion):
+        messages.error(request, "Esa sesión de caja no es tuya. Sólo podés ver tus propios turnos.")
+        return redirect('lista_sesiones_caja')
     movimientos = CajaMovimiento.objects.filter(sesion=sesion, via_caja=True).select_related(
         'cliente', 'tipo_gasto',
         'referencia_venta', 'referencia_alquiler', 'referencia_confeccion',
@@ -9631,6 +9869,9 @@ def detalle_sesion_caja(request, pk):
 def export_detalle_sesion_excel(request, pk):
     from decimal import Decimal
     sesion = get_object_or_404(CajaSesion.objects.select_related('usuario_apertura', 'usuario_cierre'), pk=pk)
+    if not caja_turno.puede_ver_sesion(request.user, sesion):
+        messages.error(request, "Esa sesión de caja no es tuya. Sólo podés ver tus propios turnos.")
+        return redirect('lista_sesiones_caja')
     movimientos = CajaMovimiento.objects.filter(sesion=sesion, via_caja=True).select_related(
         'cliente', 'tipo_gasto', 'usuario',
         'referencia_alquiler', 'referencia_venta',
@@ -9980,6 +10221,16 @@ def export_detalle_sesion_excel(request, pk):
 def cerrar_sesion_caja(request, pk):
     sesion = get_object_or_404(CajaSesion, pk=pk, estado='abierta')
 
+    es_propia = sesion.usuario_apertura_id == request.user.id
+    es_force_close = not es_propia
+    if es_force_close and not caja_turno.puede_supervisar(request.user):
+        messages.error(
+            request,
+            f"La caja abierta es de {sesion.usuario_apertura.get_username()}. "
+            "Sólo quien la abrió (o un Administrador) puede cerrarla.",
+        )
+        return redirect('detalle_sesion_caja', pk=sesion.pk)
+
     if request.method == 'POST':
         form = CajaSesionCierreForm(request.POST)
         if form.is_valid():
@@ -9988,8 +10239,16 @@ def cerrar_sesion_caja(request, pk):
             saldo_sistema = sesion.saldo_efectivo_sistema
             diferencia = monto_declarado - saldo_sistema
 
-            # Require observaciones when there is a difference
-            if diferencia != Decimal('0') and not observaciones:
+            # Force-close (Administrador cerrando el turno de otro) exige
+            # observación SIEMPRE, haya o no diferencia — es la constancia de
+            # por qué se cerró una caja que no es la propia.
+            if es_force_close and not observaciones:
+                form.add_error(
+                    'observaciones',
+                    'Cerrar la caja de otro usuario requiere una observación.',
+                )
+            # Cierre normal: observaciones sólo obligatorias si hay diferencia.
+            elif diferencia != Decimal('0') and not observaciones:
                 form.add_error('observaciones', 'Las observaciones son requeridas cuando hay diferencia.')
             else:
                 with transaction.atomic():

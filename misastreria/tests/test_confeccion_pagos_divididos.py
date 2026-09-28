@@ -33,7 +33,7 @@ class CrearConfeccionAdelantoDivididoTests(TestCase):
         self.user = make_user()
         self.client = Client()
         self.client.force_login(self.user)
-        self.sesion = make_sesion_caja()
+        self.sesion = make_sesion_caja(usuario=self.user)
         self.tp = make_tipo_prenda()
 
     def _post_crear(self, extra):
@@ -89,7 +89,7 @@ class AgregarPagoConfeccionDivididoTests(TestCase):
         self.user = make_user()
         self.client = Client()
         self.client.force_login(self.user)
-        self.sesion = make_sesion_caja()
+        self.sesion = make_sesion_caja(usuario=self.user)
         self.conf = make_confeccion(precio=Decimal('500.00'), saldo=Decimal('500.00'))
 
     def test_pago_dividido_en_detalle(self):
