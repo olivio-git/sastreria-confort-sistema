@@ -181,3 +181,25 @@ class PagoComisionEmpleadoTests(TestCase):
         s = str(pago)
         self.assertIn('COM-0001', s)
         self.assertIn('200', s)
+
+
+class EmpleadoUserLinkTests(TestCase):
+    """La baja de un Empleado desactiva al User vinculado (si existe)."""
+
+    def test_baja_desactiva_usuario_vinculado_activo(self):
+        user = make_user(username='vinculado')
+        emp = make_empleado(user=user)
+        self.assertTrue(user.is_active)
+
+        emp.fecha_baja = date(2024, 6, 1)
+        emp.save()
+
+        user.refresh_from_db()
+        self.assertFalse(user.is_active)
+
+    def test_baja_sin_usuario_vinculado_no_falla(self):
+        emp = make_empleado(user=None)
+        emp.fecha_baja = date(2024, 6, 1)
+        emp.save()  # no debe lanzar excepción
+        emp.refresh_from_db()
+        self.assertFalse(emp.activo)

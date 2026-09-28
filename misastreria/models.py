@@ -7,6 +7,8 @@ from django.core.validators import EmailValidator, RegexValidator, MinValueValid
 from django.utils import timezone
 from django.core.exceptions import ValidationError
 
+from .roles import CUSTOM_PERMISSIONS
+
 
 MENSAJE_SIGLA_NUMERO = (
     '«%s» parece un número de corte. El número lo asigna el sistema solo; '
@@ -59,6 +61,10 @@ class Empleado(models.Model):
     fecha_baja = models.DateField(null=True, blank=True, verbose_name="Fecha de Baja")
     activo = models.BooleanField(default=True, verbose_name="Activo")
     creado = models.DateTimeField(auto_now_add=True, verbose_name="Fecha de Creación")
+    user = models.OneToOneField(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='empleado', verbose_name="Usuario del sistema",
+    )
 
     def save(self, *args, **kwargs):
         if not self.codigo:
@@ -72,6 +78,9 @@ class Empleado(models.Model):
         if self.apellido_materno:
             self.apellido_materno = self.apellido_materno.capitalize()
         super().save(*args, **kwargs)
+        if self.fecha_baja and self.user_id and self.user.is_active:
+            self.user.is_active = False
+            self.user.save(update_fields=['is_active'])
 
     class Meta:
         verbose_name = "Empleado"
@@ -2370,3 +2379,31 @@ class ConfiguracionImpresora(models.Model):
         # Fija el pk para que no se pueda crear una segunda fila por descuido.
         self.pk = 1
         super().save(*args, **kwargs)
+
+
+class PerfilUsuario(models.Model):
+    """Datos de autorización del User que no pertenecen a `auth.User`.
+
+    Hoy sólo guarda el PIN de desbloqueo de caja (ver `misastreria/caja_turno.py`
+    y `misastreria/middleware.py::CajaPinMiddleware`). También es el ancla de
+    `Meta.permissions` para los permisos personalizados de `roles.py`: no todo
+    permiso mapea 1:1 a un modelo de negocio (ej. `registrar_cobro`,
+    `supervisar_caja`), así que viven acá en vez de forzarlos en un modelo que
+    no tiene nada que ver.
+    """
+    user = models.OneToOneField(
+        User, on_delete=models.CASCADE, related_name='perfil',
+        verbose_name="Usuario",
+    )
+    pin_hash = models.CharField(max_length=128, blank=True, default='', verbose_name="Hash del PIN")
+    pin_intentos_fallidos = models.PositiveSmallIntegerField(default=0, verbose_name="Intentos fallidos de PIN")
+    pin_bloqueado = models.BooleanField(default=False, verbose_name="PIN bloqueado")
+    pin_actualizado = models.DateTimeField(null=True, blank=True, verbose_name="PIN actualizado")
+
+    class Meta:
+        verbose_name = "Perfil de Usuario"
+        verbose_name_plural = "Perfiles de Usuario"
+        permissions = CUSTOM_PERMISSIONS
+
+    def __str__(self):
+        return f"Perfil de {self.user.username}"
