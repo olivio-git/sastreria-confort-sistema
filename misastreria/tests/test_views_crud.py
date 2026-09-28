@@ -13,7 +13,6 @@ from decimal import Decimal
 
 from django.test import TestCase, Client
 from django.urls import reverse
-from django.contrib.auth.models import User
 
 from misastreria.models import (
     Empleado, Cliente, Reparacion, Confeccion, Alquiler,
@@ -22,13 +21,13 @@ from misastreria.models import (
 from .factories import (
     make_empleado, make_cliente, make_reparacion, make_confeccion,
     make_alquiler, make_prenda, make_prenda_item,
-    make_tipo_prenda, make_tipo_reparacion,
+    make_tipo_prenda, make_tipo_reparacion, make_user,
 )
 
 
 class BaseViewTest(TestCase):
     def setUp(self):
-        self.user = User.objects.create_user('cruduser', password='pass123')
+        self.user = make_user(username='cruduser', password='pass123')
         self.client = Client()
         self.client.force_login(self.user)
 

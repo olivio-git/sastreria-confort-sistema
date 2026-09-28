@@ -10,6 +10,8 @@ por separado (deben responder 200 sin login).
 from django.test import TestCase, Client
 from django.urls import reverse
 
+from .factories import make_user
+
 
 # URLs que requieren login — (url_name, kwargs o None)
 PROTECTED_URLS = [
@@ -110,8 +112,7 @@ class AuthenticatedListViewsTests(TestCase):
     """Vistas de lista devuelven 200 cuando el usuario está autenticado."""
 
     def setUp(self):
-        from django.contrib.auth.models import User
-        self.user = User.objects.create_user('testviews', password='pass123')
+        self.user = make_user(username='testviews', password='pass123')
         self.client = Client()
         self.client.force_login(self.user)
 
