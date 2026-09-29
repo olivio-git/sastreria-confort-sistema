@@ -1152,7 +1152,14 @@ class CrearUsuarioForm(forms.Form):
         widget=forms.PasswordInput(attrs={'class': 'form-control', 'autocomplete': 'new-password'}),
         min_length=8,
     )
-    rol = forms.ChoiceField(label='Rol', choices=ROL_CHOICES, widget=forms.Select(attrs={'class': 'form-select'}))
+    # MultipleChoiceField (no ChoiceField): el personal de mostrador suele
+    # necesitar más de un rol a la vez (ej. Cajero + Vendedor para poder
+    # cobrar Y vender) — un select de uno solo no alcanza para expresar eso
+    # (WARNING 5 del reporte de verificación).
+    roles = forms.MultipleChoiceField(
+        label='Roles', choices=ROL_CHOICES,
+        widget=forms.CheckboxSelectMultiple(attrs={'class': 'form-check-input'}),
+    )
     empleado = forms.ModelChoiceField(
         label='Empleado vinculado', queryset=Empleado.objects.filter(user__isnull=True),
         required=False, empty_label='(Sin vincular)',
@@ -1167,7 +1174,10 @@ class CrearUsuarioForm(forms.Form):
 
 
 class EditarUsuarioForm(forms.Form):
-    rol = forms.ChoiceField(label='Rol', choices=ROL_CHOICES, widget=forms.Select(attrs={'class': 'form-select'}))
+    roles = forms.MultipleChoiceField(
+        label='Roles', choices=ROL_CHOICES,
+        widget=forms.CheckboxSelectMultiple(attrs={'class': 'form-check-input'}),
+    )
     empleado = forms.ModelChoiceField(
         label='Empleado vinculado', queryset=Empleado.objects.none(),
         required=False, empty_label='(Sin vincular)',

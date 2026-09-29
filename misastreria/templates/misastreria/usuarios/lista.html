@@ -73,7 +73,7 @@
           <td class="fw-semibold">{{ usr.username }}</td>
           <td>{{ usr.empleado|default:"—" }}</td>
           <td>
-            {% for g in usr.groups.all %}{{ g.name }}{% empty %}<span class="text-muted">Sin rol</span>{% endfor %}
+            {% for g in usr.groups.all %}{{ g.name }}{% if not forloop.last %}, {% endif %}{% empty %}<span class="text-muted">Sin rol</span>{% endfor %}
           </td>
           <td>
             {% if usr.is_active %}

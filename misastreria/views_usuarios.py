@@ -15,6 +15,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import Group, User
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
@@ -73,17 +74,31 @@ def crear_usuario(request):
     if request.method == 'POST':
         form = CrearUsuarioForm(request.POST)
         if form.is_valid():
-            user = User.objects.create_user(
-                username=form.cleaned_data['username'],
-                password=form.cleaned_data['password'],
-            )
-            grupo, _ = Group.objects.get_or_create(name=form.cleaned_data['rol'])
-            user.groups.add(grupo)
-            empleado = form.cleaned_data.get('empleado')
-            if empleado:
-                empleado.user = user
-                empleado.save(update_fields=['user'])
-            messages.success(request, f"Usuario «{user.username}» creado con rol {form.cleaned_data['rol']}.")
+            # Atómico (WARNING 7): crear el User, sumarle sus grupos y
+            # vincularlo a un Empleado son tres escrituras relacionadas — si
+            # una fallara a mitad de camino no debe quedar un usuario sin
+            # rol o un Empleado a medio vincular.
+            with transaction.atomic():
+                user = User.objects.create_user(
+                    username=form.cleaned_data['username'],
+                    password=form.cleaned_data['password'],
+                )
+                for nombre_rol in form.cleaned_data['roles']:
+                    grupo, _ = Group.objects.get_or_create(name=nombre_rol)
+                    user.groups.add(grupo)
+                empleado = form.cleaned_data.get('empleado')
+                if empleado:
+                    empleado.user = user
+                    empleado.save(update_fields=['user'])
+                    # SUGGESTION 2: si el Empleado elegido ya está de baja,
+                    # el usuario vinculado nace desactivado — vincular no
+                    # debe "resucitar" el acceso de alguien que ya no trabaja
+                    # acá.
+                    if empleado.fecha_baja and user.is_active:
+                        user.is_active = False
+                        user.save(update_fields=['is_active'])
+            roles_txt = ', '.join(form.cleaned_data['roles'])
+            messages.success(request, f"Usuario «{user.username}» creado con rol(es) {roles_txt}.")
             return redirect('lista_usuarios')
     else:
         form = CrearUsuarioForm()
@@ -98,35 +113,49 @@ def crear_usuario(request):
 @permission_required('misastreria.gestionar_usuarios')
 def editar_usuario(request, pk):
     user_obj = get_object_or_404(User, pk=pk)
-    rol_actual = user_obj.groups.first()
+    roles_actuales = list(
+        user_obj.groups.filter(name__in=roles.ROLES.keys()).values_list('name', flat=True)
+    )
     empleado_actual = getattr(user_obj, 'empleado', None)
 
     if request.method == 'POST':
         if user_obj.pk == request.user.pk:
-            messages.error(request, "No podés cambiar tu propio rol desde acá.")
+            messages.error(request, "No podés cambiar tus propios roles desde acá.")
             return redirect('lista_usuarios')
 
         form = EditarUsuarioForm(request.POST, user_obj=user_obj)
         if form.is_valid():
-            nuevo_rol = form.cleaned_data['rol']
-            if nuevo_rol != 'Administrador' and _es_ultimo_administrador_activo(user_obj):
+            nuevos_roles = set(form.cleaned_data['roles'])
+            if 'Administrador' not in nuevos_roles and _es_ultimo_administrador_activo(user_obj):
                 form.add_error(None, "No podés quitarle el rol de Administrador al último Administrador activo.")
             else:
-                user_obj.groups.clear()
-                grupo, _ = Group.objects.get_or_create(name=nuevo_rol)
-                user_obj.groups.add(grupo)
+                # Atómico (WARNING 7): reasignar roles + relink de Empleado
+                # son varias escrituras relacionadas.
+                with transaction.atomic():
+                    # Sólo se tocan los grupos que SON roles del sistema
+                    # (WARNING 5: antes `.groups.clear()` borraba TODOS los
+                    # grupos del usuario, incluyendo cualquiera ajeno a
+                    # `roles.ROLES` que pudiera tener por otro motivo).
+                    grupos_roles_sistema = Group.objects.filter(name__in=roles.ROLES.keys())
+                    user_obj.groups.remove(*grupos_roles_sistema)
+                    for nombre_rol in nuevos_roles:
+                        grupo, _ = Group.objects.get_or_create(name=nombre_rol)
+                        user_obj.groups.add(grupo)
 
-                Empleado.objects.filter(user=user_obj).update(user=None)
-                empleado = form.cleaned_data.get('empleado')
-                if empleado:
-                    empleado.user = user_obj
-                    empleado.save(update_fields=['user'])
+                    Empleado.objects.filter(user=user_obj).update(user=None)
+                    empleado = form.cleaned_data.get('empleado')
+                    if empleado:
+                        empleado.user = user_obj
+                        empleado.save(update_fields=['user'])
+                        if empleado.fecha_baja and user_obj.is_active:
+                            user_obj.is_active = False
+                            user_obj.save(update_fields=['is_active'])
 
                 messages.success(request, f"Usuario «{user_obj.username}» actualizado.")
                 return redirect('lista_usuarios')
     else:
         form = EditarUsuarioForm(user_obj=user_obj, initial={
-            'rol': rol_actual.name if rol_actual else '',
+            'roles': roles_actuales,
             'empleado': empleado_actual.pk if empleado_actual else None,
         })
 
@@ -159,6 +188,17 @@ def toggle_activo_usuario(request, pk):
 
     if user_obj.is_active and _es_ultimo_administrador_activo(user_obj):
         messages.error(request, "No podés desactivar al último Administrador activo.")
+        return redirect('lista_usuarios')
+
+    empleado_vinculado = getattr(user_obj, 'empleado', None)
+    if not user_obj.is_active and empleado_vinculado and empleado_vinculado.fecha_baja:
+        # SUGGESTION 2: si el Empleado vinculado está de baja, reactivar el
+        # usuario desde acá lo dejaría con acceso sin que nadie haya dado de
+        # alta al Empleado de nuevo — la baja del Empleado manda.
+        messages.error(
+            request,
+            f"No se puede reactivar: el empleado vinculado «{empleado_vinculado}» está de baja.",
+        )
         return redirect('lista_usuarios')
 
     user_obj.is_active = not user_obj.is_active
