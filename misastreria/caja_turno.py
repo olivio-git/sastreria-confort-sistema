@@ -68,6 +68,35 @@ def puede_ver_sesion(user, sesion):
     return sesion.usuario_apertura_id == user.id or puede_supervisar(user)
 
 
+def autorizar_transicion_a_entregado(user, saldo_pendiente):
+    """Reglas para marcar una reparación/confección como 'entregado' —
+    ÚNICAS y compartidas por todos los caminos que pueden disparar esa
+    transición: el botón dedicado (`marcar_entregado`/`entregar_confeccion`)
+    Y cualquier formulario que además exponga el campo `estado`
+    (`crear_reparacion`, `editar_reparacion`, `crear_confeccion`,
+    `editar_confeccion` — `ReparacionForm`/`ConfeccionForm` incluyen
+    `estado` entre sus campos editables, así que sin este guard alcanzaba con
+    mandar `estado=entregado` en esos formularios para saltarse la regla).
+
+    Matriz de permisos (spec): "Reparaciones/Confecciones entregado = Admin/
+    Taller only". Si además queda saldo pendiente, hace falta tener la caja
+    PROPIA abierta para poder cobrar ese saldo — igual que cualquier otro
+    cobro. Taller nunca tiene turno propio (nunca recibe `abrir_caja`), así
+    que en la práctica sólo puede entregar cuando el saldo ya es cero
+    (opción (a) del reporte de verificación: "Taller sólo entrega con saldo
+    en cero").
+
+    Levanta `TurnoCajaError` con un mensaje listo para mostrarle al usuario
+    si la transición no está permitida; no devuelve nada ni levanta nada si
+    está todo en orden."""
+    if not user.has_perm('misastreria.cambiar_estado_taller'):
+        raise TurnoCajaError(
+            'No tenés permiso para marcar esto como entregado.'
+        )
+    if saldo_pendiente and saldo_pendiente > 0:
+        verificar_turno_cobro(user)
+
+
 # ============================================================
 # PIN de desbloqueo de caja (Fase 5)
 # ============================================================

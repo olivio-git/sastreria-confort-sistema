@@ -37,7 +37,7 @@ from misastreria.caja_signals import (
     _ajustar_total_en_caja,
     _reversar_movimientos_activos,
 )
-from misastreria.caja_turno import CajaSinSesionError
+from misastreria.caja_turno import CajaSinSesionError, TurnoCajaError
 from misastreria.models import CajaMovimiento, Alquiler, Reparacion, Confeccion, Venta
 from .factories import (
     make_user, make_alquiler, make_alquiler_item, make_prenda_item,
@@ -244,8 +244,13 @@ class PagosAlquilerTests(TestCase):
 class PagosReparacionTests(TestCase):
 
     def setUp(self):
-        self.sesion = make_sesion_caja()
+        # WARNING 1 (reporte de verificación): `_liberar_pagos_reservados`
+        # ahora exige que `usuario` sea el dueño de la sesión abierta (antes
+        # no chequeaba dueño). La sesión de este setUp tiene que ser de
+        # `self.user`, no de un tercero, para que los tests que completan el
+        # saldo (y disparan la liberación) sigan pasando.
         self.user = make_user(username='cajero_rep')
+        self.sesion = make_sesion_caja(usuario=self.user)
         self.rep = make_reparacion(total=Decimal('150.00'))
 
     def test_reparacion_no_entregada_no_registra(self):
@@ -345,8 +350,12 @@ class PagosReparacionTests(TestCase):
 class PagosConfeccionTests(TestCase):
 
     def setUp(self):
-        self.sesion = make_sesion_caja()
+        # WARNING 1: misma razón que en PagosReparacionTests.setUp — la
+        # sesión tiene que pertenecer a `self.user` para que
+        # `_liberar_pagos_reservados` (disparada al completar el saldo) no
+        # rechace por dueño ajeno.
         self.user = make_user(username='cajero_conf')
+        self.sesion = make_sesion_caja(usuario=self.user)
         self.conf = make_confeccion(precio=Decimal('600.00'), adelanto=Decimal('0'))
 
     def test_pago_confeccion_crea_movimiento(self):
@@ -648,6 +657,59 @@ class AjustarTotalEnCajaTests(TestCase):
         self.assertEqual(
             _movs_activos(alquiler=alq, concepto='garantia_alquiler').count(), 1
         )
+
+
+class AjustarTotalEnCajaOwnershipTests(TestCase):
+    """WARNING 2 (reporte de verificación): el egreso de devolución por
+    sobrepago (`anulacion_cobro`) tiene que respetar la regla de turno —
+    sólo el dueño de la sesión abierta puede generar movimientos en ella,
+    Administrador incluido — igual que cualquier otro cobro. Antes de este
+    fix, `_ajustar_total_en_caja` sólo chequeaba "hay sesión" (vía
+    `_crear_mov_auto`), no "es la mía": editar una venta de otro cajero
+    podía sacar plata del cajón de esa persona."""
+
+    def _venta_con_sobrepago(self, propietario):
+        from .factories import make_sesion_caja
+        make_sesion_caja(usuario=propietario)
+        venta = make_venta(total=Decimal('0'))
+        venta.total = Decimal('230.00')
+        venta.save(update_fields=['total'])
+        registrar_pago_venta(venta, Decimal('100.00'), 'efectivo', None, None)
+        return venta
+
+    def test_sin_usuario_no_exige_turno_compatibilidad(self):
+        """Los tests de contabilidad pura de esta misma clase (arriba) no
+        pasan `usuario` — deben seguir funcionando sin exigir turno."""
+        propietario = make_user(username='dueno_compat', role='Cajero')
+        venta = self._venta_con_sobrepago(propietario)
+        _ajustar_total_en_caja(
+            referencia_field='referencia_venta', instance=venta,
+            concepto_cobro='venta_ajuste', nuevo_total=Decimal('80.00'),
+            old_total=venta.total, forma_pago='efectivo',
+        )
+        self.assertEqual(_movs_activos(venta=venta, concepto='anulacion_cobro').count(), 1)
+
+    def test_usuario_ajeno_a_la_sesion_no_puede_generar_el_egreso(self):
+        dueno = make_user(username='dueno_ajuste', role='Cajero')
+        otro = make_user(username='otro_ajuste', role='Administrador')
+        venta = self._venta_con_sobrepago(dueno)
+        with self.assertRaises(TurnoCajaError):
+            _ajustar_total_en_caja(
+                referencia_field='referencia_venta', instance=venta,
+                concepto_cobro='venta_ajuste', nuevo_total=Decimal('80.00'),
+                old_total=venta.total, forma_pago='efectivo', usuario=otro,
+            )
+        self.assertEqual(_movs_activos(venta=venta, concepto='anulacion_cobro').count(), 0)
+
+    def test_dueno_de_la_sesion_si_puede(self):
+        dueno = make_user(username='dueno_ajuste2', role='Cajero')
+        venta = self._venta_con_sobrepago(dueno)
+        _ajustar_total_en_caja(
+            referencia_field='referencia_venta', instance=venta,
+            concepto_cobro='venta_ajuste', nuevo_total=Decimal('80.00'),
+            old_total=venta.total, forma_pago='efectivo', usuario=dueno,
+        )
+        self.assertEqual(_movs_activos(venta=venta, concepto='anulacion_cobro').count(), 1)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

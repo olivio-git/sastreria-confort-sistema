@@ -19,12 +19,18 @@ from django.urls import reverse
 
 from misastreria.caja_signals import registrar_pago_venta
 from misastreria.models import Venta
-from .factories import make_user, make_venta
+from .factories import make_sesion_caja, make_user, make_venta
 
 
 class PagoDeVentaEfectuadaConSaldoTests(TestCase):
     def setUp(self):
         self.usuario = make_user()
+        # WARNING 1 (reporte de verificación): registrar un pago, sea
+        # `via_caja=True` o `via_caja=False` (reserva), exige turno propio
+        # abierto — no es parte de lo que este archivo prueba (VEN-067 es
+        # sobre estado/saldo), pero hace falta para que los pagos de este
+        # setUp se puedan registrar.
+        make_sesion_caja(usuario=self.usuario)
         self.client = Client()
         self.client.force_login(self.usuario)
         # Se reproduce el flujo real de `crear_venta`: la venta nace SIN total

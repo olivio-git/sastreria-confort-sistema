@@ -87,7 +87,7 @@ def servicio_pre_delete_reversar_caja(sender, instance, **kwargs):
     _reversar_movimientos_activos(referencia_field=referencia_field, instance=instance)
 
 
-def _ajustar_total_en_caja(*, referencia_field, instance, concepto_cobro, nuevo_total, forma_pago, cliente=None, old_total=None):
+def _ajustar_total_en_caja(*, referencia_field, instance, concepto_cobro, nuevo_total, forma_pago, cliente=None, old_total=None, usuario=None):
     """
     Reconcilia la caja con el nuevo total de un servicio editado.
 
@@ -103,6 +103,16 @@ def _ajustar_total_en_caja(*, referencia_field, instance, concepto_cobro, nuevo_
     `pagado` se calcula sobre los movimientos activos del servicio, excluyendo
     garantías de alquiler (que tienen su propio flujo). `concepto_cobro` y
     `old_total` se conservan por compatibilidad de firma pero ya no se usan.
+
+    `usuario`: el egreso de devolución es un movimiento de caja como
+    cualquier otro — sólo el dueño de la sesión abierta puede generarlo
+    (WARNING 2 del reporte de verificación: antes sólo se chequeaba "hay
+    sesión", no "es la mía", así que editar el total de un servicio ajeno
+    podía sacarle plata del cajón a otro cajero). Si no se pasa `usuario`
+    (compatibilidad con callers internos/tests de contabilidad pura que no
+    tienen un request), NO se hace el chequeo de dueño — sigue exigiéndose
+    sólo "hay sesión abierta" vía `_crear_mov_auto`. Las vistas SIEMPRE
+    deben pasar `usuario=request.user`.
     """
     from django.db.models import Sum
     if nuevo_total is None or Decimal(str(nuevo_total)) < 0:
@@ -118,6 +128,9 @@ def _ajustar_total_en_caja(*, referencia_field, instance, concepto_cobro, nuevo_
     exceso = pagado - Decimal(str(nuevo_total))
     if exceso <= 0:
         return
+    if usuario is not None:
+        from .caja_turno import verificar_turno_cobro
+        verificar_turno_cobro(usuario)
     _crear_mov_auto(
         concepto='anulacion_cobro',
         monto=exceso,
@@ -134,22 +147,27 @@ def _crear_mov_auto(*, concepto, monto, forma_pago, descripcion, via_caja=True, 
     Checks idempotency via the referencia_* + concepto + movimiento_reverso__isnull=True query.
     Note: callers perform the idempotency check before calling this function.
 
-    Defensa en profundidad: cuando el movimiento SÍ va a afectar la caja
-    (`via_caja=True`, el default), nunca se crea con sesion=None — esa era la
-    fuente de los movimientos huérfanos. Las vistas deben validar el turno
-    ANTES de llegar acá (`caja_turno.verificar_turno_cobro`) para mostrar un
-    mensaje amable; si de todos modos se llega hasta acá sin sesión (ej.
-    señal disparada desde el admin de Django o un shell), se corta acá con
-    CajaSinSesionError.
+    Defensa en profundidad: nunca se crea un movimiento con sesion=None —
+    esa era la fuente de los movimientos huérfanos. Las vistas deben validar
+    el turno ANTES de llegar acá (`caja_turno.verificar_turno_cobro`) para
+    mostrar un mensaje amable; si de todos modos se llega hasta acá sin
+    sesión (ej. señal disparada desde el admin de Django o un shell), se
+    corta acá con CajaSinSesionError.
 
-    `via_caja=False` es la reserva intencional: un pago que se registra pero
-    todavía NO cuenta para el saldo de ninguna sesión (se "libera" después,
-    ver `_liberar_pagos_reservados`) — sesion=None ahí es el diseño, no un bug.
+    `via_caja=False` es la reserva intencional (WARNING 1 del reporte de
+    verificación, decisión del dueño del producto): un pago que SÍ es plata
+    real cobrada ahora por quien tiene su turno abierto, pero que todavía NO
+    cuenta para el saldo de NINGUNA sesión hasta que se "libere" (ver
+    `_liberar_pagos_reservados`) — por eso exige exactamente el mismo "hay
+    sesión abierta" que `via_caja=True`; la única diferencia es el flag, no
+    el requisito de turno. (Antes de este fix, `via_caja=False` se eximía
+    del chequeo por completo y podía crear filas con `sesion=None` sin que
+    nadie hubiera abierto ninguna caja — el bug que esto corrige.)
     """
     if monto is None or Decimal(str(monto)) <= 0:
         return None
     sesion = _sesion_activa()
-    if sesion is None and via_caja:
+    if sesion is None:
         raise CajaSinSesionError(
             f"No se puede registrar '{concepto}': no hay ninguna caja abierta."
         )
@@ -167,13 +185,29 @@ def _crear_mov_auto(*, concepto, monto, forma_pago, descripcion, via_caja=True, 
     )
 
 
-def _liberar_pagos_reservados(referencia_field, instance):
-    """Convierte todos los pagos via_caja=False de un servicio a via_caja=True."""
-    CajaMovimiento.objects.filter(
-        **{referencia_field: instance},
-        via_caja=False,
-        movimiento_reverso__isnull=True,
-    ).update(via_caja=True)
+def _liberar_pagos_reservados(referencia_field, instance, usuario):
+    """Libera los pagos reservados (`via_caja=False`) de un servicio: los
+    marca `via_caja=True` Y los reasigna a la sesión abierta de `usuario`
+    (WARNING 1, decisión del dueño del producto) — sin importar en qué
+    sesión (o sin sesión, `sesion=None`, para filas reservadas de antes de
+    este fix) se hayan creado originalmente. Quien libera necesita su propio
+    turno abierto, igual que para cualquier otro cobro: si no lo tiene, NO
+    se libera nada (atómico) y se levanta `TurnoCajaError` para que el
+    llamador lo convierta en un mensaje.
+
+    No hace falta una migración de datos para las filas viejas con
+    `sesion=None`: quedan tal cual hasta que alguien con turno propio las
+    libere, momento en el que esta misma función les asigna la sesión.
+    """
+    from django.db import transaction as db_transaction
+    from .caja_turno import verificar_turno_cobro
+    sesion = verificar_turno_cobro(usuario)
+    with db_transaction.atomic():
+        CajaMovimiento.objects.filter(
+            **{referencia_field: instance},
+            via_caja=False,
+            movimiento_reverso__isnull=True,
+        ).update(via_caja=True, sesion=sesion)
 
 
 # ============================================================
@@ -247,7 +281,7 @@ def registrar_pago_alquiler(alquiler, monto, forma_pago, descripcion, usuario, v
     if via_caja:
         alquiler.refresh_from_db()
         if alquiler.saldo_pendiente <= Decimal('0'):
-            _liberar_pagos_reservados('referencia_alquiler', alquiler)
+            _liberar_pagos_reservados('referencia_alquiler', alquiler, usuario)
 
 
 def registrar_recargo_alquiler(alquiler, monto, forma_pago, descripcion, usuario, via_caja=True):
@@ -326,12 +360,34 @@ def registrar_garantia_alquiler_en_caja(instance):
     )
 
 
-def _ajustar_garantia_alquiler_en_caja(instance):
+def _sesion_propia_o_error(usuario, mensaje):
+    """Devuelve la sesión abierta si existe Y (cuando se pasa `usuario`) le
+    pertenece; si no, levanta el error de turno correspondiente con
+    `mensaje`. `usuario=None` preserva el comportamiento anterior de sólo
+    exigir "hay sesión abierta" (compatibilidad con callers internos)."""
+    sesion = _sesion_activa()
+    if sesion is None:
+        raise CajaSinSesionError(mensaje)
+    if usuario is not None and sesion.usuario_apertura_id != usuario.id:
+        from .caja_turno import TurnoCajaError
+        raise TurnoCajaError(
+            f'La caja abierta es de {sesion.usuario_apertura.get_username()}. '
+            'Sólo quien abrió el turno puede ajustar sus movimientos.'
+        )
+    return sesion
+
+
+def _ajustar_garantia_alquiler_en_caja(instance, usuario=None):
     """
     Sincroniza el movimiento de garantía al editar un alquiler.
     - Si la garantía pasó a no-monetaria → reversa el movimiento existente.
     - Si cambió monto o tipo → reversa el anterior y crea uno nuevo.
     - Si no cambió → no hace nada.
+
+    `usuario`: igual regla de dueño que `_ajustar_total_en_caja` (WARNING 2)
+    — reversar/crear el movimiento de garantía es tocar la caja, y sólo el
+    dueño de la sesión abierta puede hacerlo. Sin `usuario` (compatibilidad),
+    sólo se exige que haya una sesión abierta, sin importar de quién.
     """
     from django.db import transaction as db_transaction
     existing = CajaMovimiento.objects.filter(
@@ -348,11 +404,10 @@ def _ajustar_garantia_alquiler_en_caja(instance):
 
     if not is_monetary:
         if existing and not existing.fue_reversado:
-            sesion = _sesion_activa()
-            if sesion is None:
-                raise CajaSinSesionError(
-                    f"No se puede quitar la garantía de {instance.codigo}: no hay ninguna caja abierta."
-                )
+            sesion = _sesion_propia_o_error(
+                usuario,
+                f"No se puede quitar la garantía de {instance.codigo}: no hay ninguna caja abierta.",
+            )
             with db_transaction.atomic():
                 reverso = CajaMovimiento.objects.create(
                     sesion=sesion,
@@ -374,11 +429,10 @@ def _ajustar_garantia_alquiler_en_caja(instance):
         if existing.monto == instance.garantia_monto and existing.forma_pago == forma:
             return
         # Reverse old and create new
-        sesion = _sesion_activa()
-        if sesion is None:
-            raise CajaSinSesionError(
-                f"No se puede ajustar la garantía de {instance.codigo}: no hay ninguna caja abierta."
-            )
+        sesion = _sesion_propia_o_error(
+            usuario,
+            f"No se puede ajustar la garantía de {instance.codigo}: no hay ninguna caja abierta.",
+        )
         with db_transaction.atomic():
             reverso = CajaMovimiento.objects.create(
                 sesion=sesion,
@@ -394,6 +448,9 @@ def _ajustar_garantia_alquiler_en_caja(instance):
             existing.movimiento_reverso = reverso
             existing.save(update_fields=['movimiento_reverso'])
 
+    if usuario is not None:
+        from .caja_turno import verificar_turno_cobro
+        verificar_turno_cobro(usuario)
     _crear_mov_auto(
         concepto='garantia_alquiler',
         monto=instance.garantia_monto,
@@ -530,7 +587,7 @@ def registrar_pago_venta(venta, monto, forma_pago, descripcion, usuario, via_caj
                 pi.estado = 'baja'
                 pi.save(update_fields=['estado'])
     if via_caja and nuevo_saldo <= Decimal('0'):
-        _liberar_pagos_reservados('referencia_venta', venta)
+        _liberar_pagos_reservados('referencia_venta', venta, usuario)
 
 
 @receiver(post_save, sender=Venta)
@@ -612,7 +669,7 @@ def registrar_pago_confeccion(confeccion, monto, forma_pago, descripcion, usuari
     if via_caja:
         confeccion.refresh_from_db()
         if confeccion.saldo_pendiente <= Decimal('0'):
-            _liberar_pagos_reservados('referencia_confeccion', confeccion)
+            _liberar_pagos_reservados('referencia_confeccion', confeccion, usuario)
 
 
 @receiver(post_save, sender=Confeccion)
@@ -739,7 +796,7 @@ def registrar_pago_reparacion(reparacion, monto, forma_pago, descripcion, usuari
     if via_caja:
         reparacion.refresh_from_db()
         if reparacion.saldo_pendiente <= Decimal('0'):
-            _liberar_pagos_reservados('referencia_reparacion', reparacion)
+            _liberar_pagos_reservados('referencia_reparacion', reparacion, usuario)
 
 
 def registrar_pago_comision_empleado(empleado, monto, forma_pago, via_caja, descripcion, usuario, aplicaciones=None):

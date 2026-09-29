@@ -24,6 +24,7 @@ from misastreria.models import CajaSesion, CajaMovimiento, Venta, Alquiler
 from .factories import (
     make_administrador, make_cajero, make_sesion_caja, make_movimiento_caja,
     make_cliente, make_empleado, make_prenda, make_prenda_item,
+    make_alquiler, make_alquiler_item,
     desbloquear_caja_test,
 )
 
@@ -250,6 +251,80 @@ class CobroGuardTests(TestCase):
         )
 
 
+class CobroGuardAlquilerTests(TestCase):
+    """WARNING 4 (reporte de verificación): faltaban tests del cobro guard
+    para agregar_pago_alquiler (dueño) y agregar_recargo_alquiler — el guard
+    en sí ya estaba implementado (caja_turno_disponible/_puede_cobrar_o_avisar),
+    sólo faltaba la prueba."""
+
+    def setUp(self):
+        self.alquiler = make_alquiler(total=Decimal('200.00'))
+        make_alquiler_item(self.alquiler)
+
+    def test_agregar_pago_alquiler_sin_sesion_no_crea_movimiento(self):
+        cajero = make_cajero()
+        self.client.force_login(cajero)
+        resp = self.client.post(
+            reverse('agregar_pago_alquiler', args=[self.alquiler.id]),
+            {'monto': '100', 'forma_pago': 'efectivo', 'via_caja': 'on'},
+        )
+        self.assertEqual(
+            CajaMovimiento.objects.filter(referencia_alquiler=self.alquiler, concepto='alquiler_pago').count(), 0
+        )
+
+    def test_agregar_pago_alquiler_dueno_si_puede(self):
+        cajero = make_cajero()
+        make_sesion_caja(usuario=cajero)
+        self.client.force_login(cajero)
+        resp = self.client.post(
+            reverse('agregar_pago_alquiler', args=[self.alquiler.id]),
+            {'monto': '100', 'forma_pago': 'efectivo', 'via_caja': 'on'},
+        )
+        self.assertRedirects(resp, reverse('detalle_alquiler', args=[self.alquiler.id]))
+        self.assertEqual(
+            CajaMovimiento.objects.filter(referencia_alquiler=self.alquiler, concepto='alquiler_pago').count(), 1
+        )
+
+    def test_agregar_recargo_alquiler_sin_sesion_no_crea_movimiento(self):
+        cajero = make_cajero()
+        self.client.force_login(cajero)
+        self.client.post(
+            reverse('agregar_recargo_alquiler', args=[self.alquiler.id]),
+            {'monto': '50', 'forma_pago': 'efectivo', 'via_caja': 'on'},
+        )
+        self.assertEqual(
+            CajaMovimiento.objects.filter(referencia_alquiler=self.alquiler, concepto='alquiler_recargo').count(), 0
+        )
+
+    def test_agregar_recargo_alquiler_dueno_si_puede(self):
+        cajero = make_cajero()
+        make_sesion_caja(usuario=cajero)
+        self.client.force_login(cajero)
+        self.client.post(
+            reverse('agregar_recargo_alquiler', args=[self.alquiler.id]),
+            {'monto': '50', 'forma_pago': 'efectivo', 'via_caja': 'on'},
+        )
+        self.assertEqual(
+            CajaMovimiento.objects.filter(referencia_alquiler=self.alquiler, concepto='alquiler_recargo').count(), 1
+        )
+
+
+class SegundaSesionMensajeUsuarioTests(TestCase):
+    """WARNING 4: el rechazo de abrir una segunda sesión (unique_caja_abierta)
+    ya estaba probado a nivel de modelo (IntegrityError); faltaba probar que
+    la VISTA lo convierte en un mensaje de error legible, no en un 500."""
+
+    def test_abrir_sesion_caja_con_una_ya_abierta_muestra_mensaje(self):
+        make_sesion_caja()
+        cajero = make_cajero(username='segunda_sesion')
+        self.client.force_login(cajero)
+        desbloquear_caja_test(self.client, cajero)
+        resp = self.client.post(reverse('abrir_sesion_caja'), {'monto_apertura': '100'})
+        self.assertEqual(resp.status_code, 200, 're-renderiza el form con error, no un 500')
+        self.assertContains(resp, 'Ya existe una sesión de caja abierta')
+        self.assertEqual(CajaSesion.objects.filter(estado='abierta').count(), 1)
+
+
 class CrearVentaPagoInlineRechazaTodoTests(TestCase):
     """Scenario: Inline payment during crear_venta with no open session — se
     rechaza TODO el envío (ni venta, ni items, ni pago quedan guardados)."""
@@ -352,4 +427,46 @@ class ReportesCajaPropiosTests(TestCase):
         self.client.force_login(self.cajero_a)
         desbloquear_caja_test(self.client, self.cajero_a)
         resp = self.client.get(reverse('detalle_sesion_caja', args=[self.sesion_a.pk]))
+        self.assertEqual(resp.status_code, 200)
+
+    def test_lista_movimientos_cajero_ve_solo_los_de_su_sesion(self):
+        """WARNING 3 (reporte de verificación): lista_movimientos_caja NO
+        filtraba por sesión propia — un Cajero veía los movimientos de
+        cualquier otra sesión, a diferencia de lista_sesiones/detalle_sesion
+        que sí filtran."""
+        sesion_b = self._abrir_sesion_b()
+        mov_a = make_movimiento_caja(sesion=self.sesion_a)
+        mov_b = make_movimiento_caja(sesion=sesion_b)
+        self.client.force_login(self.cajero_a)
+        desbloquear_caja_test(self.client, self.cajero_a)
+        resp = self.client.get(reverse('lista_movimientos_caja'))
+        ids = {m.pk for m in resp.context['page_obj']}
+        self.assertIn(mov_a.pk, ids)
+        self.assertNotIn(mov_b.pk, ids)
+
+    def test_lista_movimientos_admin_ve_todos(self):
+        sesion_b = self._abrir_sesion_b()
+        mov_a = make_movimiento_caja(sesion=self.sesion_a)
+        mov_b = make_movimiento_caja(sesion=sesion_b)
+        admin = make_administrador()
+        self.client.force_login(admin)
+        desbloquear_caja_test(self.client, admin)
+        resp = self.client.get(reverse('lista_movimientos_caja'))
+        ids = {m.pk for m in resp.context['page_obj']}
+        self.assertIn(mov_a.pk, ids)
+        self.assertIn(mov_b.pk, ids)
+
+    def test_detalle_movimiento_ajeno_redirige(self):
+        sesion_b = self._abrir_sesion_b()
+        mov_b = make_movimiento_caja(sesion=sesion_b)
+        self.client.force_login(self.cajero_a)
+        desbloquear_caja_test(self.client, self.cajero_a)
+        resp = self.client.get(reverse('detalle_movimiento_caja', args=[mov_b.pk]), follow=True)
+        self.assertRedirects(resp, reverse('lista_movimientos_caja'))
+
+    def test_detalle_movimiento_propio_accesible(self):
+        mov_a = make_movimiento_caja(sesion=self.sesion_a)
+        self.client.force_login(self.cajero_a)
+        desbloquear_caja_test(self.client, self.cajero_a)
+        resp = self.client.get(reverse('detalle_movimiento_caja', args=[mov_a.pk]))
         self.assertEqual(resp.status_code, 200)
