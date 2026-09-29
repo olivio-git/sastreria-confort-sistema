@@ -264,8 +264,10 @@ def lista_X(request):
   (reparaciones, ventas, confecciones, alquileres, transacciones)
 - Inventario y Clientes **no** tienen filtro de fecha por defecto
 - Inventario muestra `estado=ACT` por defecto
-- `buscar_clientes` (endpoint AJAX) no lleva `@login_required` para permitir
-  autocomplete desde formularios
+- `buscar_clientes` (endpoint AJAX) **ya NO es público**: desde el cambio de
+  roles/permisos requiere `@login_required` + `@any_permission_required(...)`
+  de al menos un permiso operativo (venta/reparación/alquiler/confección).
+  Ver `## Roles y permisos` más abajo.
 
 ---
 
@@ -312,6 +314,105 @@ El endpoint `buscar_clientes` devuelve JSON `[{id, ci, nombre}]` (top 10).
 
 ---
 
+## Roles y permisos
+
+El sistema autoriza cada vista contra 4 Django Groups: **Administrador**,
+**Cajero**, **Vendedor**, **Taller**. La navbar/sidebar (`perms.misastreria.*`
+en los templates) es sólo cosmética — la barrera real está en la vista.
+
+### `misastreria/roles.py` es la única fuente de verdad
+
+Todo el mapeo rol → permiso vive en el diccionario `ROLES` de
+`misastreria/roles.py`. **Para cambiar qué puede hacer un rol, se edita ese
+diccionario — nunca una vista.** El cambio se aplica solo:
+
+- en cada `migrate` (vía `post_migrate`, conectado en `apps.py`), o
+- corriendo `python3 manage.py sync_roles` a mano si sólo cambió `roles.py`
+  (sin migraciones nuevas) después de un deploy.
+
+`Administrador` es un caso especial (`ROLES['Administrador'] = ALL`): recibe
+automáticamente TODOS los permisos de la app, así nunca queda desactualizado
+cuando se agrega un modelo o permiso nuevo.
+
+Los permisos personalizados que no son `add_`/`change_`/`delete_`/`view_` de
+un modelo (ej. `registrar_cobro`, `abrir_caja`, `supervisar_caja`,
+`gestionar_usuarios`) están declarados en `roles.CUSTOM_PERMISSIONS` y se
+registran en `PerfilUsuario.Meta.permissions`.
+
+### Orden de decoradores en una vista
+
+```python
+@login_required                              # 1. afuera: anónimo -> login
+@permission_required('misastreria.perm')     # 2. sin permiso -> 403 estilizado
+@require_POST                                 # 3. si aplica
+def vista(request, ...):
+    ...
+```
+
+- `permission_required`/`any_permission_required` se importan de
+  `.permisos` (NUNCA `django.contrib.auth.decorators.permission_required`
+  directo) — la versión propia fuerza `raise_exception=True` y marca la
+  vista con `_permisos_requeridos` para que `test_url_coverage.py` la
+  detecte automáticamente.
+- `any_permission_required(*perms)` es para endpoints compartidos por varios
+  módulos (catálogos dinámicos AJAX, `buscar_clientes`, `buscar_empleados`):
+  exige AL MENOS UNO de los permisos listados, no todos.
+- Los chequeos de **ownership/turno de caja** (¿esta sesión es mía?, ¿tengo
+  mi propio turno abierto para cobrar?) van DENTRO del cuerpo de la vista,
+  usando `misastreria/caja_turno.py` — no son un problema de permiso (403),
+  son un problema de negocio (`messages.error` + redirect).
+- Toda URL nombrada en `urls.py` debe tener `_permisos_requeridos` o estar
+  en el allowlist explícito de `test_url_coverage.py` (`index`, `login`,
+  `logout`). Un test automático falla si se agrega una vista sin decorar.
+
+### Turno de caja y PIN de desbloqueo
+
+- Una sesión de caja pertenece a quien la abrió; sólo esa persona (o un
+  Administrador supervisando, con observación obligatoria) puede operarla o
+  cerrarla — ver `misastreria/caja_turno.py`.
+- Cobrar (pagos de venta/alquiler/confección/reparación) exige tener el
+  propio turno abierto, Administrador incluido: supervisar no es lo mismo
+  que cobrar.
+- Toda vista bajo `/caja/*` exige además un PIN de 4-6 dígitos (PC
+  compartida del mostrador), independiente de la sesión de Django —
+  `CajaPinMiddleware.process_view` en `misastreria/middleware.py`. Se
+  desbloquea 15 minutos por inactividad; 5 intentos fallidos bloquean el PIN
+  hasta que un Administrador lo resetea desde la pantalla de Usuarios.
+
+### Gestión de usuarios
+
+`/usuarios/` (permiso `gestionar_usuarios`, sólo Administrador) reemplaza al
+admin de Django para el día a día: crear usuario y vincularlo a un Empleado,
+cambiar de rol, resetear PIN, activar/desactivar. No se puede desactivar ni
+degradar al último Administrador activo del sistema, ni actuar sobre la
+propia cuenta desde esa pantalla.
+
+### Pendiente conocido (fuera de alcance de este cambio)
+
+`CajaAbiertaMiddleware.__call__` lee `request.resolver_match` ANTES de que
+Django lo resuelva (`get_response()`), así que hoy es un no-op — nunca
+bloquea nada. El guard de cobro (`caja_turno`/`caja_signals`) cubre el caso
+de plata sin caja abierta, pero el middleware en sí sigue roto y debería
+arreglarse (usar `process_view`, igual que `CajaPinMiddleware`) en un cambio
+aparte.
+
+### Checklist de despliegue
+
+1. `python3 manage.py migrate` — crea/actualiza los 4 grupos vía
+   `post_migrate` (idempotente, no toca membresías existentes salvo la
+   migración de datos inicial que sólo corre una vez).
+2. El superusuario entra y, desde `/usuarios/`, asigna un rol a cada User
+   existente que todavía no tenga uno (los superusuarios ya quedan en
+   Administrador por la migración inicial).
+3. Si `roles.py` cambió sin agregar una migración (sólo el diccionario
+   `ROLES`), correr `python3 manage.py sync_roles` para aplicarlo sin
+   esperar al próximo `migrate`.
+4. Cada usuario activo fija su propio PIN de caja la primera vez que entra
+   a `/caja/` (pantalla `configurar_pin_caja`) — nadie puede cobrar ni abrir
+   caja sin eso.
+
+---
+
 ## Archivos clave
 
 | Archivo | Rol |
@@ -324,6 +425,11 @@ El endpoint `buscar_clientes` devuelve JSON `[{id, ci, nombre}]` (top 10).
 | `misastreria/models.py` | Todos los modelos |
 | `misastreria/forms.py` | Todos los formularios |
 | `sastreria/settings_local.py` | Config local (SQLite, DEBUG=True) — **no commiteado** |
+| `misastreria/roles.py` | Fuente única rol → permiso (`ROLES`, `CUSTOM_PERMISSIONS`) |
+| `misastreria/permisos.py` | Decoradores `permission_required`/`any_permission_required` |
+| `misastreria/caja_turno.py` | Ownership de turno de caja + ciclo de vida del PIN |
+| `misastreria/middleware.py` | `CajaAbiertaMiddleware` (inerte, ver pendiente conocido), `CajaPinMiddleware` |
+| `misastreria/views_usuarios.py` | Pantalla de gestión de usuarios/rol/PIN (Administrador) |
 
 ## Excepciones a JS inline en templates
 
