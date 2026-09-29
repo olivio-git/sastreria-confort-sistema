@@ -132,6 +132,61 @@ class ResetearPinUsuarioTests(TestCase):
         self.assertRedirects(resp, reverse('lista_sesiones_caja'))
 
 
+class ResetearPinUsuarioSelfTests(TestCase):
+    """WARNING 2 (reporte de verificación): un Administrador no puede
+    resetear su propio PIN desde `/usuarios/`. `/usuarios/` no está detrás
+    del gate de PIN (sólo `/caja/` lo está), así que sin este chequeo un
+    Administrador con el PIN bloqueado podía resetear el suyo propio acá y
+    volver a fijarlo con la contraseña de su cuenta — saltándose por
+    completo el bloqueo de 5 intentos (NEW-5 del reporte). Tiene que
+    resetearlo OTRO Administrador."""
+
+    def test_admin_no_puede_resetear_su_propio_pin(self):
+        admin = make_administrador(pin='1234')
+        self.client.force_login(admin)
+
+        resp = self.client.post(reverse('resetear_pin_usuario', args=[admin.pk]))
+
+        self.assertRedirects(resp, reverse('lista_usuarios'))
+        perfil = perfil_de(admin)
+        self.assertNotEqual(perfil.pin_hash, '', 'el PIN no debe haberse borrado')
+
+    def test_otro_administrador_si_puede_resetearselo(self):
+        admin_a = make_administrador(username='admin_a_pin', pin='1234')
+        admin_b = make_administrador(username='admin_b_pin')
+        self.client.force_login(admin_b)
+
+        resp = self.client.post(reverse('resetear_pin_usuario', args=[admin_a.pk]))
+
+        self.assertRedirects(resp, reverse('lista_usuarios'))
+        perfil = perfil_de(admin_a)
+        self.assertEqual(perfil.pin_hash, '')
+
+
+class ResetearPinManagementCommandTests(TestCase):
+    """Escape hatch para el caso «un solo Administrador» (WARNING 2): si el
+    único Administrador se bloquea el PIN, no hay OTRO Administrador que
+    pueda resetéarselo desde la web — el comando de management requiere
+    acceso al servidor, no al sistema."""
+
+    def test_resetea_el_pin_por_username(self):
+        from django.core.management import call_command
+        admin = make_administrador(username='unico_admin', pin='1234')
+        self.assertNotEqual(perfil_de(admin).pin_hash, '')
+
+        call_command('resetear_pin', admin.username)
+
+        perfil = perfil_de(admin)
+        self.assertEqual(perfil.pin_hash, '')
+        self.assertFalse(perfil.pin_bloqueado)
+
+    def test_username_inexistente_falla_con_mensaje_claro(self):
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        with self.assertRaises(CommandError):
+            call_command('resetear_pin', 'no_existe_este_usuario')
+
+
 class EmpleadoDeBajaVinculoTests(TestCase):
     """SUGGESTION 2 (reporte de verificación): vincular un Empleado que ya
     tiene `fecha_baja` no debe dejar el usuario activo, y no se puede

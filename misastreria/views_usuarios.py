@@ -171,6 +171,18 @@ def editar_usuario(request, pk):
 @require_POST
 def resetear_pin_usuario(request, pk):
     user_obj = get_object_or_404(User, pk=pk)
+    if user_obj.pk == request.user.pk:
+        # WARNING 2 del reporte de verificación: `/usuarios/` no está detrás
+        # del gate de PIN (sólo `/caja/` lo está), así que sin este chequeo
+        # un Administrador con el PIN bloqueado podía resetear el suyo
+        # propio acá y volver a fijarlo con la contraseña de su cuenta —
+        # saltándose por completo el bloqueo de 5 intentos. Mismo criterio
+        # que `editar_usuario`/`toggle_activo_usuario`: nunca actuar sobre
+        # la propia cuenta desde esta pantalla; tiene que resetearlo OTRO
+        # Administrador (o el management command `resetear_pin` con acceso
+        # al servidor, para el caso de un solo Administrador).
+        messages.error(request, "No podés resetear tu propio PIN. Pedile a otro Administrador que lo haga.")
+        return redirect('lista_usuarios')
     caja_turno.resetear_pin(user_obj)
     messages.success(request, f"PIN de «{user_obj.username}» reseteado. Deberá fijar uno nuevo en su próximo acceso a caja.")
     return redirect('lista_usuarios')
