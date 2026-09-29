@@ -1136,6 +1136,15 @@ def pagar_comision_empleado(request, empleado_id):
                 )
 
             if monto_nuevo > 0:
+                # CRITICAL 1 (tercera vuelta de sdd-verify): pagar una
+                # comisión "por caja" es un egreso NUEVO como cualquier
+                # otro — sólo el dueño del turno abierto puede generarlo,
+                # Administrador NO exento. Antes no se chequeaba acá (el
+                # helper tampoco lo hacía), así que un Administrador podía
+                # pagarle a un empleado desde la caja de OTRO cajero, o
+                # reventar con un 500 si no había ninguna sesión abierta.
+                if form.cleaned_data.get('via_caja', False):
+                    caja_turno.verificar_turno_cobro(request.user)
                 pago = registrar_pago_comision_empleado(
                     empleado=empleado,
                     monto=monto_nuevo,
@@ -1145,6 +1154,9 @@ def pagar_comision_empleado(request, empleado_id):
                     usuario=request.user,
                     aplicaciones=aplicaciones,
                 )
+    except caja_turno.TurnoCajaError as exc:
+        messages.error(request, str(exc))
+        return redirect('detalle_empleado', id=empleado_id)
     except ValueError as exc:
         messages.error(request, str(exc))
         return redirect('detalle_empleado', id=empleado_id)
@@ -1937,10 +1949,19 @@ def crear_reparacion(request):
                     errores = _guardar_items_reparacion(reparacion, request.POST)
                     errores += _guardar_asignaciones(reparacion, request.POST, ReparacionEmpleado, 'reparacion',
                                                      commission_field='monto_comision_fijo', monto_key='monto', sync_lead=False)
+                    # WARNING 2 (tercera vuelta de sdd-verify): la matriz
+                    # "en_proceso/entregado = Admin/Taller only" también
+                    # aplica al ESTADO INICIAL — antes un Vendedor podía
+                    # crear la reparación directamente en 'en_proceso' sin
+                    # `cambiar_estado_taller` (P8 del reporte). Cubre
+                    # 'entregado' delegando en la misma autorización de
+                    # siempre (permiso + turno propio si queda saldo).
+                    caja_turno.autorizar_cambio_estado(
+                        request.user, 'pendiente', reparacion.estado, reparacion.saldo_pendiente,
+                    )
                     if reparacion.estado == 'entregado':
-                        caja_turno.autorizar_transicion_a_entregado(request.user, reparacion.saldo_pendiente)
                         from .caja_signals import registrar_reparacion_en_caja
-                        registrar_reparacion_en_caja(reparacion)
+                        registrar_reparacion_en_caja(reparacion, usuario=request.user)
             except caja_turno.TurnoCajaError as exc:
                 form.add_error(None, str(exc))
             else:
@@ -2155,6 +2176,10 @@ def marcar_entregado(request, id):
             if forma_pago in formas_validas:
                 reparacion.forma_pago = forma_pago
             reparacion.estado = 'entregado'
+            # `reparacion_to_caja` (caja_signals.py) necesita saber QUIÉN
+            # entrega para registrar el saldo final a nombre del dueño del
+            # turno (mismo patrón que `editar_reparacion`).
+            reparacion._actor_caja = request.user
             reparacion.save()
             messages.success(request, f"La reparación {reparacion.codigo} ha sido marcada como entregada.")
         else:
@@ -3532,8 +3557,12 @@ def crear_confeccion(request):
                         confeccion, request.POST, request.user,
                         f"Adelanto confección {confeccion.codigo}", saldo_max=confeccion.precio,
                     )
-                    if estado_solicitado == 'entregado':
-                        caja_turno.autorizar_transicion_a_entregado(request.user, confeccion.saldo_pendiente)
+                    # WARNING 2 (tercera vuelta de sdd-verify): mismo fix que
+                    # crear_reparacion — la matriz también aplica al ESTADO
+                    # INICIAL, no sólo a ediciones posteriores (P8).
+                    caja_turno.autorizar_cambio_estado(
+                        request.user, 'pendiente', estado_solicitado, confeccion.saldo_pendiente,
+                    )
             except caja_turno.TurnoCajaError as exc:
                 form.add_error(None, str(exc))
             else:
@@ -3593,6 +3622,11 @@ def editar_confeccion(request, id):
                     request.user, estado_anterior, form.cleaned_data.get('estado'),
                     saldo_antes_de_editar,
                 )
+                # Estampado ANTES de guardar: si esta edición transiciona a
+                # 'entregado' (o, a futuro, regresa desde ahí),
+                # `caja_signals.confeccion_to_caja` necesita saber QUIÉN está
+                # cobrando/revirtiendo — mismo patrón que editar_reparacion.
+                confeccion._actor_caja = request.user
                 with transaction.atomic():
                     from .models import ConfeccionEmpleado
                     form.save()
@@ -3742,6 +3776,10 @@ def entregar_confeccion(request, id):
             confeccion.fecha_entrega = django_tz.localdate()
         if confeccion.garantia_meses and not confeccion.garantia_hasta:
             confeccion.garantia_hasta = confeccion.fecha_entrega + relativedelta(months=confeccion.garantia_meses)
+        # `confeccion_to_caja` necesita saber QUIÉN entrega para registrar el
+        # saldo final a nombre del dueño del turno (mismo patrón que
+        # marcar_entregado/editar_reparacion).
+        confeccion._actor_caja = request.user
         confeccion.save()
         messages.success(request, f'Confección {confeccion.codigo} marcada como entregada.')
         return redirect('lista_confecciones')
@@ -4069,8 +4107,8 @@ def crear_alquiler(request):
                     errores = _guardar_items_alquiler(alquiler, request.POST)
                     adelanto_efectivo = min(adelanto, alquiler.total or Decimal('0'))
                     forma = form.cleaned_data.get('forma_pago') or 'efectivo'
-                    registrar_alquiler_en_caja(alquiler, adelanto=adelanto_efectivo, forma_pago=forma)
-                    registrar_garantia_alquiler_en_caja(alquiler)
+                    registrar_alquiler_en_caja(alquiler, adelanto=adelanto_efectivo, forma_pago=forma, usuario=request.user)
+                    registrar_garantia_alquiler_en_caja(alquiler, usuario=request.user)
             except caja_turno.TurnoCajaError as exc:
                 form.add_error(None, str(exc))
             else:
@@ -9925,7 +9963,11 @@ def revertir_movimiento_caja(request, pk):
     tipo_reverso = 'egreso' if movimiento.tipo == 'ingreso' else 'ingreso'
 
     try:
-        sesion_activa = caja_turno.verificar_turno_cobro(request.user)
+        # S6 (tercera vuelta de sdd-verify): revertir es "reversión de un
+        # movimiento existente", no un cobro nuevo — usa la misma regla que
+        # `_reversar_movimientos_activos` (dueño O Administrador), no la
+        # regla de cobro (que exige turno PROPIO incluso para Administrador).
+        sesion_activa = caja_turno.verificar_turno_reversion(request.user)
     except caja_turno.TurnoCajaError as exc:
         messages.error(request, str(exc))
         return redirect('detalle_movimiento_caja', pk=pk)

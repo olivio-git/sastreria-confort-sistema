@@ -11,6 +11,11 @@ ESTADOS_CERRADOS = ['devuelto', 'extraviado']
 
 
 class Command(BaseCommand):
+    """Excepción DOCUMENTADA al choke point de caja — ver el docstring
+    equivalente en `backfill_reparacion_cobros`: `sesion=None`/`usuario=None`
+    a propósito (cobros históricos anteriores al módulo de caja, sólo
+    ejecutable con acceso de shell al servidor)."""
+
     help = (
         'Backfill CajaMovimiento de cobro para alquileres cerrados (devuelto/extraviado) '
         'creados antes del módulo de caja. Idempotente.'

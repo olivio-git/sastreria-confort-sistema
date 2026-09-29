@@ -57,9 +57,12 @@ class ConfeccionSaldoTests(TestCase):
         self.assertEqual(c.saldo, Decimal('0.00'))
 
     def test_saldo_se_actualiza_al_editar(self):
-        make_sesion_caja()
+        sesion = make_sesion_caja()
         c = make_confeccion(precio=Decimal('500.00'), adelanto=Decimal('0'))
         c.adelanto = Decimal('300.00')
+        # Incrementar el adelanto dispara confeccion_to_caja (choke point de
+        # caja: `_crear_mov_auto` exige un actor explícito).
+        c._actor_caja = sesion.usuario_apertura
         c.save()
         c.refresh_from_db()
         self.assertEqual(c.saldo, Decimal('200.00'))
@@ -125,10 +128,12 @@ class ConfeccionEstadoTests(TestCase):
 
     def test_cambio_estado_entregado(self):
         # Con saldo pendiente > 0, pasar a 'entregado' dispara confeccion_saldo
-        # (confeccion_to_caja): necesita una caja abierta.
-        make_sesion_caja()
+        # (confeccion_to_caja): necesita una caja abierta Y un actor (choke
+        # point de caja).
+        sesion = make_sesion_caja()
         c = make_confeccion()
         c.estado = 'entregado'
+        c._actor_caja = sesion.usuario_apertura
         c.save()
         self.assertEqual(c.estado, 'entregado')
 

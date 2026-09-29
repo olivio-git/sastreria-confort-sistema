@@ -26,7 +26,8 @@ from django.urls import reverse
 from misastreria.caja_turno import TurnoCajaError, autorizar_transicion_a_entregado
 from misastreria.caja_signals import registrar_pago_venta
 from misastreria.models import (
-    Alquiler, CajaMovimiento, Confeccion, Reparacion, Venta,
+    Alquiler, CajaMovimiento, Confeccion, PagoComisionEmpleado, Reparacion,
+    ReparacionEmpleado, Venta,
 )
 from .factories import (
     make_administrador, make_alquiler, make_alquiler_item, make_cajero,
@@ -427,7 +428,7 @@ class EditarVentaReembolsoOwnershipTests(TestCase):
         # setUp; se cierra enseguida — cada test abre la sesión que le
         # corresponde a su escenario.
         sesion_armado = make_sesion_caja()
-        registrar_pago_venta(self.venta, Decimal('100.00'), 'efectivo', None, None)
+        registrar_pago_venta(self.venta, Decimal('100.00'), 'efectivo', None, sesion_armado.usuario_apertura)
         sesion_armado.estado = 'cerrada'
         sesion_armado.save(update_fields=['estado'])
 
@@ -620,7 +621,7 @@ class EditarVentaSinSesionAlgunaTests(TestCase):
         Venta.objects.filter(pk=venta.pk).update(total=Decimal('230'), subtotal=Decimal('230'))
         venta.refresh_from_db()
         sesion_armado = make_sesion_caja()
-        registrar_pago_venta(venta, Decimal('100.00'), 'efectivo', None, None)
+        registrar_pago_venta(venta, Decimal('100.00'), 'efectivo', None, sesion_armado.usuario_apertura)
         sesion_armado.estado = 'cerrada'
         sesion_armado.save(update_fields=['estado'])
 
@@ -866,3 +867,221 @@ class DevolverAlquilerGarantiaOwnershipTests(TestCase):
             CajaMovimiento.objects.filter(
                 referencia_alquiler=self.alquiler, concepto='garantia_devolucion').count(), 1,
         )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CRITICAL 1 (tercera vuelta de sdd-verify) — pagar_comision_empleado: pagar
+# una comisión "por caja" es un egreso NUEVO como cualquier otro — sólo el
+# dueño del turno abierto puede generarlo, Administrador NO exento. Proven
+# exploit del reporte (P7): un Administrador (no dueño) pagaba Bs80 de
+# comisión y el egreso se escribía en la caja de Cajero A; P7b: sin ninguna
+# sesión abierta, la vista reventaba con HTTP 500 (CajaSinSesionError no
+# contemplada).
+# ──────────────────────────────────────────────────────────────────────────────
+
+class PagarComisionEmpleadoOwnershipTests(TestCase):
+    def setUp(self):
+        self.empleado = make_empleado()
+        rep = make_reparacion(total=Decimal('80'))
+        self.asignacion = ReparacionEmpleado.objects.create(
+            reparacion=rep, empleado=self.empleado, monto_comision_fijo=Decimal('80'),
+        )
+
+    def _pagar(self, usuario):
+        self.client.force_login(usuario)
+        return self.client.post(
+            reverse('pagar_comision_empleado', kwargs={'empleado_id': self.empleado.id}),
+            {
+                'sel': [f'reparacion:{self.asignacion.id}'],
+                'forma_pago': 'efectivo',
+                'via_caja': 'on',
+            },
+        )
+
+    def test_admin_no_dueno_no_puede_pagar_comision_en_sesion_ajena(self):
+        cajero_a = make_cajero(username='cajero_a_com')
+        make_sesion_caja(usuario=cajero_a)
+        admin = make_administrador(username='admin_com')
+
+        resp = self._pagar(admin)
+
+        self.assertNotEqual(resp.status_code, 500)
+        self.assertFalse(PagoComisionEmpleado.objects.exists(), 'no debe quedar ningún pago registrado')
+        self.assertEqual(
+            CajaMovimiento.objects.filter(concepto='comision_empleado').count(), 0,
+            'no debe haberse escrito ningún egreso en la caja de cajero_a',
+        )
+
+    def test_sin_ninguna_sesion_abierta_no_revienta_con_500(self):
+        admin = make_administrador(username='admin_com2')
+
+        resp = self._pagar(admin)
+
+        self.assertNotEqual(resp.status_code, 500, 'CajaSinSesionError debe convertirse en mensaje, no en un 500')
+        self.assertFalse(PagoComisionEmpleado.objects.exists())
+        self.assertEqual(CajaMovimiento.objects.filter(concepto='comision_empleado').count(), 0)
+
+    def test_dueno_de_la_sesion_si_puede_pagar_comision(self):
+        # `pagar_comision_empleado` exige `misastreria.change_empleado`, que
+        # sólo tiene Administrador — el dueño de la sesión en este escenario
+        # es un Administrador que abrió su propio turno.
+        admin_dueno = make_administrador(username='admin_com_dueno')
+        make_sesion_caja(usuario=admin_dueno)
+
+        resp = self._pagar(admin_dueno)
+
+        self.assertEqual(resp.status_code, 302)
+        pago = PagoComisionEmpleado.objects.get(empleado=self.empleado)
+        mov = CajaMovimiento.objects.get(concepto='comision_empleado')
+        self.assertEqual(mov.monto, Decimal('80'))
+        self.assertEqual(mov.referencia_pago_comision_id, pago.id)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# WARNING 2 (tercera vuelta de sdd-verify) — crear_reparacion/crear_confeccion:
+# la matriz "en_proceso/entregado = Admin/Taller only" también aplica al
+# ESTADO INICIAL, no sólo a la transición a 'entregado'. Proven exploit del
+# reporte (P8): un Vendedor creaba directamente en 'en_proceso'.
+# ──────────────────────────────────────────────────────────────────────────────
+
+class CrearReparacionEstadoEnProcesoTests(TestCase):
+    def setUp(self):
+        self.cliente = make_cliente()
+        self.tp = make_tipo_prenda()
+        self.tr = make_tipo_reparacion()
+
+    def _datos(self, estado):
+        return {
+            'fecha_entrega': (date.today() + timedelta(days=3)).isoformat(),
+            'cliente': str(self.cliente.id),
+            'estado': estado,
+            'forma_pago': 'efectivo',
+            'items_count': '1',
+            'items[0][tipo_prenda]': str(self.tp.id),
+            'items[0][tipo_reparacion]': str(self.tr.id),
+            'items[0][costo]': '100.00',
+            'items[0][detalles]': '',
+            'asignaciones_count': '0',
+        }
+
+    def test_vendedor_no_puede_crear_en_proceso(self):
+        vendedor = make_vendedor()
+        self.client.force_login(vendedor)
+
+        resp = self.client.post(reverse('crear_reparacion'), self._datos('en_proceso'))
+
+        self.assertEqual(resp.status_code, 200, 're-renderiza el form con error, no redirige')
+        self.assertEqual(Reparacion.objects.count(), 0)
+
+    def test_admin_si_puede_crear_en_proceso(self):
+        admin = make_administrador()
+        self.client.force_login(admin)
+
+        resp = self.client.post(reverse('crear_reparacion'), self._datos('en_proceso'))
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(Reparacion.objects.count(), 1)
+        self.assertEqual(Reparacion.objects.first().estado, 'en_proceso')
+
+
+class CrearConfeccionEstadoEnProcesoTests(TestCase):
+    def setUp(self):
+        self.tp = make_tipo_prenda()
+
+    def _datos(self, estado):
+        return {
+            'fecha_inicio': date.today().isoformat(),
+            'color': 'Negro', 'modelo': 'Traje', 'precio': '0',
+            'estado': estado,
+            'items-TOTAL_FORMS': '1', 'items-INITIAL_FORMS': '0',
+            'items-MIN_NUM_FORMS': '0', 'items-MAX_NUM_FORMS': '1000',
+            'items-0-tipo_prenda': str(self.tp.id),
+            'items-0-costo': '300.00',
+            'items-0-talla': '',
+        }
+
+    def test_vendedor_no_puede_crear_en_proceso(self):
+        vendedor = make_vendedor()
+        self.client.force_login(vendedor)
+
+        resp = self.client.post(reverse('crear_confeccion'), self._datos('en_proceso'))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(Confeccion.objects.count(), 0)
+
+    def test_admin_si_puede_crear_en_proceso(self):
+        admin = make_administrador()
+        self.client.force_login(admin)
+
+        resp = self.client.post(reverse('crear_confeccion'), self._datos('en_proceso'))
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(Confeccion.objects.count(), 1)
+        self.assertEqual(Confeccion.objects.first().estado, 'en_proceso')
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# WARNING 3 (tercera vuelta de sdd-verify) — editar_confeccion: cobertura de
+# TODAS las transiciones de estado por roles sin el permiso de taller (P3 del
+# reporte: "Vendedor pendiente<->en_proceso, entregado->pendiente,
+# entregado->en_proceso -> todos 200, sin cambio"). A diferencia de
+# Reparación, `ConfeccionForm.clean_estado` ya bloquea CUALQUIER regresión
+# desde 'entregado' a nivel de formulario, para cualquier usuario — por eso
+# no hay un escenario de "Administrador SÍ puede revertir" análogo a
+# `EditarReparacionRegresionEstadoTests` acá: la confección simplemente no
+# se puede regresar por `editar_confeccion` (ver eliminar_confeccion / ajuste
+# manual para ese caso, fuera de este guard).
+# ──────────────────────────────────────────────────────────────────────────────
+
+class EditarConfeccionTransicionesSinPermisoTallerTests(TestCase):
+    def setUp(self):
+        self.tp = make_tipo_prenda()
+
+    def _datos(self, conf, estado):
+        return {
+            'fecha_inicio': date.today().isoformat(),
+            'color': conf.color, 'modelo': conf.modelo, 'precio': '300.00',
+            'estado': estado,
+            'items-TOTAL_FORMS': '0', 'items-INITIAL_FORMS': '0',
+            'items-MIN_NUM_FORMS': '0', 'items-MAX_NUM_FORMS': '1000',
+        }
+
+    def _rechazado_sin_cambio(self, estado_inicial, estado_pedido):
+        conf = make_confeccion(precio=Decimal('300'), adelanto=Decimal('0'), estado=estado_inicial)
+        vendedor = make_vendedor()
+        self.client.force_login(vendedor)
+
+        resp = self.client.post(
+            reverse('editar_confeccion', kwargs={'id': conf.id}), self._datos(conf, estado_pedido))
+
+        conf.refresh_from_db()
+        self.assertEqual(resp.status_code, 200, 're-renderiza con error, no redirige')
+        self.assertEqual(conf.estado, estado_inicial, 'el estado no debe haber cambiado')
+        self.assertEqual(CajaMovimiento.objects.filter(referencia_confeccion=conf).count(), 0)
+
+    def test_vendedor_no_puede_pasar_pendiente_a_en_proceso(self):
+        self._rechazado_sin_cambio('pendiente', 'en_proceso')
+
+    def test_vendedor_no_puede_pasar_en_proceso_a_pendiente(self):
+        self._rechazado_sin_cambio('en_proceso', 'pendiente')
+
+    def test_vendedor_no_puede_regresar_de_entregado_a_pendiente(self):
+        self._rechazado_sin_cambio('entregado', 'pendiente')
+
+    def test_vendedor_no_puede_regresar_de_entregado_a_en_proceso(self):
+        self._rechazado_sin_cambio('entregado', 'en_proceso')
+
+    def test_admin_tampoco_puede_regresar_de_entregado_por_el_formulario(self):
+        """`ConfeccionForm.clean_estado` bloquea la regresión para CUALQUIER
+        usuario, Administrador incluido — no es un chequeo de permiso, así
+        que no debe confundirse con una brecha de la matriz."""
+        conf = make_confeccion(precio=Decimal('300'), adelanto=Decimal('0'), estado='entregado')
+        admin = make_administrador()
+        self.client.force_login(admin)
+
+        resp = self.client.post(
+            reverse('editar_confeccion', kwargs={'id': conf.id}), self._datos(conf, 'pendiente'))
+
+        conf.refresh_from_db()
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(conf.estado, 'entregado')

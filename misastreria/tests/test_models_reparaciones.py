@@ -143,10 +143,12 @@ class ReparacionEstadoTests(TestCase):
 
     def test_cambio_a_entregado(self):
         # total > 0 sin pagos: pasar a 'entregado' dispara reparacion_saldo
-        # (reparacion_to_caja) — necesita una caja abierta.
-        make_sesion_caja()
+        # (reparacion_to_caja) — necesita una caja abierta Y un actor (choke
+        # point de caja: `_crear_mov_auto` exige `usuario`).
+        sesion = make_sesion_caja()
         rep = make_reparacion()
         rep.estado = 'entregado'
+        rep._actor_caja = sesion.usuario_apertura
         rep.save()
         rep.refresh_from_db()
         self.assertEqual(rep.estado, 'entregado')

@@ -160,11 +160,26 @@ class CajaSesionAdmin(admin.ModelAdmin):
 
 @admin.register(CajaMovimiento)
 class CajaMovimientoAdmin(admin.ModelAdmin):
+    """Sólo lectura: todo movimiento de caja se escribe a través de
+    `caja_signals._crear_mov_auto` / `_reversar_movimientos_activos*`, que
+    exigen y verifican un dueño (choke point,
+    architecture/caja-ownership-chokepoint). Permitir altas/ediciones/bajas
+    acá sería un bypass total de esa regla — un superusuario podría escribir
+    cualquier movimiento en cualquier sesión sin que nada lo chequee."""
     list_display = ['codigo', 'fecha', 'tipo', 'concepto', 'origen', 'forma_pago', 'monto', 'sesion']
     list_filter = ['tipo', 'concepto', 'origen', 'forma_pago']
     search_fields = ['codigo', 'descripcion']
     readonly_fields = ['codigo', 'creado', 'tipo']
     list_per_page = 20
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(PlantillaEtiqueta)

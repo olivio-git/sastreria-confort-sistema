@@ -158,13 +158,33 @@ def make_corte(**kwargs):
 # Servicios
 # ──────────────────────────────────────────────────────────────────────────────
 
-def make_reparacion(**kwargs):
+def _actor_caja_por_defecto():
+    """Dueño de la caja actualmente abierta, o None si no hay ninguna.
+
+    Choke point de caja (architecture/caja-ownership-chokepoint): las
+    señales `confeccion_to_caja`/`reparacion_to_caja`/`venta_to_caja` exigen
+    un `_actor_caja` explícito para escribir un CajaMovimiento nuevo — en
+    producción lo estampa la vista (`request.user`) antes de guardar. Estos
+    factories NO son producción: la mayoría de los tests sólo necesitan "hay
+    una caja abierta" (contabilidad pura, sin importar de quién), así que
+    por conveniencia se infiere el dueño de la sesión abierta — si el test
+    necesita un actor DISTINTO, debe pasar `usuario=` explícitamente al
+    factory."""
+    from misastreria.caja_turno import sesion_abierta
+    sesion = sesion_abierta()
+    return sesion.usuario_apertura if sesion else None
+
+
+def make_reparacion(usuario=None, **kwargs):
     defaults = dict(
         fecha_entrega=date.today() + timedelta(days=3),
         total=Decimal('100.00'),
     )
     defaults.update(kwargs)
-    return Reparacion.objects.create(**defaults)
+    instance = Reparacion(**defaults)
+    instance._actor_caja = usuario if usuario is not None else _actor_caja_por_defecto()
+    instance.save()
+    return instance
 
 
 def make_reparacion_item(reparacion=None, **kwargs):
@@ -179,17 +199,20 @@ def make_reparacion_item(reparacion=None, **kwargs):
     return ReparacionItem.objects.create(reparacion=reparacion, **defaults)
 
 
-def make_venta(**kwargs):
+def make_venta(usuario=None, **kwargs):
     defaults = dict(
         descuento=Decimal('0'),
         subtotal=Decimal('0'),
         total=Decimal('0'),
     )
     defaults.update(kwargs)
-    return Venta.objects.create(**defaults)
+    instance = Venta(**defaults)
+    instance._actor_caja = usuario if usuario is not None else _actor_caja_por_defecto()
+    instance.save()
+    return instance
 
 
-def make_confeccion(**kwargs):
+def make_confeccion(usuario=None, **kwargs):
     defaults = dict(
         color='Negro',
         modelo='Traje Clásico',
@@ -199,7 +222,10 @@ def make_confeccion(**kwargs):
         fecha_inicio=date.today(),
     )
     defaults.update(kwargs)
-    return Confeccion.objects.create(**defaults)
+    instance = Confeccion(**defaults)
+    instance._actor_caja = usuario if usuario is not None else _actor_caja_por_defecto()
+    instance.save()
+    return instance
 
 
 def make_alquiler(**kwargs):
