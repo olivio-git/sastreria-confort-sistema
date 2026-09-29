@@ -97,6 +97,12 @@
         <span class="sc-nav-label">Empleados</span>
       </a>
       {% endif %}
+      {% if perms.misastreria.gestionar_usuarios %}
+      <a class="sc-nav-item {% if 'usuario' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'lista_usuarios' %}">
+        <span class="sc-nav-icon"><i data-lucide="user-cog"></i></span>
+        <span class="sc-nav-label">Usuarios</span>
+      </a>
+      {% endif %}
       {% if perms.misastreria.view_ordenproduccion %}
       <a class="sc-nav-item {% if 'orden' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'lista_ordenes' %}">
         <span class="sc-nav-icon"><i data-lucide="settings"></i></span>

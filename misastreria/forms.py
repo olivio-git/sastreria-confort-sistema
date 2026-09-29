@@ -10,6 +10,9 @@ from .models import (
 )
 from django.forms import DateInput, inlineformset_factory
 from django.core.exceptions import ValidationError
+from django.db.models import Q
+from django.contrib.auth.models import User
+from . import roles as _roles
 
 
 COUNTRY_CODE_CHOICES = [
@@ -1130,3 +1133,53 @@ class DesbloquearPinForm(forms.Form):
         label='PIN',
         widget=_PIN_WIDGET,
     )
+
+
+# ============================================================
+# Gestión de usuarios (pantalla de Administrador)
+# ============================================================
+
+ROL_CHOICES = [(nombre, nombre) for nombre in _roles.ROLES]
+
+
+class CrearUsuarioForm(forms.Form):
+    username = forms.CharField(
+        label='Usuario', max_length=150,
+        widget=forms.TextInput(attrs={'class': 'form-control', 'autocomplete': 'off'}),
+    )
+    password = forms.CharField(
+        label='Contraseña inicial',
+        widget=forms.PasswordInput(attrs={'class': 'form-control', 'autocomplete': 'new-password'}),
+        min_length=8,
+    )
+    rol = forms.ChoiceField(label='Rol', choices=ROL_CHOICES, widget=forms.Select(attrs={'class': 'form-select'}))
+    empleado = forms.ModelChoiceField(
+        label='Empleado vinculado', queryset=Empleado.objects.filter(user__isnull=True),
+        required=False, empty_label='(Sin vincular)',
+        widget=forms.Select(attrs={'class': 'form-select'}),
+    )
+
+    def clean_username(self):
+        username = self.cleaned_data['username'].strip()
+        if User.objects.filter(username=username).exists():
+            raise ValidationError('Ya existe un usuario con ese nombre.')
+        return username
+
+
+class EditarUsuarioForm(forms.Form):
+    rol = forms.ChoiceField(label='Rol', choices=ROL_CHOICES, widget=forms.Select(attrs={'class': 'form-select'}))
+    empleado = forms.ModelChoiceField(
+        label='Empleado vinculado', queryset=Empleado.objects.none(),
+        required=False, empty_label='(Sin vincular)',
+        widget=forms.Select(attrs={'class': 'form-select'}),
+    )
+
+    def __init__(self, *args, user_obj=None, **kwargs):
+        self.user_obj = user_obj
+        super().__init__(*args, **kwargs)
+        # El empleado ya vinculado a ESTE usuario debe seguir apareciendo en
+        # el select (si no, el ModelChoiceField lo rechazaría al re-guardar
+        # sin cambios), además de los que están libres.
+        self.fields['empleado'].queryset = Empleado.objects.filter(
+            Q(user__isnull=True) | Q(user=user_obj)
+        ) if user_obj else Empleado.objects.filter(user__isnull=True)

@@ -1,5 +1,5 @@
 from django.urls import path
-from . import views, views_etiquetas
+from . import views, views_etiquetas, views_usuarios
 from django.contrib.auth.views import LoginView, LogoutView
 from django.views.generic import RedirectView
 
@@ -210,4 +210,10 @@ urlpatterns = [
     path('analitica/comparativas/', views.analitica_comparativas, name='analitica_comparativas'),
     path('analitica/estacionalidad/', views.estacionalidad, name='analitica_estacionalidad'),
     path('analitica/prendas-temporada/', views.prendas_temporada, name='analitica_prendas_temporada'),
+    # Usuarios (Administrador)
+    path('usuarios/', views_usuarios.lista_usuarios, name='lista_usuarios'),
+    path('usuarios/crear/', views_usuarios.crear_usuario, name='crear_usuario'),
+    path('usuarios/<int:pk>/editar/', views_usuarios.editar_usuario, name='editar_usuario'),
+    path('usuarios/<int:pk>/resetear-pin/', views_usuarios.resetear_pin_usuario, name='resetear_pin_usuario'),
+    path('usuarios/<int:pk>/toggle-activo/', views_usuarios.toggle_activo_usuario, name='toggle_activo_usuario'),
 ]

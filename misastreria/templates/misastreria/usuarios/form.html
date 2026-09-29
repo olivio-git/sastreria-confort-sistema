@@ -1,0 +1,58 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}{% if modo == 'crear' %}Nuevo Usuario{% else %}Editar Usuario{% endif %}{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'lista_usuarios' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left"></i>Volver
+      </a>
+    </div>
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="user-cog" class="me-2 text-muted"></i>
+        {% if modo == 'crear' %}Nuevo Usuario{% else %}Editar «{{ usuario_obj.username }}»{% endif %}
+      </h2>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+<div class="row justify-content-center">
+  <div class="col-12 col-lg-8 col-xl-6">
+    <div class="card">
+      <div class="card-header"><h3 class="card-title">Datos del usuario</h3></div>
+      <div class="card-body">
+        <form method="post" id="mainForm">
+          {% csrf_token %}
+          {% if form.non_field_errors %}
+          <div class="alert alert-danger">
+            {% for error in form.non_field_errors %}<div>{{ error }}</div>{% endfor %}
+          </div>
+          {% endif %}
+          <div class="row g-3">
+            {% for field in form %}
+              <div class="col-md-6">
+                <label for="{{ field.id_for_label }}" class="form-label">
+                  {{ field.label }}{% if not field.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}
+                </label>
+                {{ field }}
+                {% if field.help_text %}<div class="form-text text-muted">{{ field.help_text }}</div>{% endif %}
+                {% if field.errors %}<div class="text-danger small mt-1">{{ field.errors.0 }}</div>{% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        </form>
+      </div>
+      <div class="card-footer text-end d-flex justify-content-end gap-2">
+        <a href="{% url 'lista_usuarios' %}" class="btn btn-outline-secondary">Cancelar</a>
+        <button type="submit" form="mainForm" class="btn btn-primary">
+          <i data-lucide="check"></i>Guardar
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
