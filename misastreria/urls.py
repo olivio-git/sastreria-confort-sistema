@@ -179,6 +179,10 @@ urlpatterns = [
     path('caja/sesiones/<int:pk>/', views.detalle_sesion_caja, name='detalle_sesion_caja'),
     path('caja/sesiones/<int:pk>/excel/', views.export_detalle_sesion_excel, name='export_detalle_sesion_excel'),
     path('caja/sesiones/<int:pk>/cerrar/', views.cerrar_sesion_caja, name='cerrar_sesion_caja'),
+    # Caja — PIN de desbloqueo (exentas del propio gate, ver middleware.py)
+    path('caja/pin/configurar/', views.configurar_pin_caja, name='configurar_pin_caja'),
+    path('caja/pin/desbloquear/', views.desbloquear_caja, name='desbloquear_caja'),
+    path('caja/pin/bloquear/', views.bloquear_caja, name='bloquear_caja'),
     # Caja — resumen y exports
     path('caja/resumen/', views.resumen_caja, name='resumen_caja'),
     path('caja/resumen/pdf/', views.export_resumen_caja_pdf, name='export_resumen_caja_pdf'),

@@ -1074,3 +1074,59 @@ class ConjuntoSlotInlineForm(forms.ModelForm):
 ConjuntoSlotFormSet = inlineformset_factory(
     Conjunto, ConjuntoSlot, form=ConjuntoSlotInlineForm, extra=0, can_delete=True,
 )
+
+
+# ============================================================
+# Caja — PIN de desbloqueo (PC compartida del mostrador)
+# ============================================================
+
+_PIN_WIDGET = forms.TextInput(attrs={
+    'class': 'form-control', 'inputmode': 'numeric', 'pattern': r'\d{4,6}',
+    'maxlength': '6', 'autocomplete': 'off',
+})
+
+
+class ConfigurarPinForm(forms.Form):
+    """Exige la contraseña de la cuenta además del PIN nuevo (dos veces): en
+    una PC compartida, cualquiera que la encuentre desbloqueada podría fijar
+    un PIN a nombre de otro usuario si sólo pidiéramos el PIN."""
+    password = forms.CharField(
+        label='Tu contraseña',
+        widget=forms.PasswordInput(attrs={'class': 'form-control', 'autocomplete': 'current-password'}),
+    )
+    pin = forms.RegexField(
+        regex=r'^\d{4,6}$',
+        label='PIN nuevo (4 a 6 dígitos)',
+        widget=_PIN_WIDGET,
+        error_messages={'invalid': 'El PIN debe tener entre 4 y 6 dígitos.'},
+    )
+    pin2 = forms.RegexField(
+        regex=r'^\d{4,6}$',
+        label='Repetí el PIN',
+        widget=_PIN_WIDGET,
+        error_messages={'invalid': 'El PIN debe tener entre 4 y 6 dígitos.'},
+    )
+
+    def __init__(self, *args, user=None, **kwargs):
+        self.user = user
+        super().__init__(*args, **kwargs)
+
+    def clean_password(self):
+        password = self.cleaned_data['password']
+        if not self.user or not self.user.check_password(password):
+            raise ValidationError('Contraseña incorrecta.')
+        return password
+
+    def clean(self):
+        cleaned = super().clean()
+        pin, pin2 = cleaned.get('pin'), cleaned.get('pin2')
+        if pin and pin2 and pin != pin2:
+            self.add_error('pin2', 'Los dos PIN no coinciden.')
+        return cleaned
+
+
+class DesbloquearPinForm(forms.Form):
+    pin = forms.CharField(
+        label='PIN',
+        widget=_PIN_WIDGET,
+    )

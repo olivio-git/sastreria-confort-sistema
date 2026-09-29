@@ -15,7 +15,7 @@ from django.urls import reverse
 from .factories import (
     make_administrador, make_cajero, make_vendedor, make_taller,
     make_cliente, make_reparacion, make_confeccion,
-    make_prenda, make_prenda_item,
+    make_prenda, make_prenda_item, desbloquear_caja_test,
 )
 
 
@@ -303,7 +303,9 @@ class CajaMatrizTests(TestCase):
     def test_admin_y_cajero_acceden_a_abrir_sesion(self):
         for maker in (make_administrador, make_cajero):
             with self.subTest(rol=maker.__name__):
-                self.client.force_login(maker(username=f'ab_{maker.__name__}'))
+                user = maker(username=f'ab_{maker.__name__}')
+                self.client.force_login(user)
+                desbloquear_caja_test(self.client, user)
                 resp = self.client.get(reverse('abrir_sesion_caja'))
                 self.assertEqual(resp.status_code, 200)
 
@@ -317,7 +319,9 @@ class CajaMatrizTests(TestCase):
     def test_admin_y_cajero_ven_lista_de_sesiones(self):
         for maker in (make_administrador, make_cajero):
             with self.subTest(rol=maker.__name__):
-                self.client.force_login(maker(username=f'ls_{maker.__name__}'))
+                user = maker(username=f'ls_{maker.__name__}')
+                self.client.force_login(user)
+                desbloquear_caja_test(self.client, user)
                 resp = self.client.get(reverse('lista_sesiones_caja'))
                 self.assertEqual(resp.status_code, 200)
 
@@ -326,7 +330,9 @@ class TipoGastoMatrizTests(TestCase):
     """Conceptos de gasto: Admin only."""
 
     def test_solo_admin_ve_conceptos_de_gasto(self):
-        self.client.force_login(make_administrador())
+        admin = make_administrador()
+        self.client.force_login(admin)
+        desbloquear_caja_test(self.client, admin)
         resp = self.client.get(reverse('lista_tipo_gasto'))
         self.assertEqual(resp.status_code, 200)
 

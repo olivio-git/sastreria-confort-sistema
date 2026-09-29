@@ -10,7 +10,7 @@ al menos un permiso operativo) — se verifica en `BuscarClientesTests`.
 from django.test import TestCase, Client
 from django.urls import reverse
 
-from .factories import make_user
+from .factories import make_user, desbloquear_caja_test
 
 
 # URLs que requieren login — (url_name, kwargs o None)
@@ -119,6 +119,7 @@ class AuthenticatedListViewsTests(TestCase):
         self.user = make_user(username='testviews', password='pass123')
         self.client = Client()
         self.client.force_login(self.user)
+        desbloquear_caja_test(self.client, self.user)
 
     def _assert_200(self, url_name, kwargs=None):
         url = reverse(url_name, kwargs=kwargs or {})

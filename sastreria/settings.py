@@ -56,6 +56,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'misastreria.middleware.CajaAbiertaMiddleware',
+    'misastreria.middleware.CajaPinMiddleware',
 ]
 
 ROOT_URLCONF = 'sastreria.urls'

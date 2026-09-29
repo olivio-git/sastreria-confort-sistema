@@ -22,6 +22,7 @@ from .factories import (
     make_empleado, make_cliente, make_reparacion, make_confeccion,
     make_alquiler, make_prenda, make_prenda_item,
     make_tipo_prenda, make_tipo_reparacion, make_user, make_sesion_caja,
+    desbloquear_caja_test,
 )
 
 
@@ -30,6 +31,9 @@ class BaseViewTest(TestCase):
         self.user = make_user(username='cruduser', password='pass123')
         self.client = Client()
         self.client.force_login(self.user)
+        # Vistas /caja/* exigen PIN (Fase 5); desbloqueado acá para que las
+        # demás pruebas CRUD de este archivo no tengan que saberlo.
+        desbloquear_caja_test(self.client, self.user)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

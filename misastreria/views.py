@@ -1,6 +1,8 @@
 from decimal import Decimal, InvalidOperation
 from itertools import zip_longest
 from django.shortcuts import render, redirect, get_object_or_404
+from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.contrib import messages
 from django.db.models import Sum, F, ExpressionWrapper, DecimalField, Count, Q, Avg, OuterRef, Subquery, Value, Exists
 from django.db.models.functions import Coalesce, Greatest
@@ -13,7 +15,7 @@ from django.utils import timezone as django_tz
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 from .models import Empleado, TipoContrato, Cliente, Reparacion, ReparacionItem, TipoPrenda, TipoReparacion, Venta, VentaItem, Confeccion, ConfeccionItem, Alquiler, AlquilerItem, EstadoAlquiler, Transaccion, PrendaInventario, PrendaItem, Corte, UbicacionItem, Insumo, TipoMaterial, UnidadMedida, Permiso, Falta, OrdenProduccion, InsumoCortado, CajaSesion, CajaMovimiento, TipoGasto, Conjunto, ConjuntoSlot, PagoComisionEmpleado, ModeloConfeccion, VentaItemEmpleado, AlquilerItemEmpleado, KardexEvento, ReparacionEmpleado, ConfeccionEmpleado, OrdenProduccionEmpleado, AplicacionPagoComision
 from . import comisiones
-from .forms import EmpleadoForm, ClienteForm, ReparacionForm, ReparacionItemForm, VentaForm, VentaItemForm, ConfeccionForm, ConfeccionItemFormSet, AlquilerForm, AlquilerItemForm, TransaccionForm, PrendaInventarioForm, InsumoForm, PermisoForm, FaltaForm, EmpleadoReporteForm, ClienteReporteForm, ReparacionReporteForm, OrdenProduccionForm, InsumoCortadoForm, CajaSesionAperturaForm, CajaSesionCierreForm, CajaMovimientoManualForm, TipoGastoForm, ConjuntoForm, ConjuntoSlotFormSet, PagoComisionEmpleadoForm
+from .forms import EmpleadoForm, ClienteForm, ReparacionForm, ReparacionItemForm, VentaForm, VentaItemForm, ConfeccionForm, ConfeccionItemFormSet, AlquilerForm, AlquilerItemForm, TransaccionForm, PrendaInventarioForm, InsumoForm, PermisoForm, FaltaForm, EmpleadoReporteForm, ClienteReporteForm, ReparacionReporteForm, OrdenProduccionForm, InsumoCortadoForm, CajaSesionAperturaForm, CajaSesionCierreForm, CajaMovimientoManualForm, TipoGastoForm, ConjuntoForm, ConjuntoSlotFormSet, PagoComisionEmpleadoForm, ConfigurarPinForm, DesbloquearPinForm
 from django.core.paginator import Paginator
 from datetime import date, datetime, timedelta
 from dateutil import rrule
@@ -10300,6 +10302,86 @@ def cerrar_sesion_caja(request, pk):
         'saldo_sistema': saldo_sistema,
         'arqueo': arqueo,
     })
+
+
+# ============================================================
+# CAJA — PIN de desbloqueo (PC compartida del mostrador)
+# ============================================================
+
+def _next_url_seguro(request, default='lista_sesiones_caja'):
+    """`next` sólo si apunta a este mismo host (evita open-redirect); si no
+    vino o es inválido, cae al listado de sesiones."""
+    next_url = request.POST.get('next') or request.GET.get('next')
+    if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
+        return next_url
+    return reverse(default)
+
+
+@login_required
+@permission_required('misastreria.acceder_sistema')
+def configurar_pin_caja(request):
+    """Primer PIN (o reemplazo tras un reset de Administrador). Pide la
+    contraseña de la cuenta además del PIN dos veces — ver `ConfigurarPinForm`
+    para el motivo (PC compartida)."""
+    next_url = _next_url_seguro(request)
+
+    if request.method == 'POST':
+        form = ConfigurarPinForm(request.POST, user=request.user)
+        if form.is_valid():
+            caja_turno.set_pin(request.user, form.cleaned_data['pin'])
+            caja_turno.marcar_desbloqueado(request)
+            messages.success(request, "PIN configurado. Caja desbloqueada.")
+            return redirect(next_url)
+    else:
+        form = ConfigurarPinForm(user=request.user)
+
+    return render(request, 'misastreria/caja/pin_configurar.html', {
+        'form': form,
+        'next': next_url,
+    })
+
+
+@login_required
+@permission_required('misastreria.acceder_sistema')
+def desbloquear_caja(request):
+    """Pantalla de re-ingreso del PIN — la muestra `CajaPinMiddleware` cuando
+    no hay desbloqueo vigente. Administrador pasa por acá igual que cualquier
+    otro rol (spec: nadie está exento)."""
+    next_url = _next_url_seguro(request)
+    perfil = caja_turno.perfil_de(request.user)
+
+    if not perfil.pin_hash:
+        return redirect('configurar_pin_caja')
+
+    if request.method == 'POST':
+        form = DesbloquearPinForm(request.POST)
+        if form.is_valid():
+            if perfil.pin_bloqueado:
+                form.add_error(None, "PIN bloqueado por intentos fallidos. Pedile a un Administrador que lo resetee.")
+            elif caja_turno.validar_pin(request.user, form.cleaned_data['pin']):
+                caja_turno.marcar_desbloqueado(request)
+                return redirect(next_url)
+            else:
+                form.add_error('pin', "PIN incorrecto.")
+    else:
+        form = DesbloquearPinForm()
+
+    return render(request, 'misastreria/caja/pin_desbloquear.html', {
+        'form': form,
+        'next': next_url,
+        'pin_bloqueado': perfil.pin_bloqueado,
+    })
+
+
+@login_required
+@permission_required('misastreria.acceder_sistema')
+@require_POST
+def bloquear_caja(request):
+    """Bloqueo manual (ej. antes de dejar el mostrador desatendido)."""
+    request.session.pop('caja_pin_uid', None)
+    request.session.pop('caja_pin_hasta', None)
+    messages.info(request, "Caja bloqueada.")
+    return redirect('lista_sesiones_caja')
 
 
 # ============================================================

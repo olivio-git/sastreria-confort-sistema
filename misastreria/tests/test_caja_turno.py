@@ -24,6 +24,7 @@ from misastreria.models import CajaSesion, CajaMovimiento, Venta, Alquiler
 from .factories import (
     make_administrador, make_cajero, make_sesion_caja, make_movimiento_caja,
     make_cliente, make_empleado, make_prenda, make_prenda_item,
+    desbloquear_caja_test,
 )
 
 
@@ -72,6 +73,7 @@ class CrearMovimientoCajaOwnershipTests(TestCase):
         cajero = make_cajero()
         sesion = make_sesion_caja(usuario=cajero)
         self.client.force_login(cajero)
+        desbloquear_caja_test(self.client, cajero)
         resp = self.client.post(reverse('crear_movimiento_caja'), {
             'concepto': 'ingreso_manual', 'monto': '50', 'forma_pago': 'efectivo',
         })
@@ -84,6 +86,7 @@ class CrearMovimientoCajaOwnershipTests(TestCase):
         otro = make_cajero(username='otro_cajero')
         make_sesion_caja(usuario=cajero)
         self.client.force_login(otro)
+        desbloquear_caja_test(self.client, otro)
         resp = self.client.post(reverse('crear_movimiento_caja'), {
             'concepto': 'ingreso_manual', 'monto': '50', 'forma_pago': 'efectivo',
         }, follow=True)
@@ -92,6 +95,7 @@ class CrearMovimientoCajaOwnershipTests(TestCase):
     def test_sin_sesion_abierta_bloqueado(self):
         cajero = make_cajero()
         self.client.force_login(cajero)
+        desbloquear_caja_test(self.client, cajero)
         resp = self.client.post(reverse('crear_movimiento_caja'), {
             'concepto': 'ingreso_manual', 'monto': '50', 'forma_pago': 'efectivo',
         }, follow=True)
@@ -104,6 +108,7 @@ class RevertirMovimientoCajaOwnershipTests(TestCase):
         sesion = make_sesion_caja(usuario=cajero)
         mov = make_movimiento_caja(sesion=sesion, origen='manual')
         self.client.force_login(cajero)
+        desbloquear_caja_test(self.client, cajero)
         resp = self.client.post(reverse('revertir_movimiento_caja', args=[mov.pk]))
         mov.refresh_from_db()
         self.assertIsNotNone(mov.movimiento_reverso)
@@ -115,6 +120,7 @@ class RevertirMovimientoCajaOwnershipTests(TestCase):
         mov = make_movimiento_caja(sesion=sesion, origen='manual')
         # `otro` no tiene sesión propia abierta -> bloqueado por verificar_turno_cobro
         self.client.force_login(otro)
+        desbloquear_caja_test(self.client, otro)
         resp = self.client.post(reverse('revertir_movimiento_caja', args=[mov.pk]))
         mov.refresh_from_db()
         self.assertIsNone(mov.movimiento_reverso)
@@ -128,6 +134,7 @@ class RevertirMovimientoCajaOwnershipTests(TestCase):
         sesion_cajero.save()
         make_sesion_caja(usuario=admin)  # admin abre su propio turno para supervisar
         self.client.force_login(admin)
+        desbloquear_caja_test(self.client, admin)
         resp = self.client.post(reverse('revertir_movimiento_caja', args=[mov.pk]))
         mov.refresh_from_db()
         self.assertIsNotNone(mov.movimiento_reverso)
@@ -138,6 +145,7 @@ class CerrarSesionCajaOwnershipTests(TestCase):
         cajero = make_cajero()
         sesion = make_sesion_caja(usuario=cajero, monto_apertura=Decimal('100'))
         self.client.force_login(cajero)
+        desbloquear_caja_test(self.client, cajero)
         resp = self.client.post(reverse('cerrar_sesion_caja', args=[sesion.pk]), {
             'monto_cierre_declarado': '100', 'observaciones': '',
         })
@@ -149,6 +157,7 @@ class CerrarSesionCajaOwnershipTests(TestCase):
         otro = make_cajero(username='otro_cajero')
         sesion = make_sesion_caja(usuario=cajero, monto_apertura=Decimal('100'))
         self.client.force_login(otro)
+        desbloquear_caja_test(self.client, otro)
         resp = self.client.post(reverse('cerrar_sesion_caja', args=[sesion.pk]), {
             'monto_cierre_declarado': '100', 'observaciones': '',
         })
@@ -160,6 +169,7 @@ class CerrarSesionCajaOwnershipTests(TestCase):
         admin = make_administrador()
         sesion = make_sesion_caja(usuario=cajero, monto_apertura=Decimal('100'))
         self.client.force_login(admin)
+        desbloquear_caja_test(self.client, admin)
         resp = self.client.post(reverse('cerrar_sesion_caja', args=[sesion.pk]), {
             'monto_cierre_declarado': '100', 'observaciones': '',
         })
@@ -171,6 +181,7 @@ class CerrarSesionCajaOwnershipTests(TestCase):
         admin = make_administrador()
         sesion = make_sesion_caja(usuario=cajero, monto_apertura=Decimal('100'))
         self.client.force_login(admin)
+        desbloquear_caja_test(self.client, admin)
         resp = self.client.post(reverse('cerrar_sesion_caja', args=[sesion.pk]), {
             'monto_cierre_declarado': '100', 'observaciones': 'Cajero se retiró antes de cerrar.',
         })
@@ -314,6 +325,7 @@ class ReportesCajaPropiosTests(TestCase):
     def test_lista_sesiones_cajero_ve_solo_la_propia(self):
         sesion_b = self._abrir_sesion_b()
         self.client.force_login(self.cajero_a)
+        desbloquear_caja_test(self.client, self.cajero_a)
         resp = self.client.get(reverse('lista_sesiones_caja'))
         ids = {s.pk for s in resp.context['page_obj']}
         self.assertIn(self.sesion_a.pk, ids)
@@ -323,6 +335,7 @@ class ReportesCajaPropiosTests(TestCase):
         sesion_b = self._abrir_sesion_b()
         admin = make_administrador()
         self.client.force_login(admin)
+        desbloquear_caja_test(self.client, admin)
         resp = self.client.get(reverse('lista_sesiones_caja'))
         ids = {s.pk for s in resp.context['page_obj']}
         self.assertIn(self.sesion_a.pk, ids)
@@ -331,10 +344,12 @@ class ReportesCajaPropiosTests(TestCase):
     def test_detalle_sesion_ajena_redirige(self):
         sesion_b = self._abrir_sesion_b()
         self.client.force_login(self.cajero_a)
+        desbloquear_caja_test(self.client, self.cajero_a)
         resp = self.client.get(reverse('detalle_sesion_caja', args=[sesion_b.pk]), follow=True)
         self.assertRedirects(resp, reverse('lista_sesiones_caja'))
 
     def test_detalle_sesion_propia_accesible(self):
         self.client.force_login(self.cajero_a)
+        desbloquear_caja_test(self.client, self.cajero_a)
         resp = self.client.get(reverse('detalle_sesion_caja', args=[self.sesion_a.pk]))
         self.assertEqual(resp.status_code, 200)

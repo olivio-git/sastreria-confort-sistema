@@ -1,0 +1,68 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Configurar PIN de Caja{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="shield-check" class="me-2 text-muted"></i>Configurar PIN de Caja
+      </h2>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+<div class="card" style="max-width:480px">
+  <div class="card-header">
+    <h3 class="card-title">Fijá tu PIN</h3>
+  </div>
+  <div class="card-body">
+    <p class="text-muted small">
+      Esta PC es compartida en el mostrador. El PIN es una segunda
+      verificación rápida antes de tocar la caja — pedimos tu contraseña una
+      vez para confirmar que sos vos quien lo está fijando.
+    </p>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ next }}">
+      {% if form.non_field_errors %}
+      <div class="alert alert-danger">
+        {% for error in form.non_field_errors %}
+          <div>{{ error }}</div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <div class="mb-3">
+        <label class="form-label fw-semibold" for="{{ form.password.id_for_label }}">Tu contraseña</label>
+        {{ form.password }}
+        {% if form.password.errors %}
+          <div class="text-danger small mt-1">{{ form.password.errors.0 }}</div>
+        {% endif %}
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label fw-semibold" for="{{ form.pin.id_for_label }}">PIN nuevo (4 a 6 dígitos)</label>
+        {{ form.pin }}
+        {% if form.pin.errors %}
+          <div class="text-danger small mt-1">{{ form.pin.errors.0 }}</div>
+        {% endif %}
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label fw-semibold" for="{{ form.pin2.id_for_label }}">Repetí el PIN</label>
+        {{ form.pin2 }}
+        {% if form.pin2.errors %}
+          <div class="text-danger small mt-1">{{ form.pin2.errors.0 }}</div>
+        {% endif %}
+      </div>
+
+      <button type="submit" class="btn btn-success">
+        <i data-lucide="shield-check" class="me-1"></i>Guardar PIN
+      </button>
+    </form>
+  </div>
+</div>
+{% endblock %}
