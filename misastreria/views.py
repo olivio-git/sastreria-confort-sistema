@@ -1975,13 +1975,22 @@ def editar_reparacion(request, id):
         saldo_antes_de_editar = reparacion.saldo_pendiente
         form = ReparacionForm(request.POST, instance=reparacion)
         if form.is_valid():
-            transiciona_a_entregado = (
-                estado_anterior != 'entregado'
-                and form.cleaned_data.get('estado') == 'entregado'
-            )
             try:
-                if transiciona_a_entregado:
-                    caja_turno.autorizar_transicion_a_entregado(request.user, saldo_antes_de_editar)
+                # CRITICAL 1 del reporte de verificación: no sólo la
+                # transición HACIA 'entregado' está restringida por la
+                # matriz — CUALQUIER cambio de estado (incluida la
+                # regresión entregado->pendiente, que dispara la reversión
+                # automática del cobro) exige `cambiar_estado_taller`.
+                caja_turno.autorizar_cambio_estado(
+                    request.user, estado_anterior, form.cleaned_data.get('estado'),
+                    saldo_antes_de_editar,
+                )
+                # Estampado ANTES de guardar: si esta edición regresa el
+                # estado desde 'entregado', `caja_signals.reparacion_to_caja`
+                # necesita saber QUIÉN está revirtiendo el cobro para
+                # exigir que sea el dueño del turno abierto o un
+                # Administrador (misma regla que cualquier otra reversión).
+                reparacion._actor_caja = request.user
                 with transaction.atomic():
                     from .models import ReparacionEmpleado
                     old_total = reparacion.total
@@ -3576,13 +3585,14 @@ def editar_confeccion(request, id):
         form = ConfeccionForm(request.POST, instance=confeccion)
         formset = ConfeccionItemFormSet(request.POST, instance=confeccion, prefix='items')
         if form.is_valid() and formset.is_valid():
-            transiciona_a_entregado = (
-                estado_anterior != 'entregado'
-                and form.cleaned_data.get('estado') == 'entregado'
-            )
             try:
-                if transiciona_a_entregado:
-                    caja_turno.autorizar_transicion_a_entregado(request.user, saldo_antes_de_editar)
+                # CRITICAL 1 del reporte de verificación — mismo fix que
+                # editar_reparacion: cualquier cambio de estado (no sólo
+                # hacia 'entregado') exige `cambiar_estado_taller`.
+                caja_turno.autorizar_cambio_estado(
+                    request.user, estado_anterior, form.cleaned_data.get('estado'),
+                    saldo_antes_de_editar,
+                )
                 with transaction.atomic():
                     from .models import ConfeccionEmpleado
                     form.save()

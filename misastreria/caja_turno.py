@@ -57,6 +57,56 @@ def verificar_turno_cobro(user):
     return sesion
 
 
+def verificar_turno_reversion(user):
+    """Para REVERTIR/ANULAR un movimiento que ya existe (no crear uno nuevo):
+    el dueño del turno abierto, O un Administrador (`supervisar_caja`) —
+    regla confirmada por el dueño del producto ("revertir: dueño o
+    Administrador", WARNING 1 del reporte de verificación). Para movimientos
+    NUEVOS (cobros, devoluciones de garantía, ajustes, etc.) usar SIEMPRE
+    `verificar_turno_cobro`, que NO exime a Administrador — sólo reversiones
+    de algo que ya estaba asentado tienen esta excepción de supervisión."""
+    sesion = sesion_abierta()
+    if sesion is None:
+        raise TurnoCajaError(
+            'No hay ninguna caja abierta. Abrí un turno antes de revertir este movimiento.'
+        )
+    if sesion.usuario_apertura_id == user.id or puede_supervisar(user):
+        return sesion
+    raise TurnoCajaError(
+        f'La caja abierta es de {sesion.usuario_apertura.get_username()}. '
+        'Sólo quien abrió el turno (o un Administrador) puede revertir movimientos en ella.'
+    )
+
+
+def autorizar_cambio_estado(user, estado_anterior, estado_nuevo, saldo_pendiente=None):
+    """Autoriza CUALQUIER cambio de `estado` en los formularios de edición de
+    Reparación/Confección (`editar_reparacion`/`editar_confeccion`) — no sólo
+    la transición a 'entregado'. CRITICAL 1 del reporte de verificación:
+    `ReparacionForm`/`ConfeccionForm` exponen el campo `estado` completo y el
+    guard existente sólo cubría la dirección "hacia entregado"
+    (`autorizar_transicion_a_entregado`); un Vendedor (tiene `change_
+    reparacion` pero nunca `cambiar_estado_taller`) podía mandar
+    entregado->pendiente o pendiente->en_proceso sin ningún chequeo de
+    permiso — y el primer caso encima disparaba la reversión automática del
+    cobro en `caja_signals.reparacion_to_caja`, escribiendo un egreso en la
+    caja de quien tuviera el turno abierto en ese momento.
+
+    Matriz (spec): "Reparaciones/Confecciones en_proceso/entregado = Admin/
+    Taller only" — por lo tanto CUALQUIER cambio de estado (no sólo hacia
+    'entregado') exige `cambiar_estado_taller`. Si no hay cambio real
+    (`estado_anterior == estado_nuevo`, típico al reenviar el mismo form) no
+    se exige nada. Si el nuevo estado es 'entregado' delega en
+    `autorizar_transicion_a_entregado` (mismo permiso + turno propio si
+    queda saldo pendiente)."""
+    if estado_anterior == estado_nuevo:
+        return
+    if estado_nuevo == 'entregado':
+        autorizar_transicion_a_entregado(user, saldo_pendiente)
+        return
+    if not user.has_perm('misastreria.cambiar_estado_taller'):
+        raise TurnoCajaError('No tenés permiso para cambiar el estado de esto.')
+
+
 def puede_supervisar(user):
     """Administrador (o quien tenga `supervisar_caja`) puede ver/forzar el
     cierre de CUALQUIER sesión, no sólo la propia."""

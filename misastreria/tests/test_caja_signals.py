@@ -44,6 +44,7 @@ from .factories import (
     make_reparacion, make_reparacion_item,
     make_confeccion, make_venta, make_prenda,
     make_sesion_caja, make_cliente, make_empleado,
+    make_cajero, make_vendedor, make_administrador,
 )
 
 
@@ -485,6 +486,57 @@ class ReversarMovimientosTests(TestCase):
             referencia_alquiler=alquiler, concepto='anulacion_cobro'
         )
         self.assertEqual(reversados.count(), 1)
+
+
+class ReversarMovimientosOwnershipTests(TestCase):
+    """WARNING 1 del reporte de verificación (regla confirmada por el dueño
+    del producto): revertir un movimiento existente exige ser el dueño de la
+    sesión abierta O un Administrador — no cualquiera que simplemente tenga
+    un `usuario` a mano. `usuario=None` (compatibilidad / red de seguridad
+    `pre_delete`) sigue sin chequear dueño, ver `ServicioPreDeleteReversaTests`
+    más abajo."""
+
+    def test_no_dueno_no_admin_no_puede_revertir(self):
+        cajero_a = make_cajero(username='cajero_a_rev')
+        make_sesion_caja(usuario=cajero_a)
+        alquiler = make_alquiler(total=Decimal('200.00'))
+        registrar_alquiler_en_caja(alquiler, adelanto=Decimal('200.00'))
+        vendedor = make_vendedor()
+
+        with self.assertRaises(TurnoCajaError):
+            _reversar_movimientos_activos(
+                referencia_field='referencia_alquiler', instance=alquiler, usuario=vendedor,
+            )
+        self.assertEqual(
+            CajaMovimiento.objects.filter(referencia_alquiler=alquiler, concepto='anulacion_cobro').count(), 0,
+        )
+
+    def test_dueno_si_puede_revertir(self):
+        cajero_a = make_cajero(username='cajero_a_rev2')
+        make_sesion_caja(usuario=cajero_a)
+        alquiler = make_alquiler(total=Decimal('200.00'))
+        registrar_alquiler_en_caja(alquiler, adelanto=Decimal('200.00'))
+
+        _reversar_movimientos_activos(
+            referencia_field='referencia_alquiler', instance=alquiler, usuario=cajero_a,
+        )
+        self.assertEqual(
+            CajaMovimiento.objects.filter(referencia_alquiler=alquiler, concepto='anulacion_cobro').count(), 1,
+        )
+
+    def test_admin_no_dueno_si_puede_revertir(self):
+        cajero_a = make_cajero(username='cajero_a_rev3')
+        make_sesion_caja(usuario=cajero_a)
+        alquiler = make_alquiler(total=Decimal('200.00'))
+        registrar_alquiler_en_caja(alquiler, adelanto=Decimal('200.00'))
+        admin = make_administrador(username='admin_rev3')
+
+        _reversar_movimientos_activos(
+            referencia_field='referencia_alquiler', instance=alquiler, usuario=admin,
+        )
+        self.assertEqual(
+            CajaMovimiento.objects.filter(referencia_alquiler=alquiler, concepto='anulacion_cobro').count(), 1,
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

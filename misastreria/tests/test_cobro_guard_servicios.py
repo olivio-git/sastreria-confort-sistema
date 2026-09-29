@@ -679,3 +679,190 @@ class EntregarConfeccionSinTurnoRechazaTests(TestCase):
         self.assertEqual(
             CajaMovimiento.objects.filter(referencia_confeccion=conf, concepto='confeccion_saldo').count(), 0
         )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CRITICAL 1 (re-verify) — editar_reparacion: la matriz "en_proceso/entregado
+# = Admin/Taller only" aplica a CUALQUIER cambio de estado, no sólo a la
+# transición HACIA 'entregado'. Proven exploits del reporte:
+#   NEW-1: Vendedor mandaba estado=pendiente sobre una reparación ya
+#          entregada -> escribía un egreso `anulacion_cobro` de Bs100 en la
+#          caja del cajero A (la reversión automática de caja_signals no
+#          chequeaba de quién era la caja).
+#   NEW-2: Vendedor también podía pasar pendiente->en_proceso sin permiso.
+# ──────────────────────────────────────────────────────────────────────────────
+
+class EditarReparacionRegresionEstadoTests(TestCase):
+    def setUp(self):
+        self.cliente = make_cliente()
+        self.tp = make_tipo_prenda()
+        self.tr = make_tipo_reparacion()
+
+    def _rep_entregada_con_cobro(self, sesion_para_el_cobro):
+        rep = make_reparacion(cliente=self.cliente, estado='entregado', total=Decimal('100'))
+        make_reparacion_item(rep, tipo_prenda=self.tp, tipo_reparacion=self.tr, costo=Decimal('100'))
+        CajaMovimiento.objects.create(
+            sesion=sesion_para_el_cobro, tipo='ingreso', concepto='reparacion_cobro',
+            monto=Decimal('100'), forma_pago='efectivo', origen='automatico',
+            referencia_reparacion=rep,
+        )
+        return rep
+
+    def _datos(self, estado):
+        return {
+            'fecha_entrega': (date.today() + timedelta(days=3)).isoformat(),
+            'cliente': str(self.cliente.id),
+            'estado': estado,
+            'forma_pago': 'efectivo',
+            'items_count': '1',
+            'items[0][tipo_prenda]': str(self.tp.id),
+            'items[0][tipo_reparacion]': str(self.tr.id),
+            'items[0][costo]': '100.00',
+            'items[0][detalles]': '',
+            'asignaciones_count': '0',
+        }
+
+    def test_vendedor_no_puede_regresar_de_entregado_a_pendiente(self):
+        cajero_a = make_cajero(username='cajero_a_reg')
+        sesion_a = make_sesion_caja(usuario=cajero_a)
+        rep = self._rep_entregada_con_cobro(sesion_a)
+        vendedor = make_vendedor()
+        self.client.force_login(vendedor)
+
+        resp = self.client.post(
+            reverse('editar_reparacion', kwargs={'id': rep.id}), self._datos('pendiente'))
+
+        rep.refresh_from_db()
+        self.assertEqual(resp.status_code, 200, 're-renderiza con error, no redirige')
+        self.assertEqual(rep.estado, 'entregado', 'el estado no debe haber regresado')
+        self.assertEqual(
+            CajaMovimiento.objects.filter(referencia_reparacion=rep, concepto='anulacion_cobro').count(), 0,
+            'no debe haberse escrito ningún reverso en la caja de cajero_a',
+        )
+
+    def test_vendedor_no_puede_pasar_pendiente_a_en_proceso(self):
+        rep = make_reparacion(cliente=self.cliente, estado='pendiente', total=Decimal('100'))
+        make_reparacion_item(rep, tipo_prenda=self.tp, tipo_reparacion=self.tr, costo=Decimal('100'))
+        vendedor = make_vendedor()
+        self.client.force_login(vendedor)
+
+        resp = self.client.post(
+            reverse('editar_reparacion', kwargs={'id': rep.id}), self._datos('en_proceso'))
+
+        rep.refresh_from_db()
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(rep.estado, 'pendiente')
+
+    def test_admin_puede_regresar_y_el_reverso_respeta_la_regla_dueno_o_admin(self):
+        """WARNING 1 (regla confirmada por el dueño del producto): un
+        Administrador SÍ puede revertir el cobro aunque la caja abierta sea
+        de otro cajero — 'revertir: dueño o Administrador'."""
+        cajero_a = make_cajero(username='cajero_a_reg2')
+        sesion_a = make_sesion_caja(usuario=cajero_a)
+        rep = self._rep_entregada_con_cobro(sesion_a)
+        admin = make_administrador()
+        self.client.force_login(admin)
+
+        resp = self.client.post(
+            reverse('editar_reparacion', kwargs={'id': rep.id}), self._datos('pendiente'))
+
+        rep.refresh_from_db()
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(rep.estado, 'pendiente')
+        reverso = CajaMovimiento.objects.get(referencia_reparacion=rep, concepto='anulacion_cobro')
+        self.assertEqual(reverso.sesion_id, sesion_a.id)
+        self.assertEqual(reverso.tipo, 'egreso')
+
+    def test_admin_sin_ninguna_sesion_abierta_no_puede_revertir(self):
+        """Sin sesión abierta no hay dónde asentar el reverso — se rechaza
+        todo el envío (CRITICAL 3), no un 500 a mitad de camino."""
+        sesion = make_sesion_caja()
+        rep = self._rep_entregada_con_cobro(sesion)
+        sesion.estado = 'cerrada'
+        sesion.save(update_fields=['estado'])
+        admin = make_administrador()
+        self.client.force_login(admin)
+
+        resp = self.client.post(
+            reverse('editar_reparacion', kwargs={'id': rep.id}), self._datos('pendiente'))
+
+        rep.refresh_from_db()
+        self.assertNotEqual(resp.status_code, 500)
+        self.assertEqual(rep.estado, 'entregado')
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CRITICAL 2 (re-verify) — devolver_alquiler: devolver la garantía es un
+# egreso NUEVO (no la reversión de un movimiento existente), así que exige
+# turno PROPIO igual que cualquier otro cobro — Administrador NO exento (a
+# diferencia de la regla de reversión de WARNING 1). Proven exploit del
+# reporte (NEW-3): Vendedor (nunca tiene turno propio) escribía un egreso
+# `garantia_devolucion` de Bs100 en la caja del cajero A.
+# ──────────────────────────────────────────────────────────────────────────────
+
+class DevolverAlquilerGarantiaOwnershipTests(TestCase):
+    def setUp(self):
+        self.alquiler = make_alquiler(
+            estado='alquilado', garantia_tipo='efectivo', garantia_monto=Decimal('100'),
+        )
+        self.item = make_alquiler_item(self.alquiler)
+        self.item.prenda_item.estado = 'alquilado'
+        self.item.prenda_item.save(update_fields=['estado'])
+
+    def _devolver(self):
+        return self.client.post(
+            reverse('devolver_alquiler', kwargs={'id': self.alquiler.id}),
+            {'garantia_devolver': '100'},
+        )
+
+    def test_vendedor_no_puede_devolver_garantia_en_sesion_ajena(self):
+        cajero_a = make_cajero(username='cajero_a_gar')
+        make_sesion_caja(usuario=cajero_a)
+        vendedor = make_vendedor()
+        self.client.force_login(vendedor)
+
+        resp = self._devolver()
+
+        self.assertNotEqual(resp.status_code, 500)
+        self.alquiler.refresh_from_db()
+        self.assertEqual(self.alquiler.estado, 'alquilado', 'no debe quedar devuelto')
+        self.item.prenda_item.refresh_from_db()
+        self.assertEqual(self.item.prenda_item.estado, 'alquilado')
+        self.assertEqual(
+            CajaMovimiento.objects.filter(
+                referencia_alquiler=self.alquiler, concepto='garantia_devolucion').count(), 0,
+        )
+
+    def test_admin_tampoco_puede_devolver_en_sesion_ajena(self):
+        """A diferencia de una reversión, devolver una garantía es un egreso
+        NUEVO: Administrador NO está exento — tiene que abrir su propio
+        turno, igual que cualquier otro cobro."""
+        cajero_a = make_cajero(username='cajero_a_gar2')
+        make_sesion_caja(usuario=cajero_a)
+        admin = make_administrador()
+        self.client.force_login(admin)
+
+        resp = self._devolver()
+
+        self.assertNotEqual(resp.status_code, 500)
+        self.alquiler.refresh_from_db()
+        self.assertEqual(self.alquiler.estado, 'alquilado')
+        self.assertEqual(
+            CajaMovimiento.objects.filter(
+                referencia_alquiler=self.alquiler, concepto='garantia_devolucion').count(), 0,
+        )
+
+    def test_dueno_de_la_sesion_si_puede_devolver(self):
+        cajero = make_cajero(username='cajero_gar_dueno')
+        make_sesion_caja(usuario=cajero)
+        self.client.force_login(cajero)
+
+        resp = self._devolver()
+
+        self.assertEqual(resp.status_code, 302)
+        self.alquiler.refresh_from_db()
+        self.assertEqual(self.alquiler.estado, 'devuelto')
+        self.assertEqual(
+            CajaMovimiento.objects.filter(
+                referencia_alquiler=self.alquiler, concepto='garantia_devolucion').count(), 1,
+        )

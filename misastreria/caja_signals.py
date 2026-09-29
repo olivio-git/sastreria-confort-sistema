@@ -26,14 +26,34 @@ def _reversar_movimientos_activos(*, referencia_field, instance, usuario=None):
     """
     Reversa todos los CajaMovimientos activos vinculados a un servicio.
     Llamar ANTES de eliminar la instancia del servicio.
+
+    `usuario`: quien está revirtiendo. Si se pasa, tiene que ser el dueño de
+    la sesión abierta O un Administrador (`caja_turno.verificar_turno_
+    reversion` — WARNING 1 del reporte de verificación, regla confirmada por
+    el dueño del producto: "revertir: dueño o Administrador"). Las vistas
+    `eliminar_*` SIEMPRE pasan `usuario=request.user`. Si no se pasa
+    (compatibilidad: la red de seguridad `pre_delete` — admin de Django,
+    shell, borrados que no pasan por una vista — no tiene un actor
+    identificable), sólo se exige que haya una sesión abierta, sin chequear
+    de quién es, igual que antes de este fix.
     """
     from django.db import transaction as db_transaction
+    from .caja_turno import verificar_turno_reversion
     filtro = {referencia_field: instance, 'movimiento_reverso__isnull': True}
-    sesion = _sesion_activa()
+    sesion = None
+    sesion_resuelta = False
     # Exclude 'anulacion_cobro' to prevent reversing reversals (cycle prevention)
     for mov in CajaMovimiento.objects.filter(**filtro).exclude(concepto='anulacion_cobro'):
         if mov.fue_reversado:
             continue
+        if not sesion_resuelta:
+            if usuario is not None:
+                # Levanta TurnoCajaError si no hay sesión, o si no es del
+                # dueño ni de un Administrador.
+                sesion = verificar_turno_reversion(usuario)
+            else:
+                sesion = _sesion_activa()
+            sesion_resuelta = True
         if sesion is None:
             # Sin caja abierta no hay dónde asentar el reverso: mejor fallar
             # ruidosamente acá (bloquea el borrado) que dejar el reverso
@@ -461,10 +481,18 @@ def _ajustar_garantia_alquiler_en_caja(instance, usuario=None):
     )
 
 
-def registrar_devolucion_garantia_alquiler(instance, monto_devuelto, usuario=None):
+def registrar_devolucion_garantia_alquiler(instance, monto_devuelto, usuario):
     """
     Registra la devolución de garantía al cliente como egreso.
     monto_devuelto puede ser menor al original si hay recargos aplicados.
+
+    Este es un egreso NUEVO — no la reversión de un movimiento existente —
+    así que sigue la misma regla que cualquier otro cobro: sólo el dueño de
+    la sesión abierta puede generarlo, Administrador NO exento (CRITICAL 2
+    del reporte de verificación: antes sólo se chequeaba "hay sesión
+    abierta", así que un Vendedor —que nunca puede tener turno propio—
+    igual podía sacarle plata del cajón a otro cajero al devolver una
+    garantía). `usuario` es obligatorio.
     """
     if not monto_devuelto or Decimal(str(monto_devuelto)) <= 0:
         return
@@ -474,11 +502,8 @@ def registrar_devolucion_garantia_alquiler(instance, monto_devuelto, usuario=Non
         movimiento_reverso__isnull=True,
     ).exists():
         return
-    sesion = _sesion_activa()
-    if sesion is None:
-        raise CajaSinSesionError(
-            f"No se puede devolver la garantía de {instance.codigo}: no hay ninguna caja abierta."
-        )
+    from .caja_turno import verificar_turno_cobro
+    sesion = verificar_turno_cobro(usuario)
     CajaMovimiento.objects.create(
         sesion=sesion,
         tipo='egreso',
@@ -860,9 +885,18 @@ def reparacion_to_caja(sender, instance, created, **kwargs):
         return
     old_estado = getattr(instance, '_old_estado', None)
 
-    # Regresión: 'entregado' → otro estado
+    # Regresión: 'entregado' → otro estado. `_actor_caja` lo estampa
+    # `editar_reparacion` en la instancia ANTES de guardar (mismo patrón que
+    # `_old_estado`) para que el reverso automático de acá respete la regla
+    # de turno (dueño o Administrador) igual que cualquier otra reversión —
+    # sin esto, cualquiera con permiso para cambiar el estado podía escribir
+    # el egreso `anulacion_cobro` en la caja de quien tuviera el turno
+    # abierto, sin importar si era la suya.
     if old_estado == 'entregado' and instance.estado != 'entregado':
-        _reversar_movimientos_activos(referencia_field='referencia_reparacion', instance=instance)
+        actor = getattr(instance, '_actor_caja', None)
+        _reversar_movimientos_activos(
+            referencia_field='referencia_reparacion', instance=instance, usuario=actor,
+        )
         return
 
     # Transición GENUINA: otro estado → 'entregado'.
