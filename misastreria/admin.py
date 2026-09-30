@@ -1,6 +1,8 @@
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.http import HttpResponseRedirect
 from .forms import EmpleadoForm
 from .models import (
+    BajaNoPermitida,
     Cliente, PrendaInventario, PrendaItem, Corte, Insumo,
     Venta, VentaItem, Alquiler, AlquilerItem, Transaccion,
     Reparacion, Empleado, Permiso, Falta, Confeccion,
@@ -56,6 +58,17 @@ class EmpleadoAdmin(admin.ModelAdmin):
                 super().__init__(*args, **kw)
 
         return ActorForm
+
+    def changeform_view(self, request, object_id=None, form_url='', extra_context=None):
+        # Último recurso: si el guard de dominio (`Empleado.save`) igual
+        # rechaza la baja —p. ej. una carrera entre dos Administradores—, se
+        # muestra un mensaje en vez de un 500. Se atrapa acá (fuera del atomic
+        # del admin) para que no quede un "se guardó correctamente" falso.
+        try:
+            return super().changeform_view(request, object_id, form_url, extra_context)
+        except BajaNoPermitida as exc:
+            messages.error(request, str(exc))
+            return HttpResponseRedirect(request.path)
 
 
 admin.site.register(Permiso)

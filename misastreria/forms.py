@@ -131,9 +131,10 @@ class EmpleadoForm(forms.ModelForm):
         # es gestión de usuarios. Sin `gestionar_usuarios` el campo se muestra
         # deshabilitado (Django ignora lo que llegue por POST y conserva el
         # valor actual). Sin `actor` se falla cerrado.
+        self._user_original_id = self.instance.user_id if self.instance.pk else None
+        puede_gestionar = actor is not None and actor.has_perm('misastreria.gestionar_usuarios')
         self.baja_bloqueada = bool(
-            self.instance.pk and self.instance.user_id
-            and not (actor is not None and actor.has_perm('misastreria.gestionar_usuarios'))
+            self.instance.pk and self.instance.user_id and not puede_gestionar
         )
         if self.baja_bloqueada:
             self.fields['fecha_baja'].disabled = True
@@ -141,6 +142,11 @@ class EmpleadoForm(forms.ModelForm):
                 'Este empleado tiene usuario del sistema: sólo quien gestiona '
                 'usuarios puede darlo de baja o reactivarlo.'
             )
+        # Vincular o desvincular el usuario también es gestión de usuarios:
+        # vincular a un Empleado ya dado de baja desactiva a ese usuario.
+        # (La app no expone `user` en este form; el admin de Django sí.)
+        if 'user' in self.fields and not puede_gestionar:
+            self.fields['user'].disabled = True
 
     def clean_celular(self):
         celular = self.cleaned_data.get('celular', '').strip()
@@ -150,17 +156,34 @@ class EmpleadoForm(forms.ModelForm):
 
     def clean(self):
         cleaned = super().clean()
-        inst = self.instance
-        if not (inst.pk and inst.user_id) or 'fecha_baja' not in cleaned:
+        # Se valida con el usuario NUEVO (`cleaned_data['user']`) y la baja
+        # NUEVA: `self.instance` todavía tiene los valores viejos, porque el
+        # ModelForm recién los vuelca en `_post_clean`, después de `clean()`
+        # (verify ronda 7, W1: vincular al último Administrador y dar la baja
+        # en el mismo guardado reventaba con un 500).
+        if 'fecha_baja' not in cleaned:
+            return cleaned
+        if 'user' in self.fields:
+            if 'user' not in cleaned:
+                return cleaned
+            nuevo_user = cleaned['user']
+        else:
+            nuevo_user = self.instance.user if self.instance.user_id else None
+        if nuevo_user is None:
             return cleaned
         nueva = cleaned.get('fecha_baja')
-        if nueva == self._baja_original:
+        baja_cambio = nueva != self._baja_original
+        user_cambio = nuevo_user.pk != self._user_original_id
+        if not (baja_cambio or user_cambio):
             return cleaned
-        if self.actor is not None and inst.user_id == self.actor.pk:
-            self.add_error('fecha_baja', "No podés dar de baja ni reactivar tu propio usuario.")
-        elif nueva and es_ultimo_administrador_activo(inst.user):
+        campo = 'user' if user_cambio and 'user' in self.fields else 'fecha_baja'
+        if self.actor is not None and nuevo_user.pk == self.actor.pk and (
+            baja_cambio or (user_cambio and nueva)
+        ):
+            self.add_error(campo, "No podés dar de baja ni reactivar tu propio usuario.")
+        elif nueva and es_ultimo_administrador_activo(nuevo_user):
             self.add_error(
-                'fecha_baja',
+                campo,
                 "No se puede dar de baja: su usuario es el último Administrador activo.",
             )
         return cleaned
