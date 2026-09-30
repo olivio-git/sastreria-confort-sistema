@@ -387,6 +387,25 @@ cambiar de rol, resetear PIN, activar/desactivar. No se puede desactivar ni
 degradar al último Administrador activo del sistema, ni actuar sobre la
 propia cuenta desde esa pantalla.
 
+### Permisos adicionales por usuario
+
+Los 4 roles base siguen siendo los de `roles.py`. Encima, un Administrador
+puede sumarle a UN usuario permisos extra (`user.user_permissions`) desde
+`/usuarios/<id>/permisos/`: grilla módulo × Ver/Crear/Editar/Eliminar más
+permisos propios (cobros, reportes, etiquetas). Lo que ya da el rol aparece
+tildado y bloqueado.
+
+- La lista de permisos otorgables es `roles.PERMISOS_EXTRA_OTORGABLES`
+  (de ahí salen `modulos_otorgables()` y `CODENAMES_OTORGABLES`) y se valida en el servidor:
+  un permiso fuera de la lista (`gestionar_usuarios`, `supervisar_caja`,
+  cualquiera de otra app) rechaza el envío completo.
+- Nadie edita sus propios extras (misma regla que los roles).
+- Los extras habilitan pantallas, nunca saltean el dueño del turno de caja:
+  esa es una regla de propiedad (`caja_turno`/`caja_signals`), no un permiso.
+- Para agregar un permiso otorgable: sumarlo a `PERMISOS_EXTRA_OTORGABLES` en
+  `roles.py` (el test de coherencia verifica que exista y que no sea uno de
+  los excluidos).
+
 ### Pendiente conocido (fuera de alcance de este cambio)
 
 `CajaAbiertaMiddleware.__call__` lee `request.resolver_match` ANTES de que

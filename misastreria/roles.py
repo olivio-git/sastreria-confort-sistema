@@ -95,7 +95,7 @@ ACCIONES_GRILLA = ('ver', 'crear', 'editar', 'eliminar')
 
 # (módulo, modelo o None, permisos personalizados [(codename, etiqueta)])
 # Un modelo genera view_/add_/change_/delete_<modelo>; `solo_ver` limita a Ver.
-_MODULOS_OTORGABLES = [
+PERMISOS_EXTRA_OTORGABLES = [
     ('Clientes', 'cliente', None, []),
     ('Reparaciones', 'reparacion', None, []),
     ('Ventas', 'venta', None, []),
@@ -138,7 +138,7 @@ def modulos_otorgables():
     codename}, 'otros': [(codename, etiqueta)]}`.
     """
     modulos = []
-    for nombre, modelo, acciones_permitidas, otros in _MODULOS_OTORGABLES:
+    for nombre, modelo, acciones_permitidas, otros in PERMISOS_EXTRA_OTORGABLES:
         acciones = {}
         if modelo:
             for accion in (acciones_permitidas or ACCIONES_GRILLA):
