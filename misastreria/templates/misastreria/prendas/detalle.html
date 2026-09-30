@@ -31,9 +31,11 @@
       <a href="{% url 'kardex_inventario' prenda.id %}" class="btn btn-outline-info">
         <i class="bi bi-clock-history me-1"></i>Kardex
       </a>
+      {% if perms.misastreria.change_prendainventario %}
       <a href="{% url 'editar_prenda' prenda.id %}" class="btn btn-outline-primary">
         <i data-lucide="pencil"></i>Editar SKU
       </a>
+      {% endif %}
     </div>
   </div>
 </div>
@@ -212,6 +214,7 @@
                  title="Imprimir etiqueta de esta unidad">
                 <i data-lucide="tag"></i>
               </button>
+              {% if perms.misastreria.change_prendainventario %}
               <button type="button"
                 class="btn btn-sm btn-icon btn-ghost-primary"
                 title="Editar"
@@ -227,7 +230,8 @@
                 data-edit-item-corte-texto="{{ item.corte|default:'' }}">
                 <i data-lucide="pencil"></i>
               </button>
-              {% if prenda.codigo|slice:":2" != "H-" %}
+              {% endif %}
+              {% if prenda.codigo|slice:":2" != "H-" and perms.misastreria.change_prendainventario %}
               <button type="button"
                 class="btn btn-sm btn-icon btn-ghost-secondary"
                 title="Mover a otro SKU"
@@ -251,6 +255,7 @@
                   <i class="bi bi-cart-plus"></i>
                 </a>
                 {% endif %}
+              {% if perms.misastreria.change_prendainventario %}
               <form method="post" action="{% url 'baja_prenda_item' item.id %}" class="d-inline"
                     onsubmit="return confirm('¿Confirmar baja de {{ item.codigo_item }}?')">
                 {% csrf_token %}
@@ -258,6 +263,7 @@
                   <i data-lucide="x-circle"></i>
                 </button>
               </form>
+              {% endif %}
               {% else %}
               <button type="button" class="btn btn-sm btn-icon btn-ghost-danger" disabled title="No disponible para baja">
                 <i data-lucide="x-circle"></i>

@@ -13,9 +13,11 @@
       <button class="btn btn-outline-secondary" data-col-toggle="tablaPrendas">
         <i data-lucide="layout-list"></i>Columnas
       </button>
+      {% if perms.misastreria.add_prendainventario %}
       <a href="{% url 'crear_prenda' %}" class="btn btn-success">
         <i data-lucide="plus"></i>Nueva Prenda
       </a>
+      {% endif %}
     </div>
   </div>
 </div>
@@ -122,10 +124,14 @@
           <td style="white-space:nowrap">
             <div class="btn-actions">
               <a href="{% url 'detalle_prenda' prenda.id %}" class="btn btn-sm btn-icon btn-ghost-secondary" title="Ver detalle"><i data-lucide="eye"></i></a>
+              {% if perms.misastreria.change_prendainventario %}
               <a href="{% url 'editar_prenda' prenda.id %}" class="btn btn-sm btn-icon btn-ghost-primary" title="Editar"><i data-lucide="pencil"></i></a>
+              {% endif %}
+              {% if perms.misastreria.delete_prendainventario %}
               <button type="button" class="btn btn-sm btn-icon btn-ghost-danger" title="Eliminar"
                 data-delete-url="{% url 'eliminar_prenda' prenda.id %}"
                 data-delete-name="{{ prenda }}"><i data-lucide="trash-2"></i></button>
+              {% endif %}
             </div>
           </td>
         </tr>
