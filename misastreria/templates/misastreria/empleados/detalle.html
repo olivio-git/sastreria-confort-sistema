@@ -83,7 +83,7 @@
       <i data-lucide="percent" class="text-muted" style="width:1rem;height:1rem"></i>Comisiones
     </h3>
     <div class="card-options">
-      {% if saldo_comision > 0 %}
+      {% if saldo_comision > 0 and perms.misastreria.change_empleado %}
       <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#modalPagarComision">
         <i data-lucide="hand-coins"></i>Pagar comisión
       </button>
@@ -407,6 +407,7 @@
 
 </div>
 
+{% if perms.misastreria.change_empleado %}
 <!-- Modal: Pagar comisión, por selección de devengaciones o por monto.
      En los dos modos el pago queda aplicado a devengaciones concretas: por
      monto, el servidor lo reparte de la más vieja a la más nueva. -->
@@ -547,6 +548,7 @@
     </div>
   </div>
 </div>
+{% endif %}
 
 <!-- Detalle de las devengaciones que cubrió un pago. Uno solo para toda la
      tabla: el contenido lo clona el <template> de la fila que se abrió. -->
