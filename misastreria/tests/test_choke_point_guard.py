@@ -18,9 +18,21 @@ Qué se considera "escritura" (`buscar_escrituras`):
     sin instanciar no hay nada que guardar).
   - Instanciar un ModelForm cuyo `Meta.model` es `CajaMovimiento` (el
     `form.save()` de `crear_movimiento_caja`).
+  - `.update(...)` sobre un queryset de movimientos (`CajaMovimiento.objects
+    ...filter().update` o related manager) que fije `sesion`/`sesion_id`/
+    `via_caja` (o pase `**kwargs`): reasigna o libera plata entre cajas. Sólo
+    las funciones de liberación de reservas están en la allowlist.
 La allowlist es por (archivo, función) con un MÁXIMO de escrituras y, cuando
 corresponde, el guard de turno que esa función debe llamar. `caja_signals.py`
 también se revisa: sólo las funciones aprobadas pueden escribir ahí.
+
+Límites conocidos (es un tripwire, no una garantía): NO detecta accesos
+dinámicos al modelo — `getattr(CajaMovimiento, 'objects')`,
+`apps.get_model('misastreria', 'CajaMovimiento')`, `type(mov).objects` —, ni
+la clonación de una fila (`mov.pk = None; mov.save()`), ni SQL crudo. Quien
+quiera saltearlo a propósito puede; el guard atrapa el descuido, y la
+defensa real es el choke point (`_crear_mov_auto`) más sus tests de
+comportamiento (`test_caja_signals_fail_closed`).
 
 Son tests de ARQUITECTURA, no de comportamiento — leen el código fuente
 (AST/inspect), no ejecutan vistas.
@@ -106,6 +118,30 @@ def _funcion_contenedora(tree, lineno):
     return mejor.name if mejor else None
 
 
+_CAMPOS_DE_TURNO = ('sesion', 'sesion_id', 'via_caja')
+
+
+def _es_queryset_de_cajamovimiento(expr, nombres):
+    """`expr` es (una cadena de filter/exclude/all sobre) `CajaMovimiento.objects`
+    o un related manager de movimientos."""
+    while True:
+        if isinstance(expr, ast.Call):
+            expr = expr.func
+        elif isinstance(expr, ast.Attribute):
+            if expr.attr == 'objects' and _es_modelo(expr.value, nombres):
+                return True
+            if expr.attr in _RELATED_MANAGERS:
+                return True
+            expr = expr.value
+        else:
+            return False
+
+
+def _update_toca_el_turno(call):
+    """El `.update(...)` fija `sesion`/`via_caja` (o no se puede saber: `**kw`)."""
+    return any(kw.arg is None or kw.arg in _CAMPOS_DE_TURNO for kw in call.keywords)
+
+
 def buscar_escrituras(source, forms_de_cajamovimiento=frozenset()):
     """Lista de (lineno, nombre_de_funcion_o_None, tipo) con cada escritura
     de CajaMovimiento encontrada en `source`."""
@@ -117,7 +153,13 @@ def buscar_escrituras(source, forms_de_cajamovimiento=frozenset()):
             continue
         func = node.func
         tipo = None
-        if isinstance(func, ast.Attribute) and func.attr in _VERBOS_ESCRITURA:
+        if isinstance(func, ast.Attribute) and func.attr == 'update':
+            # Reasignar `sesion` o liberar `via_caja` sobre un queryset de
+            # movimientos es una escritura que cambia a qué caja pertenece la
+            # plata: sólo lo hacen las funciones de liberación de reservas.
+            if _es_queryset_de_cajamovimiento(func.value, nombres) and _update_toca_el_turno(node):
+                tipo = 'update de sesion/via_caja'
+        elif isinstance(func, ast.Attribute) and func.attr in _VERBOS_ESCRITURA:
             receptor = func.value
             if isinstance(receptor, ast.Attribute):
                 if receptor.attr == 'objects' and _es_modelo(receptor.value, nombres):
@@ -248,10 +290,40 @@ class DetectorDeEscriturasTests(SimpleTestCase):
             "def f(venta):\n"
             "    Reparacion.objects.create(x=1)\n"
             "    venta.caja_movimientos.filter(x=1)\n"
-            "    CajaMovimiento.objects.filter(x=1).update(via_caja=True)\n"
+            "    CajaMovimiento.objects.filter(x=1).update(descripcion='x')\n"
+            "    Reparacion.objects.filter(x=1).update(sesion=1, via_caja=True)\n"
             "    sesion.movimientos.all()\n"
         )
         self.assertEqual(buscar_escrituras(src), [])
+
+    def test_atrapa_update_de_via_caja_o_sesion_sobre_queryset(self):
+        casos = {
+            "CajaMovimiento.objects.filter(x=1).update(via_caja=True)": 'update de sesion/via_caja',
+            "CajaMovimiento.objects.filter(x=1).update(sesion=s)": 'update de sesion/via_caja',
+            "CajaMovimiento.objects.filter(x=1).update(sesion_id=1)": 'update de sesion/via_caja',
+            "CajaMovimiento.objects.filter(x=1).exclude(y=2).update(via_caja=True, sesion=s)": 'update de sesion/via_caja',
+            "CajaMovimiento.objects.all().update(**campos)": 'update de sesion/via_caja',
+            "venta.caja_movimientos.filter(x=1).update(via_caja=True)": 'update de sesion/via_caja',
+            "sesion.movimientos.update(sesion=otra)": 'update de sesion/via_caja',
+        }
+        for expr, tipo in casos.items():
+            with self.subTest(expr=expr):
+                self.assertEqual(self._tipos(f"def f():\n    {expr}\n"), [tipo])
+
+    def test_update_de_otros_campos_o_de_otros_modelos_no_se_marca(self):
+        for expr in (
+            "CajaMovimiento.objects.filter(x=1).update(descripcion='x')",
+            "Reparacion.objects.filter(x=1).update(sesion=1, via_caja=True)",
+        ):
+            with self.subTest(expr=expr):
+                self.assertEqual(self._tipos(f"def f():\n    {expr}\n"), [])
+
+    def test_update_con_alias_del_modelo(self):
+        src = (
+            "from .models import CajaMovimiento as CM\n"
+            "def f():\n    CM.objects.filter(x=1).update(via_caja=True)\n"
+        )
+        self.assertEqual(self._tipos(src), ['update de sesion/via_caja'])
 
     def test_reporta_la_funcion_contenedora(self):
         src = "def externa():\n    def interna():\n        CajaMovimiento.objects.create(monto=1)\n"
@@ -307,6 +379,11 @@ class EscriturasDeCajaMovimientoTests(SimpleTestCase):
             'max': 1, 'guard': 'verificar()',
             'motivo': "reverso: la regla de turno la inyecta el llamador (`verificar`): dueño o "
                       "Administrador, o la red de seguridad pre_delete.",
+        },
+        ('caja_signals.py', '_liberar_pagos_reservados'): {
+            'max': 1, 'guard': 'verificar_turno_cobro',
+            'motivo': "liberación de reservas: `.update(via_caja=True, sesion=...)` en la sesión "
+                      "abierta de quien libera, que debe ser su dueño (atómico).",
         },
         ('caja_signals.py', '_ajustar_garantia_alquiler_en_caja'): {
             'max': 2, 'guard': '_sesion_propia_o_error',
