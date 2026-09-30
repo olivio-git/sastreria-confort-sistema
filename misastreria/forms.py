@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django import forms
 from django.utils.safestring import mark_safe
 from .models import (
@@ -621,14 +623,33 @@ class PagoVentaForm(forms.Form):
 
 
 class PagoComisionEmpleadoForm(forms.Form):
-    """Pago de comisión por selección de devengaciones puntuales.
+    """Pago de comisión, en uno de dos modos (ver `pagar_comision_empleado`):
 
-    El monto YA NO se tipea: se deriva del total de las devengaciones
-    (pendientes o parciales) que el usuario marca en el modal — ver
-    `pagar_comision_empleado`. El campo `sel` (una o más claves
-    "tipo:id_asignacion") no vive en este Form porque son checkboxes
-    dinámicos por empleado; se leen directo de `request.POST.getlist('sel')`.
+      - 'seleccion': el monto se deriva del total de las devengaciones
+        (pendientes o parciales) que el usuario marca en el modal. El campo
+        `sel` (una o más claves "tipo:id_asignacion") no vive en este Form
+        porque son checkboxes dinámicos por empleado; se leen directo de
+        `request.POST.getlist('sel')`.
+      - 'monto': se tipea un monto y el servidor lo reparte entre las
+        devengaciones pendientes, de la más vieja a la más nueva. Nunca queda
+        plata sin devengación: el tope es lo que falta pagar.
     """
+    MODO_CHOICES = [('seleccion', 'Por selección'), ('monto', 'Por monto')]
+
+    modo = forms.ChoiceField(choices=MODO_CHOICES, initial='seleccion', required=False)
+    monto = forms.DecimalField(
+        required=False,
+        max_digits=12,
+        decimal_places=2,
+        min_value=Decimal('0.01'),
+        widget=forms.NumberInput(attrs={
+            'class': 'form-control',
+            'step': '0.01',
+            'min': '0.01',
+            'placeholder': '0.00',
+        }),
+        label='Monto a pagar (Bs)',
+    )
     forma_pago = forms.ChoiceField(
         choices=FORMA_PAGO_CHOICES,
         widget=forms.Select(attrs={'class': 'form-select'}),
@@ -650,6 +671,13 @@ class PagoComisionEmpleadoForm(forms.Form):
         }),
         label='Descripción',
     )
+
+    def clean(self):
+        cleaned = super().clean()
+        cleaned['modo'] = cleaned.get('modo') or 'seleccion'
+        if cleaned['modo'] == 'monto' and not cleaned.get('monto') and 'monto' not in self.errors:
+            self.add_error('monto', 'Ingresa el monto a pagar.')
+        return cleaned
 
 
 class TransaccionForm(forms.ModelForm):

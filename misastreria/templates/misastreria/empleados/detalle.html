@@ -407,8 +407,12 @@
 
 </div>
 
-<!-- Modal: Pagar comisión por selección de devengaciones -->
-<div class="modal fade" id="modalPagarComision" tabindex="-1" data-saldo-favor="{{ no_aplicado_comision|unlocalize }}">
+<!-- Modal: Pagar comisión, por selección de devengaciones o por monto.
+     En los dos modos el pago queda aplicado a devengaciones concretas: por
+     monto, el servidor lo reparte de la más vieja a la más nueva. -->
+<div class="modal fade" id="modalPagarComision" tabindex="-1"
+     data-saldo-favor="{{ no_aplicado_comision|unlocalize }}"
+     data-saldo-comision="{{ saldo_comision|unlocalize }}">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <form method="post" action="{% url 'pagar_comision_empleado' empleado.id %}">
@@ -420,8 +424,29 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
-          <div class="alert alert-info py-2 small mb-3">
+          <div class="btn-group w-100 mb-3" role="group" aria-label="Forma de armar el pago">
+            <input type="radio" class="btn-check" name="modo" id="modoPagoSeleccion" value="seleccion" checked>
+            <label class="btn btn-outline-primary" for="modoPagoSeleccion">
+              <i data-lucide="list-checks"></i>Por selección
+            </label>
+            <input type="radio" class="btn-check" name="modo" id="modoPagoMonto" value="monto">
+            <label class="btn btn-outline-primary" for="modoPagoMonto">
+              <i data-lucide="banknote"></i>Por monto
+            </label>
+          </div>
+
+          <div class="alert alert-info py-2 small mb-3" data-modo-solo="seleccion">
             Marca las devengaciones pendientes o parciales que estás pagando. El monto se calcula solo.
+          </div>
+          <div class="alert alert-info py-2 small mb-3 d-none" data-modo-solo="monto">
+            Escribe cuánto le pagas. Se aplica a las devengaciones de la más vieja a la más nueva;
+            la última puede quedar parcial. La tabla muestra cómo queda repartido.
+          </div>
+
+          <div class="mb-3 d-none" data-modo-solo="monto">
+            <label class="form-label fw-semibold" for="{{ pago_form.monto.id_for_label }}">{{ pago_form.monto.label }}</label>
+            {{ pago_form.monto }}
+            <div class="form-text">Máximo Bs. {{ saldo_comision|floatformat:2 }}: lo que falta pagarle.</div>
           </div>
 
           <div class="table-responsive mb-3" style="max-height:320px;overflow-y:auto">
@@ -436,11 +461,12 @@
                   <th>Fecha</th>
                   <th>Cliente</th>
                   <th class="text-end">Pendiente</th>
+                  <th class="text-end d-none" data-modo-solo="monto">Se paga</th>
                 </tr>
               </thead>
               <tbody>
                 {% for o in operaciones_pendientes_comision %}
-                <tr>
+                <tr class="fila-devengacion" data-orden="{{ o.orden_fifo }}" data-pendiente="{{ o.pendiente|unlocalize }}">
                   <td>
                     <input type="checkbox" class="form-check-input sel-devengacion" name="sel"
                            value="{{ o.clave }}" data-pendiente="{{ o.pendiente|unlocalize }}">
@@ -450,10 +476,11 @@
                   <td>{{ o.fecha|default:"—" }}</td>
                   <td>{{ o.cliente|default:"—" }}</td>
                   <td class="text-end fw-semibold">Bs. {{ o.pendiente|floatformat:2 }}</td>
+                  <td class="text-end text-nowrap d-none" data-modo-solo="monto" data-reparto>—</td>
                 </tr>
                 {% empty %}
                 <tr>
-                  <td colspan="6" class="text-center text-muted py-3">
+                  <td colspan="7" class="text-center text-muted py-3">
                     No hay devengaciones pendientes ni parciales para pagar.
                   </td>
                 </tr>
@@ -464,11 +491,15 @@
 
           <div class="sc-comision-resumen mb-3">
             <div class="sc-comision-tile sc-comision-tile-seleccion">
-              <div class="sc-comision-tile-label">Seleccionadas</div>
+              <div class="sc-comision-tile-label">
+                <span data-modo-solo="seleccion">Seleccionadas</span><span class="d-none" data-modo-solo="monto">Alcanzadas</span>
+              </div>
               <div class="sc-comision-tile-valor"><span id="contadorSeleccionComision">0</span></div>
             </div>
             <div class="sc-comision-tile sc-comision-tile-seleccion">
-              <div class="sc-comision-tile-label">Total seleccionado</div>
+              <div class="sc-comision-tile-label">
+                <span data-modo-solo="seleccion">Total seleccionado</span><span class="d-none" data-modo-solo="monto">Total cubierto</span>
+              </div>
               <div class="sc-comision-tile-valor">Bs. <span id="totalSeleccionComision">0.00</span></div>
             </div>
             {% if no_aplicado_comision > 0 %}
@@ -484,7 +515,8 @@
           </div>
           {% if no_aplicado_comision > 0 %}
           <div class="text-muted small mb-3">
-            El saldo a favor del empleado se aplica primero a las devengaciones marcadas;
+            El saldo a favor del empleado se aplica primero
+            <span data-modo-solo="seleccion">a las devengaciones marcadas</span><span class="d-none" data-modo-solo="monto">a las devengaciones más viejas</span>;
             sólo la diferencia se registra como pago nuevo.
           </div>
           {% endif %}

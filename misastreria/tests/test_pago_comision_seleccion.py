@@ -21,6 +21,7 @@ Comisiones del detalle de empleado:
   - detalle_empleado: 200 con el filtro "Pendientes" activo por defecto;
     conteos por estado real (pendiente/parcial/pagada) y tinte de fila.
 """
+from datetime import date, timedelta
 from decimal import Decimal
 from io import BytesIO
 from unittest import mock
@@ -222,6 +223,113 @@ class PagarComisionSeleccionTests(TestCase):
     def test_get_no_permitido(self):
         resp = self.client.get(self._url())
         self.assertEqual(resp.status_code, 405)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# pagar_comision_empleado — pago por monto (reparto de la más vieja a la más nueva)
+# ──────────────────────────────────────────────────────────────────────────────
+
+class PagarComisionPorMontoTests(TestCase):
+
+    def setUp(self):
+        self.user = make_user()
+        self.client = Client()
+        self.client.force_login(self.user)
+        self.empleado = make_empleado()
+        hoy = date.today()
+        # a_vieja se entregó antes: recibe la plata primero.
+        self.a_vieja = _crear_asignacion_reparacion(
+            self.empleado, Decimal('100'), fecha_entrega=hoy - timedelta(days=10))
+        self.a_nueva = _crear_asignacion_reparacion(
+            self.empleado, Decimal('50'), fecha_entrega=hoy - timedelta(days=2))
+
+    def _url(self):
+        return reverse('pagar_comision_empleado', kwargs={'empleado_id': self.empleado.id})
+
+    def _post(self, **datos):
+        base = {'modo': 'monto', 'forma_pago': 'efectivo', 'via_caja': ''}
+        base.update(datos)
+        return self.client.post(self._url(), base)
+
+    def _aplicado(self, asignacion):
+        return AplicacionPagoComision.objects.filter(
+            reparacion_empleado=asignacion).aggregate(s=Sum('monto'))['s'] or Decimal('0')
+
+    def test_reparte_de_la_mas_vieja_a_la_mas_nueva(self):
+        resp = self._post(monto='120')
+        self.assertEqual(resp.status_code, 302)
+        pago = PagoComisionEmpleado.objects.get(empleado=self.empleado)
+        self.assertEqual(pago.monto, Decimal('120'))
+        self.assertEqual(self._aplicado(self.a_vieja), Decimal('100'))
+        self.assertEqual(self._aplicado(self.a_nueva), Decimal('20'))
+
+    def test_monto_menor_deja_parcial_la_mas_vieja_y_no_toca_la_nueva(self):
+        self._post(monto='30')
+        self.assertEqual(self._aplicado(self.a_vieja), Decimal('30'))
+        self.assertEqual(self._aplicado(self.a_nueva), Decimal('0'))
+        pago = PagoComisionEmpleado.objects.get(empleado=self.empleado)
+        self.assertEqual(pago.aplicaciones.count(), 1)
+
+    def test_todo_el_pago_queda_aplicado(self):
+        self._post(monto='150')
+        pago = PagoComisionEmpleado.objects.get(empleado=self.empleado)
+        aplicado = pago.aplicaciones.aggregate(s=Sum('monto'))['s']
+        self.assertEqual(aplicado, pago.monto)
+
+    def test_rechaza_monto_mayor_a_lo_pendiente(self):
+        resp = self._post(monto='150.01')
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(PagoComisionEmpleado.objects.exists())
+        self.assertFalse(AplicacionPagoComision.objects.exists())
+        msgs = [str(m) for m in get_messages(resp.wsgi_request)]
+        self.assertTrue(any('supera' in m for m in msgs), msgs)
+
+    def test_rechaza_sin_monto(self):
+        self._post(monto='')
+        self.assertFalse(PagoComisionEmpleado.objects.exists())
+
+    def test_rechaza_monto_cero_o_negativo(self):
+        self._post(monto='0')
+        self._post(monto='-10')
+        self.assertFalse(PagoComisionEmpleado.objects.exists())
+
+    def test_ignora_checkboxes_en_modo_monto(self):
+        """Por monto manda el orden de reparto, no lo que haya quedado marcado."""
+        self._post(monto='50', sel=[f'reparacion:{self.a_nueva.id}'])
+        self.assertEqual(self._aplicado(self.a_vieja), Decimal('50'))
+        self.assertEqual(self._aplicado(self.a_nueva), Decimal('0'))
+
+    def test_saldo_a_favor_se_consume_antes_que_el_monto(self):
+        # Pago viejo de Bs 40 sin aplicar (remanente anterior a la 0065).
+        PagoComisionEmpleado.objects.create(empleado=self.empleado, monto=Decimal('40'))
+        self._post(monto='60')
+        nuevo = PagoComisionEmpleado.objects.filter(empleado=self.empleado).latest('id')
+        self.assertEqual(nuevo.monto, Decimal('60'))
+        # 40 de saldo a favor + 60 nuevos cubren la vieja entera.
+        self.assertEqual(self._aplicado(self.a_vieja), Decimal('100'))
+        self.assertEqual(self._aplicado(self.a_nueva), Decimal('0'))
+
+    def test_tope_descuenta_el_saldo_a_favor(self):
+        # Pendiente 150, a favor 40: lo que falta pagar son 110.
+        PagoComisionEmpleado.objects.create(empleado=self.empleado, monto=Decimal('40'))
+        self._post(monto='110.01')
+        self.assertEqual(PagoComisionEmpleado.objects.filter(empleado=self.empleado).count(), 1)
+        # Y el rechazo no dejó re-apuntado el saldo a favor.
+        self.assertFalse(AplicacionPagoComision.objects.exists())
+
+    def test_sin_modo_sigue_siendo_por_seleccion(self):
+        resp = self.client.post(self._url(), {'forma_pago': 'efectivo', 'via_caja': '', 'monto': '50'})
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(PagoComisionEmpleado.objects.exists())
+
+    def test_modal_trae_el_orden_de_reparto(self):
+        resp = self.client.get(reverse('detalle_empleado', kwargs={'id': self.empleado.id}))
+        html = resp.content.decode()
+        self.assertIn('data-orden="0"', html)
+        self.assertIn('name="modo"', html)
+        ops = {o['id']: o for o in _devengaciones_empleado(self.empleado)['operaciones_pendientes_comision']}
+        self.assertEqual(ops[self.a_vieja.id]['orden_fifo'], 0)
+        self.assertEqual(ops[self.a_nueva.id]['orden_fifo'], 1)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
