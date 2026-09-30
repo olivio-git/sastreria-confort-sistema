@@ -12,11 +12,25 @@ from .kardex_events import (
     delete_eventos_alquiler, delete_eventos_venta,
 )
 
-admin.site.register(Reparacion)
+# `estado` (y `adelanto` de Confección) son de sólo lectura en el admin: un
+# cambio de estado a 'entregado' o de adelanto dispara escrituras de caja que
+# exigen un actor dueño del turno, y el admin no tiene ninguno — guardar ahí
+# terminaba en TurnoCajaError (500). Los estados se cambian desde las vistas
+# de la app, que sí identifican a quien actúa (ver caja_signals).
+
+@admin.register(Reparacion)
+class ReparacionAdmin(admin.ModelAdmin):
+    readonly_fields = ['estado']
+
+
+@admin.register(Confeccion)
+class ConfeccionAdmin(admin.ModelAdmin):
+    readonly_fields = ['estado', 'adelanto']
+
+
 admin.site.register(Empleado)
 admin.site.register(Permiso)
 admin.site.register(Falta)
-admin.site.register(Confeccion)
 
 @admin.register(PrendaInventario)
 class PrendaInventarioAdmin(admin.ModelAdmin):
@@ -77,7 +91,7 @@ class VentaAdmin(admin.ModelAdmin):
     list_display  = ['codigo', 'fecha_venta', 'cliente', 'empleado', 'total']
     list_filter   = ['fecha_venta']
     search_fields = ['codigo', 'cliente__nombres', 'cliente__apellido_paterno']
-    readonly_fields = ['subtotal', 'total']
+    readonly_fields = ['subtotal', 'total', 'estado']
     list_per_page = 20
     inlines = [VentaItemInline]
 
@@ -101,7 +115,7 @@ class AlquilerAdmin(admin.ModelAdmin):
     search_fields = ['codigo', 'cliente__nombres']
     list_per_page = 20
     inlines       = [AlquilerItemInline]
-    readonly_fields = ['subtotal', 'total']
+    readonly_fields = ['subtotal', 'total', 'estado']
 
     def save_related(self, request, form, formsets, change):
         alquiler = form.instance
