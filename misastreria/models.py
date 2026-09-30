@@ -48,6 +48,21 @@ class TipoContrato(models.Model):
         return self.nombre
 
 
+class BajaNoPermitida(Exception):
+    """La baja del Empleado desactivaría al último Administrador activo."""
+
+
+def es_ultimo_administrador_activo(user_obj):
+    """True si `user_obj` es Administrador activo y no hay ningún OTRO
+    Administrador activo en el sistema — el sistema quedaría sin nadie que
+    pueda gestionar usuarios si se lo desactiva o degrada."""
+    if not (user_obj.is_active and user_obj.groups.filter(name='Administrador').exists()):
+        return False
+    return not User.objects.filter(
+        groups__name='Administrador', is_active=True
+    ).exclude(pk=user_obj.pk).exists()
+
+
 class Empleado(models.Model):
     codigo = models.CharField(max_length=10, unique=True, blank=True, verbose_name="Código")
     ci = models.CharField(max_length=20, unique=True, null=True, blank=True, verbose_name="CI")
@@ -72,6 +87,12 @@ class Empleado(models.Model):
             numero = (int(last.codigo.split('-')[1]) + 1) if last and last.codigo and '-' in last.codigo else 1
             self.codigo = f"EMP-{numero:03d}"
         self.activo = self.fecha_baja is None
+        # Guard de dominio: la baja desactiva al usuario vinculado, y ninguna
+        # ruta (vista, admin, shell) puede dejar al sistema sin Administrador.
+        if self.fecha_baja and self.user_id and es_ultimo_administrador_activo(self.user):
+            raise BajaNoPermitida(
+                "No se puede dar de baja al empleado: su usuario es el último Administrador activo."
+            )
         self.nombres = ' '.join(word.capitalize() for word in self.nombres.split())
         if self.apellido_paterno:
             self.apellido_paterno = self.apellido_paterno.capitalize()

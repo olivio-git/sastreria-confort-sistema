@@ -23,19 +23,11 @@ from django.views.decorators.http import require_POST
 
 from . import caja_turno, roles
 from .forms import CrearUsuarioForm, EditarUsuarioForm
-from .models import Empleado
+from .models import BajaNoPermitida, Empleado, es_ultimo_administrador_activo
 from .permisos import permission_required
 
 
-def _es_ultimo_administrador_activo(user_obj):
-    """True si `user_obj` es Administrador activo y no hay ningún OTRO
-    Administrador activo en el sistema — el sistema quedaría sin nadie que
-    pueda gestionar usuarios si se lo desactiva o degrada."""
-    if not (user_obj.is_active and user_obj.groups.filter(name='Administrador').exists()):
-        return False
-    return not User.objects.filter(
-        groups__name='Administrador', is_active=True
-    ).exclude(pk=user_obj.pk).exists()
+_es_ultimo_administrador_activo = es_ultimo_administrador_activo
 
 def _codenames_del_rol(user_obj):
     """Permisos de la app que el usuario recibe por sus grupos (roles)."""
@@ -106,25 +98,29 @@ def crear_usuario(request):
             # vincularlo a un Empleado son tres escrituras relacionadas — si
             # una fallara a mitad de camino no debe quedar un usuario sin
             # rol o un Empleado a medio vincular.
-            with transaction.atomic():
-                user = User.objects.create_user(
-                    username=form.cleaned_data['username'],
-                    password=form.cleaned_data['password'],
-                )
-                for nombre_rol in form.cleaned_data['roles']:
-                    grupo, _ = Group.objects.get_or_create(name=nombre_rol)
-                    user.groups.add(grupo)
-                empleado = form.cleaned_data.get('empleado')
-                if empleado:
-                    empleado.user = user
-                    empleado.save(update_fields=['user'])
-                    # SUGGESTION 2: si el Empleado elegido ya está de baja,
-                    # el usuario vinculado nace desactivado — vincular no
-                    # debe "resucitar" el acceso de alguien que ya no trabaja
-                    # acá.
-                    if empleado.fecha_baja and user.is_active:
-                        user.is_active = False
-                        user.save(update_fields=['is_active'])
+            try:
+                with transaction.atomic():
+                    user = User.objects.create_user(
+                        username=form.cleaned_data['username'],
+                        password=form.cleaned_data['password'],
+                    )
+                    for nombre_rol in form.cleaned_data['roles']:
+                        grupo, _ = Group.objects.get_or_create(name=nombre_rol)
+                        user.groups.add(grupo)
+                    empleado = form.cleaned_data.get('empleado')
+                    if empleado:
+                        empleado.user = user
+                        empleado.save(update_fields=['user'])
+                        # SUGGESTION 2: si el Empleado elegido ya está de baja,
+                        # el usuario vinculado nace desactivado — vincular no
+                        # debe "resucitar" el acceso de alguien que ya no trabaja
+                        # acá.
+                        if empleado.fecha_baja and user.is_active:
+                            user.is_active = False
+                            user.save(update_fields=['is_active'])
+            except BajaNoPermitida as exc:
+                form.add_error('empleado', str(exc))
+                return render(request, 'misastreria/usuarios/form.html', {'form': form, 'modo': 'crear'})
             roles_txt = ', '.join(form.cleaned_data['roles'])
             messages.success(request, f"Usuario «{user.username}» creado con rol(es) {roles_txt}.")
             return redirect('lista_usuarios')
@@ -159,25 +155,30 @@ def editar_usuario(request, pk):
             else:
                 # Atómico (WARNING 7): reasignar roles + relink de Empleado
                 # son varias escrituras relacionadas.
-                with transaction.atomic():
-                    # Sólo se tocan los grupos que SON roles del sistema
-                    # (WARNING 5: antes `.groups.clear()` borraba TODOS los
-                    # grupos del usuario, incluyendo cualquiera ajeno a
-                    # `roles.ROLES` que pudiera tener por otro motivo).
-                    grupos_roles_sistema = Group.objects.filter(name__in=roles.ROLES.keys())
-                    user_obj.groups.remove(*grupos_roles_sistema)
-                    for nombre_rol in nuevos_roles:
-                        grupo, _ = Group.objects.get_or_create(name=nombre_rol)
-                        user_obj.groups.add(grupo)
+                try:
+                    with transaction.atomic():
+                        # Sólo se tocan los grupos que SON roles del sistema
+                        # (WARNING 5: antes `.groups.clear()` borraba TODOS los
+                        # grupos del usuario, incluyendo cualquiera ajeno a
+                        # `roles.ROLES` que pudiera tener por otro motivo).
+                        grupos_roles_sistema = Group.objects.filter(name__in=roles.ROLES.keys())
+                        user_obj.groups.remove(*grupos_roles_sistema)
+                        for nombre_rol in nuevos_roles:
+                            grupo, _ = Group.objects.get_or_create(name=nombre_rol)
+                            user_obj.groups.add(grupo)
 
-                    Empleado.objects.filter(user=user_obj).update(user=None)
-                    empleado = form.cleaned_data.get('empleado')
-                    if empleado:
-                        empleado.user = user_obj
-                        empleado.save(update_fields=['user'])
-                        if empleado.fecha_baja and user_obj.is_active:
-                            user_obj.is_active = False
-                            user_obj.save(update_fields=['is_active'])
+                        Empleado.objects.filter(user=user_obj).update(user=None)
+                        empleado = form.cleaned_data.get('empleado')
+                        if empleado:
+                            empleado.user = user_obj
+                            empleado.save(update_fields=['user'])
+                            if empleado.fecha_baja and user_obj.is_active:
+                                user_obj.is_active = False
+                                user_obj.save(update_fields=['is_active'])
+
+                except BajaNoPermitida as exc:
+                    form.add_error('empleado', str(exc))
+                    return render(request, 'misastreria/usuarios/form.html', {'form': form, 'modo': 'editar', 'usuario_obj': user_obj})
 
                 messages.success(request, f"Usuario «{user_obj.username}» actualizado.")
                 return redirect('lista_usuarios')

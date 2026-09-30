@@ -187,7 +187,8 @@ class EmpleadoUserLinkTests(TestCase):
     """La baja de un Empleado desactiva al User vinculado (si existe)."""
 
     def test_baja_desactiva_usuario_vinculado_activo(self):
-        user = make_user(username='vinculado')
+        # Cajero: dar de baja al último Administrador activo está vedado (guard de dominio).
+        user = make_user(username='vinculado', role='Cajero')
         emp = make_empleado(user=user)
         self.assertTrue(user.is_active)
 

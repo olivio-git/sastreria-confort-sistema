@@ -13,7 +13,7 @@ from .permisos import permission_required, any_permission_required
 from django.views.decorators.http import require_POST
 from django.utils import timezone as django_tz
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
-from .models import Empleado, TipoContrato, Cliente, Reparacion, ReparacionItem, TipoPrenda, TipoReparacion, Venta, VentaItem, Confeccion, ConfeccionItem, Alquiler, AlquilerItem, EstadoAlquiler, Transaccion, PrendaInventario, PrendaItem, Corte, UbicacionItem, Insumo, TipoMaterial, UnidadMedida, Permiso, Falta, OrdenProduccion, InsumoCortado, CajaSesion, CajaMovimiento, TipoGasto, Conjunto, ConjuntoSlot, PagoComisionEmpleado, ModeloConfeccion, VentaItemEmpleado, AlquilerItemEmpleado, KardexEvento, ReparacionEmpleado, ConfeccionEmpleado, OrdenProduccionEmpleado, AplicacionPagoComision
+from .models import BajaNoPermitida, Empleado, TipoContrato, Cliente, Reparacion, ReparacionItem, TipoPrenda, TipoReparacion, Venta, VentaItem, Confeccion, ConfeccionItem, Alquiler, AlquilerItem, EstadoAlquiler, Transaccion, PrendaInventario, PrendaItem, Corte, UbicacionItem, Insumo, TipoMaterial, UnidadMedida, Permiso, Falta, OrdenProduccion, InsumoCortado, CajaSesion, CajaMovimiento, TipoGasto, Conjunto, ConjuntoSlot, PagoComisionEmpleado, ModeloConfeccion, VentaItemEmpleado, AlquilerItemEmpleado, KardexEvento, ReparacionEmpleado, ConfeccionEmpleado, OrdenProduccionEmpleado, AplicacionPagoComision
 from . import comisiones
 from .forms import EmpleadoForm, ClienteForm, ReparacionForm, ReparacionItemForm, VentaForm, VentaItemForm, ConfeccionForm, ConfeccionItemFormSet, AlquilerForm, AlquilerItemForm, TransaccionForm, PrendaInventarioForm, InsumoForm, PermisoForm, FaltaForm, EmpleadoReporteForm, ClienteReporteForm, ReparacionReporteForm, OrdenProduccionForm, InsumoCortadoForm, CajaSesionAperturaForm, CajaSesionCierreForm, CajaMovimientoManualForm, TipoGastoForm, ConjuntoForm, ConjuntoSlotFormSet, PagoComisionEmpleadoForm, ConfigurarPinForm, DesbloquearPinForm
 from django.core.paginator import Paginator
@@ -237,12 +237,18 @@ def crear_empleado(request):
 def editar_empleado(request, id):
     empleado = get_object_or_404(Empleado, id=id)
     if request.method == 'POST':
-        form = EmpleadoForm(request.POST, instance=empleado)
+        form = EmpleadoForm(request.POST, instance=empleado, actor=request.user)
         if form.is_valid():
-            form.save()
-            return redirect('lista_empleados')
+            try:
+                with transaction.atomic():
+                    form.save()
+            except BajaNoPermitida as exc:
+                # Backstop del guard de dominio de `Empleado.save`.
+                form.add_error('fecha_baja', str(exc))
+            else:
+                return redirect('lista_empleados')
     else:
-        form = EmpleadoForm(instance=empleado)
+        form = EmpleadoForm(instance=empleado, actor=request.user)
     return render(request, 'misastreria/empleados/editar.html', {
         'form': form,
         'empleado': empleado,

@@ -8,6 +8,7 @@ from .models import (
     TipoGasto, CajaSesion, CajaMovimiento, FORMA_PAGO_CHOICES,
     Conjunto, ConjuntoSlot,
 )
+from .models import es_ultimo_administrador_activo
 from django.forms import DateInput, inlineformset_factory
 from django.core.exceptions import ValidationError
 from django.db.models import Q
@@ -119,15 +120,48 @@ class EmpleadoForm(forms.ModelForm):
             'fecha_baja': 'Completar solo si el empleado ya no trabaja aquí. Deja en blanco si sigue activo.',
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, actor=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['tipo_contrato'].required = False
+        self.actor = actor
+        self._baja_original = self.instance.fecha_baja if self.instance.pk else None
+        # La baja de un Empleado con usuario vinculado desactiva a ese usuario:
+        # es gestión de usuarios. Sin `gestionar_usuarios` el campo se muestra
+        # deshabilitado (Django ignora lo que llegue por POST y conserva el
+        # valor actual). Sin `actor` se falla cerrado.
+        self.baja_bloqueada = bool(
+            self.instance.pk and self.instance.user_id
+            and not (actor is not None and actor.has_perm('misastreria.gestionar_usuarios'))
+        )
+        if self.baja_bloqueada:
+            self.fields['fecha_baja'].disabled = True
+            self.fields['fecha_baja'].help_text = (
+                'Este empleado tiene usuario del sistema: sólo quien gestiona '
+                'usuarios puede darlo de baja o reactivarlo.'
+            )
 
     def clean_celular(self):
         celular = self.cleaned_data.get('celular', '').strip()
         if celular and not celular.startswith('+'):
             celular = '+591' + celular
         return celular
+
+    def clean(self):
+        cleaned = super().clean()
+        inst = self.instance
+        if not (inst.pk and inst.user_id) or 'fecha_baja' not in cleaned:
+            return cleaned
+        nueva = cleaned.get('fecha_baja')
+        if nueva == self._baja_original:
+            return cleaned
+        if self.actor is not None and inst.user_id == self.actor.pk:
+            self.add_error('fecha_baja', "No podés dar de baja ni reactivar tu propio usuario.")
+        elif nueva and es_ultimo_administrador_activo(inst.user):
+            self.add_error(
+                'fecha_baja',
+                "No se puede dar de baja: su usuario es el último Administrador activo.",
+            )
+        return cleaned
 
 class PermisoForm(forms.ModelForm):
     class Meta:
