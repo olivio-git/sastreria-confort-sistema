@@ -38,7 +38,22 @@
                 <label for="{{ field.id_for_label }}" class="form-label">
                   {{ field.label }}{% if not field.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}
                 </label>
-                {{ field }}
+                {% if field.name == 'roles' %}
+                  {% comment %}
+                  CheckboxSelectMultiple renderizado a mano: sin el contenedor .form-check,
+                  Bootstrap hace flotar cada input y se sale de la tarjeta.
+                  {% endcomment %}
+                  <div id="{{ field.id_for_label }}">
+                    {% for opcion in field %}
+                    <div class="form-check">
+                      {{ opcion.tag }}
+                      <label class="form-check-label" for="{{ opcion.id_for_label }}">{{ opcion.choice_label }}</label>
+                    </div>
+                    {% endfor %}
+                  </div>
+                {% else %}
+                  {{ field }}
+                {% endif %}
                 {% if field.help_text %}<div class="form-text text-muted">{{ field.help_text }}</div>{% endif %}
                 {% if field.errors %}<div class="text-danger small mt-1">{{ field.errors.0 }}</div>{% endif %}
               </div>
