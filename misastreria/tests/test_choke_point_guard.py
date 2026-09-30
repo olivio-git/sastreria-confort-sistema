@@ -29,8 +29,15 @@ también se revisa: sólo las funciones aprobadas pueden escribir ahí.
 Límites conocidos (es un tripwire, no una garantía): NO detecta accesos
 dinámicos al modelo — `getattr(CajaMovimiento, 'objects')`,
 `apps.get_model('misastreria', 'CajaMovimiento')`, `type(mov).objects` —, ni
-la clonación de una fila (`mov.pk = None; mov.save()`), ni SQL crudo. Quien
-quiera saltearlo a propósito puede; el guard atrapa el descuido, y la
+la clonación de una fila (`mov.pk = None; mov.save()`), ni SQL crudo.
+Tampoco ve (verify ronda 6, W3):
+  - `.update(sesion=..., via_caja=...)` sobre un queryset ligado a una
+    variable (`qs = CajaMovimiento.objects.filter(...); qs.update(...)`):
+    sólo se reconoce la cadena directa `CajaMovimiento.objects...update`.
+  - La escritura de un campo en una instancia seguida de `save()`
+    (`mov.sesion = otra; mov.via_caja = True; mov.save()`): el guard sólo
+    mira instanciaciones y verbos de manager/queryset, no asignaciones.
+Quien quiera saltearlo a propósito puede; el guard atrapa el descuido, y la
 defensa real es el choke point (`_crear_mov_auto`) más sus tests de
 comportamiento (`test_caja_signals_fail_closed`).
 
