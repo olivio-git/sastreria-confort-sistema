@@ -20,13 +20,15 @@ completo se rechaza — nada queda persistido — y no hay 500.
 from datetime import date, timedelta
 from decimal import Decimal
 
+from django.contrib.messages import get_messages
 from django.test import TestCase
 from django.urls import reverse
 
 from misastreria.caja_turno import TurnoCajaError, autorizar_transicion_a_entregado
 from misastreria.caja_signals import registrar_pago_venta
 from misastreria.models import (
-    Alquiler, CajaMovimiento, Confeccion, PagoComisionEmpleado, Reparacion,
+    AplicacionPagoComision, Alquiler, CajaMovimiento, Confeccion,
+    PagoComisionEmpleado, Reparacion,
     ReparacionEmpleado, Venta,
 )
 from .factories import (
@@ -935,6 +937,74 @@ class PagarComisionEmpleadoOwnershipTests(TestCase):
         mov = CajaMovimiento.objects.get(concepto='comision_empleado')
         self.assertEqual(mov.monto, Decimal('80'))
         self.assertEqual(mov.referencia_pago_comision_id, pago.id)
+
+
+class PagarComisionPorMontoOwnershipTests(TestCase):
+    """El pago por monto (modo 'monto', reparto FIFO) pasa por el mismo guard
+    de turno que el pago por selección: con via_caja sólo el dueño del turno
+    abierto puede generar el egreso."""
+
+    def setUp(self):
+        self.empleado = make_empleado()
+        hoy = date.today()
+        rep_vieja = make_reparacion(total=Decimal('100'), fecha_entrega=hoy - timedelta(days=10))
+        rep_nueva = make_reparacion(total=Decimal('50'), fecha_entrega=hoy - timedelta(days=2))
+        ReparacionEmpleado.objects.create(
+            reparacion=rep_vieja, empleado=self.empleado, monto_comision_fijo=Decimal('100'))
+        ReparacionEmpleado.objects.create(
+            reparacion=rep_nueva, empleado=self.empleado, monto_comision_fijo=Decimal('50'))
+
+    def _pagar_por_monto(self, usuario, monto='120'):
+        self.client.force_login(usuario)
+        return self.client.post(
+            reverse('pagar_comision_empleado', kwargs={'empleado_id': self.empleado.id}),
+            {'modo': 'monto', 'monto': monto, 'forma_pago': 'efectivo', 'via_caja': 'on'},
+        )
+
+    def _nada_registrado(self):
+        self.assertFalse(PagoComisionEmpleado.objects.exists())
+        self.assertEqual(AplicacionPagoComision.objects.count(), 0)
+        self.assertEqual(CajaMovimiento.objects.filter(concepto='comision_empleado').count(), 0)
+
+    def test_admin_no_dueno_es_rechazado(self):
+        make_sesion_caja(usuario=make_cajero(username='cajero_a_monto'))
+        admin = make_administrador(username='admin_monto')
+
+        resp = self._pagar_por_monto(admin)
+
+        self.assertNotEqual(resp.status_code, 500)
+        self._nada_registrado()
+
+    def test_cajero_b_es_rechazado(self):
+        make_sesion_caja(usuario=make_cajero(username='cajero_a_monto2'))
+        cajero_b = make_cajero(username='cajero_b_monto')
+
+        resp = self._pagar_por_monto(cajero_b)
+
+        self.assertNotEqual(resp.status_code, 500)
+        self._nada_registrado()
+
+    def test_dueno_puede_pagar_por_monto(self):
+        admin_dueno = make_administrador(username='admin_monto_dueno')
+        make_sesion_caja(usuario=admin_dueno)
+
+        resp = self._pagar_por_monto(admin_dueno)
+
+        self.assertEqual(resp.status_code, 302)
+        pago = PagoComisionEmpleado.objects.get(empleado=self.empleado)
+        self.assertEqual(pago.monto, Decimal('120'))
+        self.assertEqual(pago.aplicaciones.count(), 2)
+        mov = CajaMovimiento.objects.get(concepto='comision_empleado')
+        self.assertEqual(mov.monto, Decimal('120'))
+
+    def test_sin_sesion_abierta_muestra_mensaje_y_no_500(self):
+        admin = make_administrador(username='admin_monto_sin')
+
+        resp = self._pagar_por_monto(admin)
+
+        self.assertEqual(resp.status_code, 302)
+        self._nada_registrado()
+        self.assertTrue(list(get_messages(resp.wsgi_request)), 'debe explicar por qué no se pagó')
 
 
 # ──────────────────────────────────────────────────────────────────────────────
