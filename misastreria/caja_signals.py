@@ -18,8 +18,11 @@ from .caja_turno import CajaSinSesionError, TurnoCajaError
 # ============================================================
 
 def _sesion_activa():
-    """Retorna la CajaSesion con estado='abierta', o None si no existe."""
-    return CajaSesion.objects.filter(estado='abierta').first()
+    """Retorna la CajaSesion con estado='abierta', o None si no existe.
+    Con 2+ abiertas falla cerrado (CajasAbiertasMultiplesError): ver
+    `caja_turno.sesion_abierta`."""
+    from .caja_turno import sesion_abierta
+    return sesion_abierta()
 
 
 def _reversar_movimientos_activos_impl(*, referencia_field, instance, usuario, verificar):

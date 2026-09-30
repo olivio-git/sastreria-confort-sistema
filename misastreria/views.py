@@ -162,7 +162,7 @@ def dashboard(request):
     )
     ingresos_hoy = caja_hoy_qs.filter(tipo='ingreso').aggregate(t=Sum('monto'))['t'] or Decimal('0')
     egresos_hoy = caja_hoy_qs.filter(tipo='egreso').aggregate(t=Sum('monto'))['t'] or Decimal('0')
-    sesion_activa = CajaSesion.objects.filter(estado='abierta').first()
+    sesion_activa, _ = caja_turno.sesion_abierta_para_mostrar()
     caja_hoy = {
         'ingresos': ingresos_hoy,
         'egresos': egresos_hoy,
@@ -10002,7 +10002,7 @@ def crear_movimiento_caja(request):
         else:
             messages.error(request, "Por favor corrige los errores del formulario.")
     else:
-        sesion_activa = caja_turno.sesion_abierta()
+        sesion_activa, _ = caja_turno.sesion_abierta_para_mostrar()
         form = CajaMovimientoManualForm()
 
     return render(request, 'misastreria/caja/form_movimiento.html', {
@@ -10130,31 +10130,40 @@ def lista_sesiones_caja(request):
 @login_required
 @permission_required('misastreria.abrir_caja')
 def abrir_sesion_caja(request):
-    sesion_existente = CajaSesion.objects.filter(estado='abierta').first()
+    sesion_existente, _ = caja_turno.sesion_abierta_para_mostrar()
 
     if request.method == 'POST':
         form = CajaSesionAperturaForm(request.POST)
         if form.is_valid():
             try:
-                with transaction.atomic():
-                    sesion = form.save(commit=False)
-                    sesion.usuario_apertura = request.user
-                    sesion.estado = 'abierta'
-                    sesion.save()
-                    CajaMovimiento.objects.create(
-                        sesion=sesion,
-                        tipo='ingreso',
-                        concepto='apertura_caja',
-                        origen='automatico',
-                        forma_pago='efectivo',
-                        monto=sesion.monto_apertura,
-                        descripcion=f"Apertura de caja sesión #{sesion.pk}",
-                        usuario=request.user,
-                    )
+                # "A lo sumo una caja abierta" se garantiza acá y no sólo con el
+                # UniqueConstraint: MariaDB lo ignora (models.W036). El lock
+                # serializa a los que abren y el re-chequeo va DENTRO de la
+                # transacción, ya con el lock tomado.
+                with caja_turno.bloqueo_apertura_caja():
+                    with transaction.atomic():
+                        if CajaSesion.objects.filter(estado='abierta').exists():
+                            raise IntegrityError('caja ya abierta')
+                        sesion = form.save(commit=False)
+                        sesion.usuario_apertura = request.user
+                        sesion.estado = 'abierta'
+                        sesion.save()
+                        CajaMovimiento.objects.create(
+                            sesion=sesion,
+                            tipo='ingreso',
+                            concepto='apertura_caja',
+                            origen='automatico',
+                            forma_pago='efectivo',
+                            monto=sesion.monto_apertura,
+                            descripcion=f"Apertura de caja sesión #{sesion.pk}",
+                            usuario=request.user,
+                        )
                 messages.success(request, f"Sesión de caja #{sesion.pk} abierta exitosamente.")
                 return redirect('detalle_sesion_caja', pk=sesion.pk)
             except IntegrityError:
                 form.add_error(None, "Ya existe una sesión de caja abierta. Ciérrala antes de abrir una nueva.")
+            except caja_turno.TurnoCajaError as exc:
+                form.add_error(None, str(exc))
     else:
         form = CajaSesionAperturaForm()
 

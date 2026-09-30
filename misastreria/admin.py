@@ -168,8 +168,13 @@ class CajaSesionAdmin(admin.ModelAdmin):
     list_display = ['id', 'fecha_apertura', 'estado', 'monto_apertura', 'diferencia', 'usuario_apertura']
     list_filter = ['estado']
     search_fields = ['id']
-    readonly_fields = ['creado', 'monto_cierre_sistema', 'diferencia']
+    readonly_fields = ['creado', 'monto_cierre_sistema', 'diferencia', 'estado']
     list_per_page = 20
+
+    def has_add_permission(self, request):
+        # Abrir una caja pasa por `abrir_sesion_caja` (lock + re-chequeo de
+        # "una sola abierta"); crearla desde el admin esquivaría ese control.
+        return False
 
 
 @admin.register(CajaMovimiento)

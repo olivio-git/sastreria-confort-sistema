@@ -11,8 +11,10 @@ Cajero, tiene que abrir el suyo.
 También vive acá (agregado en la Fase 5) el ciclo de vida del PIN de
 desbloqueo de caja: son parte del mismo "quién puede tocar la caja ahora".
 """
+from contextlib import contextmanager
+
 from django.contrib.auth.hashers import check_password, make_password
-from django.db import transaction
+from django.db import connection, transaction
 from django.utils import timezone
 
 INTENTOS_MAXIMOS_PIN = 5
@@ -32,10 +34,80 @@ class CajaSinSesionError(TurnoCajaError):
     vista (admin de Django, shell, señales)."""
 
 
+class CajasAbiertasMultiplesError(TurnoCajaError):
+    """Hay 2 o más CajaSesion abiertas. No debería pasar (una sola abierta a
+    la vez), pero en MariaDB el UniqueConstraint condicional `unique_caja_abierta`
+    no existe (models.W036), así que la base no lo impide. Se falla CERRADO:
+    ningún cobro/reversión se asienta en una caja "elegida" al azar."""
+
+
+MENSAJE_CAJAS_MULTIPLES = (
+    'Hay más de una caja abierta al mismo tiempo. Pedile a un Administrador '
+    'que cierre las que sobran antes de seguir operando.'
+)
+
+
 def sesion_abierta():
-    """La CajaSesion con estado='abierta', o None si no hay ninguna."""
+    """La CajaSesion con estado='abierta', o None si no hay ninguna.
+
+    Si por alguna falla hay 2+ abiertas levanta `CajasAbiertasMultiplesError`
+    en vez de devolver "la primera": esta es la única puerta por la que el
+    resto del código (turno de cobro, reversión, señales) resuelve la caja.
+    """
     from .models import CajaSesion
-    return CajaSesion.objects.filter(estado='abierta').first()
+    sesiones = list(
+        CajaSesion.objects.filter(estado='abierta')
+        .select_related('usuario_apertura').order_by('pk')[:2]
+    )
+    if len(sesiones) > 1:
+        raise CajasAbiertasMultiplesError(MENSAJE_CAJAS_MULTIPLES)
+    return sesiones[0] if sesiones else None
+
+
+def sesion_abierta_para_mostrar():
+    """Como `sesion_abierta()` pero para pantallas (topbar, dashboard) que no
+    pueden reventar: devuelve `(sesion, ambigua)`. Con 2+ abiertas devuelve
+    `(None, True)` — nunca muestra una caja como si fuera "la" abierta."""
+    try:
+        return sesion_abierta(), False
+    except CajasAbiertasMultiplesError:
+        return None, True
+
+
+@contextmanager
+def bloqueo_apertura_caja(timeout=10):
+    """Serializa a quienes abren caja para que "a lo sumo una abierta" valga
+    aunque la base no tenga el constraint (MariaDB).
+
+    En MySQL/MariaDB usa un lock nombrado (`GET_LOCK`). Se eligió eso y no un
+    `SELECT ... FOR UPDATE` porque bloquear "las sesiones abiertas" no sirve:
+    si no hay ninguna la consulta no devuelve filas y NO frena a un INSERT
+    concurrente. Un `FOR UPDATE` sobre una fila singleton obligaría a crear
+    una tabla/migración sólo para esto. `GET_LOCK` no requiere esquema, es por
+    conexión (se libera solo si la conexión muere) y se toma FUERA de la
+    transacción de apertura: el llamador hace `atomic()` adentro, re-chequea y
+    crea, y el lock se suelta recién después del commit, así el siguiente en
+    la cola ya ve la sesión confirmada.
+
+    En otros motores (SQLite en desarrollo/tests) no hace nada: ahí los
+    escritores ya se serializan y el UniqueConstraint sí existe.
+    """
+    if connection.vendor != 'mysql':
+        yield
+        return
+    nombre = f"caja_apertura:{connection.settings_dict['NAME']}"[:64]
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT GET_LOCK(%s, %s)', [nombre, timeout])
+        obtenido = cursor.fetchone()[0]
+    if obtenido != 1:
+        raise TurnoCajaError(
+            'Hay otra apertura de caja en curso. Intentá de nuevo en unos segundos.'
+        )
+    try:
+        yield
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT RELEASE_LOCK(%s)', [nombre])
 
 
 def verificar_turno_cobro(user):
