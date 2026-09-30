@@ -10,7 +10,7 @@ Cubre:
 """
 from decimal import Decimal
 
-from django.test import TestCase
+from django.test import TestCase, skipUnlessDBFeature
 from django.db import IntegrityError
 
 from misastreria.models import CajaMovimiento, CajaSesion
@@ -66,9 +66,11 @@ class CajaMovimientoAutoCodigoTests(TestCase):
 
     def test_segundo_movimiento_codigo_0002(self):
         sesion = make_sesion_caja()
-        make_movimiento_caja(sesion=sesion)
+        mov1 = make_movimiento_caja(sesion=sesion)
         mov2 = make_movimiento_caja(sesion=sesion, concepto='egreso_manual', tipo='egreso')
-        self.assertEqual(mov2.codigo, 'MOV-0002')
+        # Relativo al id del primero: en MySQL/MariaDB el AUTO_INCREMENT no se
+        # reinicia entre tests (SQLite sí), así que el primero no siempre es 1.
+        self.assertEqual(mov2.codigo, f'MOV-{mov1.pk + 1:04d}')
 
 
 class CajaMovimientoTipoAutoTests(TestCase):
@@ -123,6 +125,9 @@ class CajaMovimientoEsReversoTests(TestCase):
 class CajaSesionUnicaAbiertaTests(TestCase):
     """Solo puede haber una sesión abierta a la vez."""
 
+    # MariaDB no soporta UniqueConstraint con condición (models.W036): ahí la
+    # regla la hace cumplir el código (ver test_caja_una_sola_abierta.py).
+    @skipUnlessDBFeature('supports_partial_indexes')
     def test_crear_dos_sesiones_abiertas_falla(self):
         user = make_user()
         make_sesion_caja(usuario=user)

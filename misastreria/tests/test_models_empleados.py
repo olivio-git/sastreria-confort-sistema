@@ -169,9 +169,11 @@ class PagoComisionEmpleadoTests(TestCase):
 
     def test_segundo_pago_codigo_0002(self):
         emp = make_empleado()
-        PagoComisionEmpleado.objects.create(empleado=emp, monto=Decimal('100'), via_caja=False)
+        pago1 = PagoComisionEmpleado.objects.create(empleado=emp, monto=Decimal('100'), via_caja=False)
         pago2 = PagoComisionEmpleado.objects.create(empleado=emp, monto=Decimal('50'), via_caja=False)
-        self.assertEqual(pago2.codigo, 'COM-0002')
+        # Relativo al id del primero: el AUTO_INCREMENT de MySQL/MariaDB no se
+        # reinicia entre tests.
+        self.assertEqual(pago2.codigo, f'COM-{pago1.pk + 1:04d}')
 
     def test_str_pago_comision(self):
         emp = make_empleado(nombres='Carlos', apellido_paterno='Quispe')

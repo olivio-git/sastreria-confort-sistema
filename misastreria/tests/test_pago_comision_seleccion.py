@@ -740,7 +740,7 @@ class SnapshotYPresentacionTests(TestCase):
         self.empleado = make_empleado()
 
     def test_snapshot_describe_la_operacion_y_se_trunca(self):
-        cli = make_cliente(nombres='X' * 150, apellido_paterno='Y' * 90)
+        cli = make_cliente(nombres='X' * 100, apellido_paterno='Y' * 100)
         a = _crear_asignacion_reparacion(self.empleado, Decimal('100'), cliente=cli)
         texto = comisiones.detalle_snapshot('reparacion', a, max_length=200)
         self.assertLessEqual(len(texto), 200)

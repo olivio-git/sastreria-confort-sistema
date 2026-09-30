@@ -18,7 +18,7 @@ Módulos probados:
 from decimal import Decimal
 from datetime import date, timedelta
 
-from django.test import TestCase
+from django.test import TestCase, skipUnlessDBFeature
 from django.db import IntegrityError
 
 from misastreria.caja_signals import (
@@ -560,6 +560,7 @@ class UniqueConstraintsCajaTests(TestCase):
     def setUp(self):
         self.sesion = make_sesion_caja()
 
+    @skipUnlessDBFeature('supports_partial_indexes')
     def test_no_puede_haber_dos_venta_cobro_activos(self):
         """Un venta_cobro activo por venta — el segundo debe fallar con UniqueConstraint."""
         venta = make_venta()
@@ -585,6 +586,7 @@ class UniqueConstraintsCajaTests(TestCase):
                 referencia_venta=venta,
             )
 
+    @skipUnlessDBFeature('supports_partial_indexes')
     def test_garantia_alquiler_duplicada_falla(self):
         """No puede haber dos garantia_alquiler activos para el mismo alquiler."""
         alquiler = make_alquiler(
