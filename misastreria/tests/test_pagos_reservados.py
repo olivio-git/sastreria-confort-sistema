@@ -73,8 +73,10 @@ class RegistrarPagoViaCajaFalseExigeTurnoTests(TestCase):
     def test_dueno_de_la_sesion_si_puede_reservar(self):
         cajero = make_cajero()
         sesion = make_sesion_caja(usuario=cajero)
-        venta, resp = self._post_reserva(cajero)
-        mov = CajaMovimiento.objects.get(referencia_venta=venta, concepto='venta_saldo')
+        # Reserva parcial: si el pago completara la venta, sería entrega y
+        # se liberaría al instante (ver test_liberar_reservas_entrega).
+        venta, resp = self._post_reserva(cajero, monto='100')
+        mov = CajaMovimiento.objects.get(referencia_venta=venta, concepto='venta_pago')
         self.assertFalse(mov.via_caja)
         self.assertEqual(mov.sesion_id, sesion.id)
 

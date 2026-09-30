@@ -279,6 +279,32 @@ def _liberar_pagos_reservados(referencia_field, instance, usuario):
         ).update(via_caja=True, sesion=sesion)
 
 
+def _liberar_reservas_por_entrega(referencia_field, instance, actor):
+    """Libera las reservas (`via_caja=False`) de un servicio cuando la prenda
+    se ENTREGA (decisión del dueño, architecture/caja-pagos-reserva: la
+    reserva es efectivo guardado aparte hasta la entrega). Se asientan en la
+    sesión abierta de `actor`, que tiene que ser su dueño — igual que
+    cualquier otro cobro. Si no hay reservas pendientes no exige nada.
+
+    Se llama desde los post_save de la transición a 'entregado' (y desde
+    `registrar_pago_venta` cuando la venta pasa a efectuada), dentro de la
+    transacción de la vista: si `actor` falta o no es el dueño se levanta
+    `TurnoCajaError` y la entrega completa se revierte."""
+    hay_reservas = CajaMovimiento.objects.filter(
+        **{referencia_field: instance},
+        via_caja=False,
+        movimiento_reverso__isnull=True,
+    ).exists()
+    if not hay_reservas:
+        return
+    if actor is None:
+        raise TurnoCajaError(
+            "No se puede entregar: hay pagos reservados por liberar y falta "
+            "identificar quién entrega (falta 'usuario')."
+        )
+    _liberar_pagos_reservados(referencia_field, instance, actor)
+
+
 # ============================================================
 # ALQUILER
 # ============================================================
@@ -660,6 +686,8 @@ def registrar_pago_venta(venta, monto, forma_pago, descripcion, usuario, via_caj
             if pi and pi.estado == 'reservado':
                 pi.estado = 'baja'
                 pi.save(update_fields=['estado'])
+        # Efectuada = entregada: las reservas dejan de estar apartadas.
+        _liberar_reservas_por_entrega('referencia_venta', venta, usuario)
     if via_caja and nuevo_saldo <= Decimal('0'):
         _liberar_pagos_reservados('referencia_venta', venta, usuario)
 
@@ -838,6 +866,8 @@ def confeccion_to_caja(sender, instance, created, **kwargs):
                     referencia_confeccion=instance,
                     cliente=cliente,
                 )
+        # Entrega = fin de la reserva: se asientan en la sesión de quien entrega.
+        _liberar_reservas_por_entrega('referencia_confeccion', instance, actor)
 
 
 # ============================================================
@@ -979,6 +1009,13 @@ def reparacion_to_caja(sender, instance, created, **kwargs):
     # guard se generaban DOS movimientos (reparacion_saldo + reparacion_cobro).
     if instance.estado != 'entregado' or old_estado == 'entregado':
         return
+    _cobrar_saldo_al_entregar_reparacion(instance, actor)
+    # Entrega = fin de la reserva: se asientan en la sesión de quien entrega
+    # (exista o no saldo por cobrar).
+    _liberar_reservas_por_entrega('referencia_reparacion', instance, actor)
+
+
+def _cobrar_saldo_al_entregar_reparacion(instance, actor):
     # Idempotencia: ya existe cobro o saldo final
     if CajaMovimiento.objects.filter(
         referencia_reparacion=instance,

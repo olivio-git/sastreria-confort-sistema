@@ -2180,7 +2180,17 @@ def marcar_entregado(request, id):
             # entrega para registrar el saldo final a nombre del dueño del
             # turno (mismo patrón que `editar_reparacion`).
             reparacion._actor_caja = request.user
-            reparacion.save()
+            # Atómico: el estado y su cobro/liberación de reservas van
+            # juntos. Si el turno se cerró entre el chequeo de arriba y este
+            # guardado (o hay reservas que sólo libera el dueño del turno),
+            # el post_save levanta y NO debe quedar un 'entregado' sin su
+            # cobro.
+            try:
+                with transaction.atomic():
+                    reparacion.save()
+            except caja_turno.TurnoCajaError as exc:
+                messages.error(request, f"No se pudo entregar {reparacion.codigo}: {exc}")
+                return redirect('detalle_reparacion', id=reparacion.id)
             messages.success(request, f"La reparación {reparacion.codigo} ha sido marcada como entregada.")
         else:
             messages.warning(request, f"La reparación {reparacion.codigo} ya está entregada.")
@@ -3780,7 +3790,14 @@ def entregar_confeccion(request, id):
         # saldo final a nombre del dueño del turno (mismo patrón que
         # marcar_entregado/editar_reparacion).
         confeccion._actor_caja = request.user
-        confeccion.save()
+        # Atómico (mismo motivo que `marcar_entregado`): sin 'entregado'
+        # comprometido si el cobro/liberación de reservas falla.
+        try:
+            with transaction.atomic():
+                confeccion.save()
+        except caja_turno.TurnoCajaError as exc:
+            messages.error(request, f"No se pudo entregar {confeccion.codigo}: {exc}")
+            return redirect('detalle_confeccion', id=confeccion.id)
         messages.success(request, f'Confección {confeccion.codigo} marcada como entregada.')
         return redirect('lista_confecciones')
     from .models import FORMA_PAGO_CHOICES
