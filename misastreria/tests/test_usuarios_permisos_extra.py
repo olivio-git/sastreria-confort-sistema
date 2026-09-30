@@ -18,7 +18,7 @@ Cubre:
 import re
 from decimal import Decimal
 
-from django.contrib.auth.models import Permission, User
+from django.contrib.auth.models import Group, Permission, User
 from django.test import TestCase
 from django.urls import reverse
 
@@ -325,13 +325,15 @@ class ExtrasSoloConRolTests(TestCase):
     def test_quitar_el_ultimo_rol_limpia_los_extras(self):
         vend = make_vendedor()
         self._dar_extras(vend)
-        vend.groups.clear()
+        with self.captureOnCommitCallbacks(execute=True):
+            vend.groups.clear()
         self.assertEqual(self._extras(vend), set())
 
     def test_quitar_el_grupo_por_el_lado_inverso_limpia_los_extras(self):
         vend = make_vendedor()
         self._dar_extras(vend)
-        vend.groups.first().user_set.remove(vend)
+        with self.captureOnCommitCallbacks(execute=True):
+            vend.groups.first().user_set.remove(vend)
         self.assertEqual(self._extras(vend), set())
 
     def test_cambiar_de_rol_por_editar_usuario_conserva_los_extras(self):
@@ -345,12 +347,58 @@ class ExtrasSoloConRolTests(TestCase):
         vend = make_vendedor()
         vend.groups.add(*make_cajero(username='c2').groups.all())
         self._dar_extras(vend)
-        vend.groups.remove(vend.groups.get(name='Cajero'))
+        with self.captureOnCommitCallbacks(execute=True):
+            vend.groups.remove(vend.groups.get(name='Cajero'))
         self.assertEqual(len(self._extras(vend)), 2)
 
     def test_no_se_borran_permisos_no_otorgables_al_quedar_sin_rol(self):
         vend = make_vendedor()
         self._dar_extras(vend)
         vend.user_permissions.add(Permission.objects.get(codename='gestionar_usuarios'))
-        vend.groups.clear()
+        with self.captureOnCommitCallbacks(execute=True):
+            vend.groups.clear()
         self.assertEqual(self._extras(vend), {'gestionar_usuarios'})
+
+    # --- verify ronda 6, S1: el admin de Django usa groups.set() -----------
+
+    def test_groups_set_cambiar_de_rol_conserva_los_extras(self):
+        # set() quita primero y agrega después: no debe verse como "sin rol".
+        vend = make_vendedor()
+        self._dar_extras(vend)
+        cajero = Group.objects.get(name='Cajero')
+        with self.captureOnCommitCallbacks(execute=True):
+            vend.groups.set([cajero])
+        self.assertEqual(len(self._extras(vend)), 2)
+
+    def test_groups_set_vacio_limpia_los_extras(self):
+        vend = make_vendedor()
+        self._dar_extras(vend)
+        with self.captureOnCommitCallbacks(execute=True):
+            vend.groups.set([])
+        self.assertEqual(self._extras(vend), set())
+
+    def test_user_set_clear_limpia_los_extras_de_todos_los_afectados(self):
+        v1 = make_vendedor(username='v1')
+        v2 = make_vendedor(username='v2')
+        self._dar_extras(v1)
+        self._dar_extras(v2)
+        grupo = Group.objects.get(name='Vendedor')
+        with self.captureOnCommitCallbacks(execute=True):
+            grupo.user_set.clear()
+        self.assertEqual(self._extras(v1), set())
+        self.assertEqual(self._extras(v2), set())
+
+    def test_borrar_el_grupo_limpia_los_extras_de_sus_usuarios(self):
+        vend = make_vendedor()
+        self._dar_extras(vend)
+        with self.captureOnCommitCallbacks(execute=True):
+            Group.objects.get(name='Vendedor').delete()
+        self.assertEqual(self._extras(vend), set())
+
+    def test_borrar_el_grupo_conserva_extras_de_quien_tiene_otro_rol(self):
+        vend = make_vendedor()
+        vend.groups.add(Group.objects.get(name='Cajero'))
+        self._dar_extras(vend)
+        with self.captureOnCommitCallbacks(execute=True):
+            Group.objects.get(name='Vendedor').delete()
+        self.assertEqual(len(self._extras(vend)), 2)

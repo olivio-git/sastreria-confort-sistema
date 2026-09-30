@@ -5,9 +5,19 @@ ningún rol no debe conservar extras. Cuando se le quita su último rol (desde
 la pantalla de usuarios, el admin de Django o el shell) se limpian, en la
 misma transacción de la quita, los extras otorgables. Los permisos que no
 son otorgables (p. ej. `gestionar_usuarios` puesto a mano) no se tocan.
+
+La evaluación se difiere a `transaction.on_commit` y mira los grupos ACTUALES:
+`user.groups.set([...])` (lo que usa el admin de Django) quita primero y
+agrega después, y evaluar en el `post_remove` vería un estado sin rol que en
+realidad es transitorio (verify ronda 6, S1). `set()` corre en un `atomic`,
+así que el chequeo ocurre recién cuando terminó de agregar. También cubre
+`Group.user_set.clear()` (el `post_clear` inverso no trae pk_set: se capturan
+los usuarios en `pre_clear`) y `Group.delete()` (que borra las filas de la
+tabla intermedia sin emitir m2m_changed).
 """
 from django.contrib.auth.models import Group, User
-from django.db.models.signals import m2m_changed
+from django.db import transaction
+from django.db.models.signals import m2m_changed, pre_delete
 from django.dispatch import receiver
 
 from . import roles
@@ -24,12 +34,34 @@ def limpiar_extras_si_sin_rol(user):
         user.user_permissions.remove(*perms)
 
 
+def _limpiar_al_confirmar(user_pks):
+    pks = [pk for pk in user_pks if pk is not None]
+    if not pks:
+        return
+
+    def _correr():
+        for user in User.objects.filter(pk__in=pks):
+            limpiar_extras_si_sin_rol(user)
+
+    transaction.on_commit(_correr)
+
+
 @receiver(m2m_changed, sender=User.groups.through)
 def grupos_de_usuario_cambiaron(sender, instance, action, reverse, pk_set, **kwargs):
+    if reverse and action == 'pre_clear' and isinstance(instance, Group):
+        # El post_clear inverso no informa a quién se le quitó el grupo.
+        instance._usuarios_antes_de_clear = list(instance.user_set.values_list('pk', flat=True))
+        return
     if action not in ('post_remove', 'post_clear'):
         return
     if not reverse:
-        limpiar_extras_si_sin_rol(instance)
-    elif action == 'post_remove' and isinstance(instance, Group):
-        for user in User.objects.filter(pk__in=pk_set or ()):
-            limpiar_extras_si_sin_rol(user)
+        _limpiar_al_confirmar([instance.pk])
+    elif action == 'post_remove':
+        _limpiar_al_confirmar(pk_set or ())
+    else:
+        _limpiar_al_confirmar(getattr(instance, '_usuarios_antes_de_clear', ()))
+
+
+@receiver(pre_delete, sender=Group)
+def grupo_por_borrarse(sender, instance, **kwargs):
+    _limpiar_al_confirmar(list(instance.user_set.values_list('pk', flat=True)))
