@@ -360,7 +360,8 @@ def _aplicar_saldo_a_favor(empleado, destinos):
     re-apunta a la devengación nueva en vez de volver a pagarse.
 
     destinos: lista de dicts con 'tipo_key', 'fk_field', 'asignacion' y
-    'monto' (pendiente). Se MUTA 'monto' restando lo cubierto. Las
+    'monto' (pendiente). Se MUTA 'monto' restando lo cubierto y se anota en
+    'cubierto' cuánto recibió cada destino. Las
     aplicaciones huérfanas/excedentes se re-apuntan enteras o se parten en
     dos (se reduce la original y se crea otra bajo el MISMO pago); del
     remanente de un pago se crea una aplicación nueva bajo ese pago.
@@ -403,8 +404,15 @@ def _aplicar_saldo_a_favor(empleado, destinos):
                     )
             f['disponible'] -= tomar
             d['monto'] -= tomar
+            d['cubierto'] = d.get('cubierto', Decimal('0')) + tomar
             cubierto += tomar
     return cubierto
+
+
+def _orden_fifo_devengacion(op):
+    """Orden del reparto de un pago por monto: la devengación más vieja
+    primero; a igual fecha, por código y clave para que sea determinista."""
+    return (op['fecha'] or date.min, op['codigo'] or '', op['clave'])
 
 
 def _devengaciones_empleado(empleado):
@@ -590,6 +598,11 @@ def _devengaciones_empleado(empleado):
     # `operaciones_pendientes` sigue agrupando pendiente+parcial (vía
     # `estado_filtro`): es lo que se puede pagar, así que el modal no cambia.
     operaciones_pendientes = [o for o in operaciones_comision if o['estado_filtro'] == 'pendiente']
+    # Posición de cada pendiente en el reparto del pago "por monto" (la más
+    # vieja primero). La calcula el servidor y viaja al modal en data-orden
+    # para que la vista previa del JS reparta en el MISMO orden que el pago.
+    for i, o in enumerate(sorted(operaciones_pendientes, key=_orden_fifo_devengacion)):
+        o['orden_fifo'] = i
     n_pendientes = sum(1 for o in operaciones_comision if o['estado'] == 'pendiente')
     n_parciales = sum(1 for o in operaciones_comision if o['estado'] == 'parcial')
     n_pagadas = sum(1 for o in operaciones_comision if o['estado'] == 'pagada')
@@ -987,16 +1000,48 @@ def _resolver_clave_devengacion(empleado, tipo_key, id_asignacion):
     return fk_field, fila, pendiente
 
 
+def _destinos_pago_por_monto(empleado):
+    """Todas las devengaciones pendientes o parciales del empleado, bloqueadas
+    y en orden de reparto (la más vieja primero), con el formato de `destinos`
+    de `pagar_comision_empleado`. Se arma DESPUÉS de bloquear al Empleado, así
+    que ningún otro pago puede cambiarlas mientras tanto; una fila que igual
+    dejó de estar pendiente (se editó la operación) simplemente se salta.
+    """
+    pendientes = sorted(
+        _devengaciones_empleado(empleado)['operaciones_pendientes_comision'],
+        key=_orden_fifo_devengacion,
+    )
+    destinos = []
+    for o in pendientes:
+        try:
+            fk_field, fila, pendiente = _resolver_clave_devengacion(empleado, o['tipo_key'], o['id'])
+        except ValueError:
+            continue
+        destinos.append({
+            'tipo_key': o['tipo_key'],
+            'fk_field': fk_field,
+            'asignacion': fila,
+            'monto': pendiente,
+        })
+    return destinos
+
+
 @login_required
 def pagar_comision_empleado(request, empleado_id):
-    """Registra un pago de comisión cubriendo devengaciones puntuales.
+    """Registra un pago de comisión, siempre aplicado a devengaciones puntuales.
 
-    El monto NO se tipea: el usuario marca en el modal qué devengaciones
-    (pendientes o parciales) quiere pagar y el monto se deriva de la suma de
-    sus saldos pendientes. Rechaza la selección completa si cualquier clave
-    es inválida, de otro empleado, o ya está pagada — no paga un subconjunto
-    silenciosamente ante datos manipulados o una fila que se pagó mientras el
-    modal estaba abierto.
+    Dos modos (campo `modo` del form):
+
+      - 'seleccion': el usuario marca en el modal qué devengaciones
+        (pendientes o parciales) paga y el monto es la suma de sus saldos
+        pendientes. Rechaza la selección completa si cualquier clave es
+        inválida, de otro empleado, o ya está pagada — no paga un subconjunto
+        silenciosamente ante datos manipulados o una fila que se pagó mientras
+        el modal estaba abierto.
+      - 'monto': el usuario tipea un monto y se reparte entre TODAS las
+        devengaciones pendientes, la más vieja primero; la última puede quedar
+        parcial. El tope es lo que falta pagar: si sobra, se rechaza. Así un
+        pago por monto tampoco deja plata sin devengación asociada.
 
     Anti doble pago:
       - Las claves se normalizan a (tipo, int(id)) y se deduplican ANTES de
@@ -1019,48 +1064,75 @@ def pagar_comision_empleado(request, empleado_id):
 
     empleado = get_object_or_404(Empleado, id=empleado_id)
     form = PagoComisionEmpleadoForm(request.POST)
-    claves = request.POST.getlist('sel')
-
-    if not claves:
-        messages.error(request, "Selecciona al menos una devengación pendiente.")
-        return redirect('detalle_empleado', id=empleado_id)
-
-    try:
-        normalizadas = sorted({
-            comisiones.parsear_clave_devengacion(c, ASIGNACION_MODELOS) for c in claves
-        })
-    except ValueError as exc:
-        messages.error(request, str(exc))
-        return redirect('detalle_empleado', id=empleado_id)
 
     if not form.is_valid():
         for err in form.errors.values():
             messages.error(request, err.as_text())
         return redirect('detalle_empleado', id=empleado_id)
 
+    por_monto = form.cleaned_data['modo'] == 'monto'
+    monto_tipeado = form.cleaned_data.get('monto')
+
+    normalizadas = []
+    if not por_monto:
+        claves = request.POST.getlist('sel')
+        if not claves:
+            messages.error(request, "Selecciona al menos una devengación pendiente.")
+            return redirect('detalle_empleado', id=empleado_id)
+        try:
+            normalizadas = sorted({
+                comisiones.parsear_clave_devengacion(c, ASIGNACION_MODELOS) for c in claves
+            })
+        except ValueError as exc:
+            messages.error(request, str(exc))
+            return redirect('detalle_empleado', id=empleado_id)
+
     pago = None
     try:
         with transaction.atomic():
             empleado = Empleado.objects.select_for_update().get(pk=empleado.pk)
 
-            destinos = []
-            for tipo_key, id_asignacion in normalizadas:
-                fk_field, fila, pendiente = _resolver_clave_devengacion(empleado, tipo_key, id_asignacion)
-                destinos.append({
-                    'tipo_key': tipo_key,
-                    'fk_field': fk_field,
-                    'asignacion': fila,
-                    'monto': pendiente,
-                })
+            if por_monto:
+                destinos = _destinos_pago_por_monto(empleado)
+            else:
+                destinos = []
+                for tipo_key, id_asignacion in normalizadas:
+                    fk_field, fila, pendiente = _resolver_clave_devengacion(empleado, tipo_key, id_asignacion)
+                    destinos.append({
+                        'tipo_key': tipo_key,
+                        'fk_field': fk_field,
+                        'asignacion': fila,
+                        'monto': pendiente,
+                    })
 
             total_seleccionado = sum((d['monto'] for d in destinos), Decimal('0'))
             if total_seleccionado <= 0:
-                raise ValueError("El total seleccionado es Bs 0.")
+                raise ValueError(
+                    "No hay devengaciones pendientes para pagar." if por_monto
+                    else "El total seleccionado es Bs 0."
+                )
 
             # Saldo antes de tocar nada (re-apuntar saldo a favor no lo cambia).
             saldo = _calcular_saldo_comision_empleado(empleado)
 
             cubierto_con_saldo = _aplicar_saldo_a_favor(empleado, destinos)
+
+            if por_monto:
+                # Reparto FIFO del monto tipeado sobre lo que el saldo a favor
+                # no cubrió. Lo que no alcanza a llegar a una devengación queda
+                # en 0 y se descarta abajo; lo que sobra se rechaza.
+                restante = monto_tipeado
+                for d in destinos:
+                    tomar = min(restante, d['monto'])
+                    d['monto'] = tomar
+                    restante -= tomar
+                if restante > 0:
+                    falta_pagar = monto_tipeado - restante
+                    raise ValueError(
+                        f"No se registró el pago: Bs {monto_tipeado:.2f} supera lo que falta "
+                        f"pagarle a {empleado} (Bs {falta_pagar:.2f}). Un pago tiene que "
+                        f"quedar aplicado a devengaciones concretas."
+                    )
 
             aplicaciones = [
                 {
@@ -1105,7 +1177,9 @@ def pagar_comision_empleado(request, empleado_id):
         )
         return redirect('detalle_empleado', id=empleado_id)
 
-    n = len(destinos)
+    # Destinos que recibieron algo: con saldo a favor (monto ya en 0) o con
+    # plata nueva. En el pago por monto quedan afuera los que no alcanzó.
+    n = sum(1 for d in destinos if d.get('cubierto') or d['monto'] > 0)
     txt_n = f"{n} devengaci{'ón' if n == 1 else 'ones'}"
     if pago is None:
         messages.success(request, f"Se aplicó Bs {cubierto_con_saldo:.2f} de saldo a favor a {txt_n}.")
