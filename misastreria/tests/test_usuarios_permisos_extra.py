@@ -278,3 +278,79 @@ class ExtrasNoSaltanElDuenoDelTurnoTests(TestCase):
             {'monto': '100', 'forma_pago': 'efectivo', 'via_caja': 'on'},
         )
         self.assertEqual(CajaMovimiento.objects.filter(referencia_venta=venta).count(), 0)
+
+
+class ExtrasSoloConRolTests(TestCase):
+    """Verify ronda 5, WARNING 3: extras sólo para usuarios con al menos un
+    rol y nunca para superusuarios; al quedar sin rol se limpian los extras."""
+
+    def setUp(self):
+        self.admin = make_administrador()
+        self.client.force_login(self.admin)
+
+    def _extras(self, user):
+        return set(user.user_permissions.values_list('codename', flat=True))
+
+    def test_usuario_sin_rol_rechaza_otorgar(self):
+        sin_rol = User.objects.create_user('sinrol', password='x')
+        resp = self.client.post(reverse('permisos_usuario', args=[sin_rol.pk]),
+                                {'permisos': ['view_insumo']})
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(self._extras(sin_rol), set())
+
+    def test_superusuario_rechaza_otorgar(self):
+        su = User.objects.create_superuser('super', password='x')
+        self.client.post(reverse('permisos_usuario', args=[su.pk]), {'permisos': ['view_insumo']})
+        self.assertEqual(self._extras(su), set())
+
+    def test_get_de_usuario_sin_rol_no_muestra_grilla(self):
+        sin_rol = User.objects.create_user('sinrol', password='x')
+        resp = self.client.get(reverse('permisos_usuario', args=[sin_rol.pk]))
+        self.assertEqual(resp.status_code, 302)
+
+    def test_lista_oculta_el_boton_para_sin_rol_y_superusuario(self):
+        sin_rol = User.objects.create_user('sinrol', password='x')
+        su = User.objects.create_superuser('super', password='x')
+        vend = make_vendedor()
+        html = self.client.get(reverse('lista_usuarios')).content.decode()
+        self.assertNotIn(reverse('permisos_usuario', args=[sin_rol.pk]), html)
+        self.assertNotIn(reverse('permisos_usuario', args=[su.pk]), html)
+        self.assertIn(reverse('permisos_usuario', args=[vend.pk]), html)
+
+    def _dar_extras(self, user):
+        self.client.post(reverse('permisos_usuario', args=[user.pk]),
+                         {'permisos': ['view_insumo', 'add_insumo']})
+        self.assertEqual(len(self._extras(user)), 2)
+
+    def test_quitar_el_ultimo_rol_limpia_los_extras(self):
+        vend = make_vendedor()
+        self._dar_extras(vend)
+        vend.groups.clear()
+        self.assertEqual(self._extras(vend), set())
+
+    def test_quitar_el_grupo_por_el_lado_inverso_limpia_los_extras(self):
+        vend = make_vendedor()
+        self._dar_extras(vend)
+        vend.groups.first().user_set.remove(vend)
+        self.assertEqual(self._extras(vend), set())
+
+    def test_cambiar_de_rol_por_editar_usuario_conserva_los_extras(self):
+        vend = make_vendedor()
+        self._dar_extras(vend)
+        resp = self.client.post(reverse('editar_usuario', args=[vend.pk]), {'roles': ['Cajero']})
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(len(self._extras(vend)), 2)
+
+    def test_quitar_un_rol_teniendo_otro_conserva_los_extras(self):
+        vend = make_vendedor()
+        vend.groups.add(*make_cajero(username='c2').groups.all())
+        self._dar_extras(vend)
+        vend.groups.remove(vend.groups.get(name='Cajero'))
+        self.assertEqual(len(self._extras(vend)), 2)
+
+    def test_no_se_borran_permisos_no_otorgables_al_quedar_sin_rol(self):
+        vend = make_vendedor()
+        self._dar_extras(vend)
+        vend.user_permissions.add(Permission.objects.get(codename='gestionar_usuarios'))
+        vend.groups.clear()
+        self.assertEqual(self._extras(vend), {'gestionar_usuarios'})

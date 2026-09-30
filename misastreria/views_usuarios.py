@@ -29,6 +29,14 @@ from .permisos import permission_required
 
 _es_ultimo_administrador_activo = es_ultimo_administrador_activo
 
+def puede_recibir_extras(user_obj):
+    """Los extras cuelgan de un rol: sólo usuarios con al menos un rol del
+    sistema y nunca superusuarios (que ya tienen todo)."""
+    if user_obj.is_superuser:
+        return False
+    return user_obj.groups.filter(name__in=roles.ROLES.keys()).exists()
+
+
 def _codenames_del_rol(user_obj):
     """Permisos de la app que el usuario recibe por sus grupos (roles)."""
     return set(
@@ -77,6 +85,7 @@ def lista_usuarios(request):
     # su rol) que tiene otorgados.
     for usr in page_obj:
         usr.extras_etiquetas = _etiquetas_extras(_extras_otorgados(usr))
+        usr.puede_recibir_extras = puede_recibir_extras(usr)
 
     return render(request, 'misastreria/usuarios/lista.html', {
         'page_obj': page_obj,
@@ -161,11 +170,16 @@ def editar_usuario(request, pk):
                         # (WARNING 5: antes `.groups.clear()` borraba TODOS los
                         # grupos del usuario, incluyendo cualquiera ajeno a
                         # `roles.ROLES` que pudiera tener por otro motivo).
-                        grupos_roles_sistema = Group.objects.filter(name__in=roles.ROLES.keys())
-                        user_obj.groups.remove(*grupos_roles_sistema)
+                        # Se aplica la DIFERENCIA (no "quitar todos y volver a
+                        # agregar") para no pasar por un estado sin rol, que
+                        # limpiaría los permisos adicionales del usuario.
+                        # Primero se agrega y después se quita, por lo mismo.
+                        quitar = list(Group.objects.filter(name__in=roles.ROLES.keys()).exclude(name__in=nuevos_roles))
                         for nombre_rol in nuevos_roles:
                             grupo, _ = Group.objects.get_or_create(name=nombre_rol)
                             user_obj.groups.add(grupo)
+                        if quitar:
+                            user_obj.groups.remove(*quitar)
 
                         Empleado.objects.filter(user=user_obj).update(user=None)
                         empleado = form.cleaned_data.get('empleado')
@@ -264,6 +278,14 @@ def permisos_usuario(request, pk):
 
     if user_obj.pk == request.user.pk:
         messages.error(request, "No podés cambiar tus propios permisos desde acá.")
+        return redirect('lista_usuarios')
+
+    if not puede_recibir_extras(user_obj):
+        messages.error(
+            request,
+            "Sólo se pueden otorgar permisos adicionales a usuarios con al menos "
+            "un rol, y nunca a superusuarios.",
+        )
         return redirect('lista_usuarios')
 
     heredados = _codenames_del_rol(user_obj)

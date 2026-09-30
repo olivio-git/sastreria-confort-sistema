@@ -106,9 +106,11 @@
               <a href="{% url 'editar_usuario' usr.pk %}" class="btn btn-sm btn-icon btn-ghost-primary" title="Editar">
                 <i data-lucide="pencil"></i>
               </a>
+              {% if usr.puede_recibir_extras %}
               <a href="{% url 'permisos_usuario' usr.pk %}" class="btn btn-sm btn-icon btn-ghost-secondary" title="Permisos adicionales">
                 <i data-lucide="shield-check"></i>
               </a>
+              {% endif %}
               <form method="post" action="{% url 'resetear_pin_usuario' usr.pk %}" class="d-inline">
                 {% csrf_token %}
                 <button type="submit" class="btn btn-sm btn-icon btn-ghost-secondary" title="Resetear PIN">

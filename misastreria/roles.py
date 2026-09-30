@@ -86,7 +86,9 @@ ROLES = {
 #     obtiene únicamente con el rol Administrador.
 #   - `supervisar_caja`: ver/anular sesiones ajenas es una función de
 #     supervisión, no un permiso suelto.
-#   - `acceder_sistema`: lo da cualquier rol; un usuario sin rol no entra.
+#   - `acceder_sistema`: lo da cualquier rol. Los extras sólo se otorgan a
+#     usuarios con al menos un rol (y nunca a superusuarios), y se limpian al
+#     quitarle el último rol; no reemplazan a un rol.
 # Aun otorgando `operar_caja`/`abrir_caja`/`registrar_cobro`, el turno de caja
 # sigue siendo una regla de propiedad (sólo el dueño de la sesión escribe en
 # ella): un extra habilita la pantalla, nunca saltea al dueño del turno.

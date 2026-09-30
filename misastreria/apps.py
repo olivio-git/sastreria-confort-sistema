@@ -19,4 +19,5 @@ class MisastrriaConfig(AppConfig):
 
     def ready(self):
         from . import caja_signals  # noqa: F401
+        from . import extras_signals  # noqa: F401
         post_migrate.connect(_sincronizar_roles, sender=self)
