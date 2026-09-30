@@ -38,12 +38,14 @@ ROLES = {
         'view_cliente', 'add_cliente', 'change_cliente',
         'view_reparacion', 'add_reparacion', 'change_reparacion',
         'view_venta', 'add_venta', 'change_venta',
-        'view_confeccion',
+        'view_confeccion', 'add_confeccion', 'change_confeccion',
         'view_alquiler', 'add_alquiler', 'change_alquiler',
         'registrar_cobro',
         'view_transaccion', 'add_transaccion',
         'abrir_caja', 'operar_caja',
         'ver_reportes_caja',
+        # Sólo lectura de inventario (prendas, cortes, conjuntos).
+        'view_prendainventario', 'view_corte', 'view_conjunto',
     },
 
     'Vendedor': {
@@ -54,6 +56,8 @@ ROLES = {
         'view_confeccion', 'add_confeccion', 'change_confeccion',
         'view_alquiler', 'add_alquiler', 'change_alquiler',
         'registrar_cobro',
+        # Sólo lectura de inventario (prendas, cortes, conjuntos).
+        'view_prendainventario', 'view_corte', 'view_conjunto',
     },
 
     'Taller': {

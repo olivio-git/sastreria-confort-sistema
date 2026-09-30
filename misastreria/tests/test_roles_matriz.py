@@ -117,19 +117,21 @@ class VentasMatrizTests(TestCase):
 
 
 class ConfeccionesMatrizTests(TestCase):
-    """Intake (crear/editar): Admin y Vendedor sí, Cajero no (default D)."""
+    """Intake (crear/editar): Admin, Cajero y Vendedor sí (decisión del
+    dueño: el mostrador toma pedidos de confección)."""
 
-    def test_admin_y_vendedor_acceden_a_crear_confeccion(self):
-        for maker in (make_administrador, make_vendedor):
+    def test_admin_cajero_y_vendedor_acceden_a_crear_confeccion(self):
+        for maker in (make_administrador, make_cajero, make_vendedor):
             with self.subTest(rol=maker.__name__):
                 self.client.force_login(maker(username=f'cf_{maker.__name__}'))
                 resp = self.client.get(reverse('crear_confeccion'))
                 self.assertEqual(resp.status_code, 200)
 
-    def test_cajero_403_en_crear_confeccion(self):
+    def test_cajero_accede_a_editar_confeccion(self):
+        confeccion = make_confeccion()
         self.client.force_login(make_cajero())
-        resp = self.client.get(reverse('crear_confeccion'))
-        self.assertEqual(resp.status_code, 403)
+        resp = self.client.get(reverse('editar_confeccion', args=[confeccion.id]))
+        self.assertEqual(resp.status_code, 200)
 
     def test_taller_403_en_crear_confeccion(self):
         self.client.force_login(make_taller())
@@ -163,7 +165,25 @@ class AlquileresMatrizTests(TestCase):
 
 
 class InventarioMatrizTests(TestCase):
-    """Inventario/Prendas CRUD: Admin y Taller sí, Cajero/Vendedor no."""
+    """Inventario/Prendas CRUD: Admin y Taller sí. Cajero/Vendedor sólo
+    LEEN (lista y detalle); no crean, editan ni eliminan."""
+
+    def test_los_4_roles_ven_lista_y_detalle_de_prendas(self):
+        prenda = make_prenda()
+        for maker in (make_administrador, make_cajero, make_vendedor, make_taller):
+            with self.subTest(rol=maker.__name__):
+                self.client.force_login(maker(username=f'lp_{maker.__name__}'))
+                self.assertEqual(self.client.get(reverse('lista_prendas')).status_code, 200)
+                self.assertEqual(
+                    self.client.get(reverse('detalle_prenda', args=[prenda.id])).status_code, 200)
+
+    def test_cajero_y_vendedor_no_editan_ni_eliminan_prenda(self):
+        prenda = make_prenda()
+        for maker in (make_cajero, make_vendedor):
+            with self.subTest(rol=maker.__name__):
+                user = maker(username=f'ne_{maker.__name__}')
+                for accion in ('add', 'change', 'delete'):
+                    self.assertFalse(user.has_perm(f'misastreria.{accion}_prendainventario'))
 
     def test_admin_y_taller_acceden_a_crear_prenda(self):
         for maker in (make_administrador, make_taller):
@@ -189,19 +209,19 @@ class InventarioMatrizTests(TestCase):
 
 
 class CortesMatrizTests(TestCase):
-    def test_admin_y_taller_acceden_a_buscar_cortes(self):
-        for maker in (make_administrador, make_taller):
+    def test_todos_los_roles_de_inventario_acceden_a_buscar_cortes(self):
+        for maker in (make_administrador, make_cajero, make_vendedor, make_taller):
             with self.subTest(rol=maker.__name__):
                 self.client.force_login(maker(username=f'co_{maker.__name__}'))
                 resp = self.client.get(reverse('buscar_cortes'), {'q': ''})
                 self.assertEqual(resp.status_code, 200)
 
-    def test_cajero_y_vendedor_403_en_buscar_cortes(self):
+    def test_cajero_y_vendedor_no_crean_cortes(self):
         for maker in (make_cajero, make_vendedor):
             with self.subTest(rol=maker.__name__):
-                self.client.force_login(maker(username=f'co2_{maker.__name__}'))
-                resp = self.client.get(reverse('buscar_cortes'), {'q': ''})
-                self.assertEqual(resp.status_code, 403)
+                user = maker(username=f'co2_{maker.__name__}')
+                for accion in ('add', 'change', 'delete'):
+                    self.assertFalse(user.has_perm(f'misastreria.{accion}_corte'))
 
 
 class InsumosYProduccionMatrizTests(TestCase):
@@ -256,19 +276,27 @@ class TransaccionesMatrizTests(TestCase):
 
 
 class ConjuntosMatrizTests(TestCase):
-    """Conjuntos CRUD: Admin only (default D)."""
+    """Conjuntos: Admin, Cajero y Vendedor los VEN; Taller no. Sólo Admin
+    los administra (crear/editar/eliminar)."""
 
-    def test_solo_admin_ve_conjuntos(self):
-        self.client.force_login(make_administrador())
-        resp = self.client.get(reverse('lista_conjuntos'))
-        self.assertEqual(resp.status_code, 200)
-
-    def test_cajero_vendedor_taller_403_en_conjuntos(self):
-        for maker in (make_cajero, make_vendedor, make_taller):
+    def test_admin_cajero_vendedor_ven_conjuntos(self):
+        for maker in (make_administrador, make_cajero, make_vendedor):
             with self.subTest(rol=maker.__name__):
                 self.client.force_login(maker(username=f'cj_{maker.__name__}'))
                 resp = self.client.get(reverse('lista_conjuntos'))
-                self.assertEqual(resp.status_code, 403)
+                self.assertEqual(resp.status_code, 200)
+
+    def test_taller_403_en_conjuntos(self):
+        self.client.force_login(make_taller())
+        resp = self.client.get(reverse('lista_conjuntos'))
+        self.assertEqual(resp.status_code, 403)
+
+    def test_cajero_y_vendedor_no_administran_conjuntos(self):
+        for maker in (make_cajero, make_vendedor):
+            with self.subTest(rol=maker.__name__):
+                user = maker(username=f'cj2_{maker.__name__}')
+                for accion in ('add', 'change', 'delete'):
+                    self.assertFalse(user.has_perm(f'misastreria.{accion}_conjunto'))
 
 
 class ReportesYAnaliticaMatrizTests(TestCase):
@@ -377,14 +405,20 @@ class EtiquetasMatrizTests(TestCase):
 class CatalogoCompartidoORTests(TestCase):
     """Scenario: Shared catalog AJAX resolves via OR-permission.
 
-    Cajero no tiene `add_confeccion`, pero `crear_tipo_prenda` acepta
-    cualquiera de add_reparacion/add_venta/add_confeccion/add_alquiler —
-    Cajero pasa porque tiene las otras tres.
+    `crear_tipo_prenda` acepta cualquiera de
+    add_reparacion/add_venta/add_confeccion/add_alquiler — basta con uno.
     """
 
-    def test_cajero_sin_add_confeccion_igual_accede_a_crear_tipo_prenda(self):
+    def test_usuario_con_un_solo_permiso_padre_accede_a_crear_tipo_prenda(self):
+        from django.contrib.auth.models import Permission, User
         cajero = make_cajero()
-        self.assertFalse(cajero.has_perm('misastreria.add_confeccion'))
+        # Se le quitan tres de los cuatro permisos padre: con uno alcanza.
+        for codename in ('add_reparacion', 'add_venta', 'add_confeccion'):
+            cajero.groups.first().permissions.remove(
+                Permission.objects.get(codename=codename))
+        cajero = User.objects.get(pk=cajero.pk)
+        self.assertTrue(cajero.has_perm('misastreria.add_alquiler'))
+        self.assertFalse(cajero.has_perm('misastreria.add_venta'))
         self.client.force_login(cajero)
         resp = self.client.post(reverse('crear_tipo_prenda'), {'nombre': 'Saco'})
         self.assertNotEqual(resp.status_code, 403)
