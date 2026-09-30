@@ -457,15 +457,15 @@ def registrar_garantia_alquiler_en_caja(instance, *, usuario):
 
 
 def _sesion_propia_o_error(usuario, mensaje):
-    """Devuelve la sesión abierta si existe Y (cuando se pasa `usuario`) le
-    pertenece; si no, levanta el error de turno correspondiente con
-    `mensaje`. `usuario=None` preserva el comportamiento anterior de sólo
-    exigir "hay sesión abierta" (compatibilidad con callers internos)."""
+    """Devuelve la sesión abierta si existe Y le pertenece a `usuario`; si
+    no, levanta el error de turno correspondiente (`CajaSinSesionError` con
+    `mensaje` si no hay caja abierta, `TurnoCajaError` si es de otro).
+    `usuario` es siempre un usuario real: el único llamador
+    (`_ajustar_garantia_alquiler_en_caja`) ya rechaza `None` antes."""
     sesion = _sesion_activa()
     if sesion is None:
         raise CajaSinSesionError(mensaje)
-    if usuario is not None and sesion.usuario_apertura_id != usuario.id:
-        from .caja_turno import TurnoCajaError
+    if sesion.usuario_apertura_id != usuario.id:
         raise TurnoCajaError(
             f'La caja abierta es de {sesion.usuario_apertura.get_username()}. '
             'Sólo quien abrió el turno puede ajustar sus movimientos.'
@@ -519,6 +519,7 @@ def _ajustar_garantia_alquiler_en_caja(instance, *, usuario):
                     cliente=existing.cliente,
                     referencia_alquiler=instance,
                     descripcion=f"Garantía eliminada — {instance.codigo}",
+                    usuario=usuario,
                 )
                 existing.movimiento_reverso = reverso
                 existing.save(update_fields=['movimiento_reverso'])
@@ -544,6 +545,7 @@ def _ajustar_garantia_alquiler_en_caja(instance, *, usuario):
                 cliente=existing.cliente,
                 referencia_alquiler=instance,
                 descripcion=f"Ajuste garantía — {instance.codigo}",
+                usuario=usuario,
             )
             existing.movimiento_reverso = reverso
             existing.save(update_fields=['movimiento_reverso'])
