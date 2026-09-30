@@ -241,23 +241,26 @@ def toggle_activo_usuario(request, pk):
         messages.error(request, "No podés desactivarte a vos mismo.")
         return redirect('lista_usuarios')
 
-    if user_obj.is_active and _es_ultimo_administrador_activo(user_obj):
-        messages.error(request, "No podés desactivar al último Administrador activo.")
-        return redirect('lista_usuarios')
+    with transaction.atomic():
+        # Lock de los Administradores activos: dos desactivaciones cruzadas no
+        # pueden pasar las dos el chequeo "queda otro" (verify ronda 6, S3).
+        if user_obj.is_active and _es_ultimo_administrador_activo(user_obj, bloquear=True):
+            messages.error(request, "No podés desactivar al último Administrador activo.")
+            return redirect('lista_usuarios')
 
-    empleado_vinculado = getattr(user_obj, 'empleado', None)
-    if not user_obj.is_active and empleado_vinculado and empleado_vinculado.fecha_baja:
-        # SUGGESTION 2: si el Empleado vinculado está de baja, reactivar el
-        # usuario desde acá lo dejaría con acceso sin que nadie haya dado de
-        # alta al Empleado de nuevo — la baja del Empleado manda.
-        messages.error(
-            request,
-            f"No se puede reactivar: el empleado vinculado «{empleado_vinculado}» está de baja.",
-        )
-        return redirect('lista_usuarios')
+        empleado_vinculado = getattr(user_obj, 'empleado', None)
+        if not user_obj.is_active and empleado_vinculado and empleado_vinculado.fecha_baja:
+            # SUGGESTION 2: si el Empleado vinculado está de baja, reactivar el
+            # usuario desde acá lo dejaría con acceso sin que nadie haya dado de
+            # alta al Empleado de nuevo — la baja del Empleado manda.
+            messages.error(
+                request,
+                f"No se puede reactivar: el empleado vinculado «{empleado_vinculado}» está de baja.",
+            )
+            return redirect('lista_usuarios')
 
-    user_obj.is_active = not user_obj.is_active
-    user_obj.save(update_fields=['is_active'])
+        user_obj.is_active = not user_obj.is_active
+        user_obj.save(update_fields=['is_active'])
     estado = 'activado' if user_obj.is_active else 'desactivado'
     messages.success(request, f"Usuario «{user_obj.username}» {estado}.")
     return redirect('lista_usuarios')

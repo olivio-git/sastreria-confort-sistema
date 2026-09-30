@@ -52,15 +52,32 @@ class BajaNoPermitida(Exception):
     """La baja del Empleado desactivaría al último Administrador activo."""
 
 
-def es_ultimo_administrador_activo(user_obj):
+def es_ultimo_administrador_activo(user_obj, bloquear=False):
     """True si `user_obj` es Administrador activo y no hay ningún OTRO
     Administrador activo en el sistema — el sistema quedaría sin nadie que
-    pueda gestionar usuarios si se lo desactiva o degrada."""
-    if not (user_obj.is_active and user_obj.groups.filter(name='Administrador').exists()):
-        return False
-    return not User.objects.filter(
-        groups__name='Administrador', is_active=True
-    ).exclude(pk=user_obj.pk).exists()
+    pueda gestionar usuarios si se lo desactiva o degrada.
+
+    `bloquear=True` (dentro de un `atomic`) toma SELECT ... FOR UPDATE sobre
+    las filas de los Administradores activos, en orden de pk, y decide con el
+    estado real de la base (no el del objeto en memoria): dos bajas
+    simultáneas se serializan y la segunda ya ve al otro inactivo. Sin el
+    lock ambas podían pasar el chequeo y dejar al sistema sin Administradores.
+    """
+    if not bloquear:
+        if not (user_obj.is_active and user_obj.groups.filter(name='Administrador').exists()):
+            return False
+        return not User.objects.filter(
+            groups__name='Administrador', is_active=True
+        ).exclude(pk=user_obj.pk).exists()
+    ids = list(User.objects.filter(
+        groups__name='Administrador', is_active=True,
+    ).values_list('pk', flat=True))
+    # Sin JOIN: bloquear filas de la tabla de grupos no hace falta y MariaDB
+    # no soporta `FOR UPDATE OF`.
+    activos = set(User.objects.select_for_update().filter(
+        pk__in=ids, is_active=True,
+    ).order_by('pk').values_list('pk', flat=True))
+    return user_obj.pk in activos and not (activos - {user_obj.pk})
 
 
 class Empleado(models.Model):
@@ -87,21 +104,24 @@ class Empleado(models.Model):
             numero = (int(last.codigo.split('-')[1]) + 1) if last and last.codigo and '-' in last.codigo else 1
             self.codigo = f"EMP-{numero:03d}"
         self.activo = self.fecha_baja is None
-        # Guard de dominio: la baja desactiva al usuario vinculado, y ninguna
-        # ruta (vista, admin, shell) puede dejar al sistema sin Administrador.
-        if self.fecha_baja and self.user_id and es_ultimo_administrador_activo(self.user):
-            raise BajaNoPermitida(
-                "No se puede dar de baja al empleado: su usuario es el último Administrador activo."
-            )
         self.nombres = ' '.join(word.capitalize() for word in self.nombres.split())
         if self.apellido_paterno:
             self.apellido_paterno = self.apellido_paterno.capitalize()
         if self.apellido_materno:
             self.apellido_materno = self.apellido_materno.capitalize()
-        super().save(*args, **kwargs)
-        if self.fecha_baja and self.user_id and self.user.is_active:
-            self.user.is_active = False
-            self.user.save(update_fields=['is_active'])
+        # Guard de dominio: la baja desactiva al usuario vinculado, y ninguna
+        # ruta (vista, admin, shell) puede dejar al sistema sin Administrador.
+        # Chequeo, guardado y desactivación van en UNA transacción con el lock
+        # de los Administradores (ver `es_ultimo_administrador_activo`).
+        with transaction.atomic():
+            if self.fecha_baja and self.user_id and es_ultimo_administrador_activo(self.user, bloquear=True):
+                raise BajaNoPermitida(
+                    "No se puede dar de baja al empleado: su usuario es el último Administrador activo."
+                )
+            super().save(*args, **kwargs)
+            if self.fecha_baja and self.user_id and self.user.is_active:
+                self.user.is_active = False
+                self.user.save(update_fields=['is_active'])
 
     class Meta:
         verbose_name = "Empleado"

@@ -225,3 +225,62 @@ class EmpleadoAdminBajaTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         cajero.refresh_from_db()
         self.assertFalse(cajero.is_active)
+
+
+class BloqueoDeAdministradoresTests(TestCase):
+    """Dos Administradores que se dan de baja a la vez podían pasar ambos el
+    chequeo "queda otro activo" y dejar al sistema sin ninguno (verify ronda 6,
+    S3). La baja ahora bloquea (SELECT ... FOR UPDATE) las filas de los
+    Administradores activos dentro de la misma transacción que desactiva: la
+    segunda transacción espera, y al reevaluar ya ve al otro inactivo.
+
+    SQLite (los tests) ignora FOR UPDATE, así que se prueba la lógica: que se
+    pida el lock y que el chequeo bajo lock lea el estado real de la base y no
+    el del objeto en memoria. La exclusión mutua en sí la da InnoDB."""
+
+    def setUp(self):
+        from unittest import mock
+        self.mock = mock
+        self.a = make_administrador(username='a')
+        self.b = make_administrador(username='b')
+
+    def test_con_bloqueo_usa_el_estado_de_la_base_y_no_el_de_memoria(self):
+        from misastreria.models import es_ultimo_administrador_activo
+        a_en_memoria = User.objects.get(pk=self.a.pk)  # activo en memoria
+        # Otra transacción ya dio de baja a b (la base dice: a es el último).
+        User.objects.filter(pk=self.b.pk).update(is_active=False)
+        self.assertTrue(es_ultimo_administrador_activo(a_en_memoria, bloquear=True))
+        # Y al revés: a fue desactivado por otra transacción -> ya no cuenta.
+        User.objects.filter(pk=self.b.pk).update(is_active=True)
+        User.objects.filter(pk=self.a.pk).update(is_active=False)
+        self.assertFalse(es_ultimo_administrador_activo(a_en_memoria, bloquear=True))
+
+    def test_empleado_save_con_baja_pide_el_lock_de_los_administradores(self):
+        emp = make_empleado(nombres='Ana', ci='1', user=self.a)
+        emp.fecha_baja = date(2026, 1, 10)
+        with self.mock.patch('django.db.models.query.QuerySet.select_for_update',
+                             autospec=True, side_effect=lambda qs, *a, **k: qs) as sfu:
+            emp.save()
+        self.assertTrue(sfu.called)
+        self.a.refresh_from_db()
+        self.assertFalse(self.a.is_active)
+
+    def test_segunda_baja_mutua_es_rechazada(self):
+        ea = make_empleado(nombres='Ana', ci='1', user=self.a)
+        eb = make_empleado(nombres='Beto', ci='2', user=self.b)
+        ea.fecha_baja = date(2026, 1, 10)
+        ea.save()
+        eb.fecha_baja = date(2026, 1, 10)
+        with self.assertRaises(BajaNoPermitida):
+            eb.save()
+        self.b.refresh_from_db()
+        self.assertTrue(self.b.is_active)
+
+    def test_toggle_activo_usuario_pide_el_lock(self):
+        self.client.force_login(self.a)
+        with self.mock.patch('django.db.models.query.QuerySet.select_for_update',
+                             autospec=True, side_effect=lambda qs, *a, **k: qs) as sfu:
+            self.client.post(reverse('toggle_activo_usuario', args=[self.b.pk]))
+        self.assertTrue(sfu.called)
+        self.b.refresh_from_db()
+        self.assertFalse(self.b.is_active)
