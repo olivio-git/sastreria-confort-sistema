@@ -3579,6 +3579,13 @@ def crear_confeccion(request):
                     caja_turno.autorizar_cambio_estado(
                         request.user, 'pendiente', estado_solicitado, confeccion.saldo_pendiente,
                     )
+                    # Nacida 'entregado' no hay transición posterior que libere
+                    # las reservas (el post_save la omite en `created`): se
+                    # asientan acá en la sesión de quien la crea, dentro de la
+                    # misma transacción (si no es dueño del turno, no se crea nada).
+                    if confeccion.estado == 'entregado':
+                        from .caja_signals import _liberar_reservas_por_entrega
+                        _liberar_reservas_por_entrega('referencia_confeccion', confeccion, request.user)
             except caja_turno.TurnoCajaError as exc:
                 form.add_error(None, str(exc))
             else:
@@ -4465,6 +4472,12 @@ def devolver_alquiler(request, id):
                 alquiler.estado = 'devuelto'
                 alquiler.fecha_devolucion_real = django_tz.now()
                 alquiler.save()
+                # La devolución es el fin del servicio: las reservas
+                # (`via_caja=False`) se asientan en la sesión de quien
+                # devuelve, que debe ser dueño del turno (atómico: si no lo
+                # es, la devolución completa se revierte).
+                from .caja_signals import _liberar_reservas_por_entrega
+                _liberar_reservas_por_entrega('referencia_alquiler', alquiler, request.user)
                 for ai in alquiler.items.select_related('prenda_item').all():
                     kardex_events.emit_devolucion(ai.prenda_item, alquiler)
 
