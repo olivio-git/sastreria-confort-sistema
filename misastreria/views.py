@@ -8136,7 +8136,7 @@ def _kpis_operativas(fecha_inicio, fecha_fin):
         **filtro_rango('creado', fecha_inicio, fecha_fin),
         estado='entregado',
     ).values_list('creado', 'fecha_entrega'))
-    dur_rep = [(b - a.date()).days for a, b in pares_rep if a and b]
+    dur_rep = [(b - fecha_local(a)).days for a, b in pares_rep if a and b]
 
     # Inventario occupation — fecha_devolucion is required (never null), use estado instead
     total_items = PrendaItem.objects.count()
