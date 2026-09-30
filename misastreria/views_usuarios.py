@@ -3,7 +3,8 @@ Gestión de usuarios, rol y PIN — pantalla exclusiva de Administrador.
 
 Va en su propio módulo (no en `views.py`, que ya pasa las 10.5k líneas). Acá
 viven `lista_usuarios`, `crear_usuario`, `editar_usuario`,
-`resetear_pin_usuario` y `toggle_activo_usuario`, todas detrás del permiso
+`resetear_pin_usuario`, `toggle_activo_usuario` y `permisos_usuario`
+(permisos adicionales por usuario), todas detrás del permiso
 `gestionar_usuarios`.
 
 Invariante (spec User Management): nunca se puede desactivar ni degradar
@@ -13,7 +14,7 @@ bloquee a sí mismo sin querer.
 """
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.models import Group, User
+from django.contrib.auth.models import Group, Permission, User
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Q
@@ -36,6 +37,28 @@ def _es_ultimo_administrador_activo(user_obj):
         groups__name='Administrador', is_active=True
     ).exclude(pk=user_obj.pk).exists()
 
+def _codenames_del_rol(user_obj):
+    """Permisos de la app que el usuario recibe por sus grupos (roles)."""
+    return set(
+        Permission.objects.filter(
+            group__user=user_obj, content_type__app_label='misastreria'
+        ).values_list('codename', flat=True)
+    )
+
+
+def _extras_otorgados(user_obj):
+    """Permisos otorgables que el usuario tiene como extra (fuera de su rol)."""
+    return set(
+        user_obj.user_permissions.filter(
+            content_type__app_label='misastreria',
+            codename__in=roles.CODENAMES_OTORGABLES,
+        ).values_list('codename', flat=True)
+    )
+
+
+def _etiquetas_extras(codenames):
+    return [roles.ETIQUETAS_OTORGABLES[c] for c in sorted(codenames)]
+
 
 @login_required
 @permission_required('misastreria.gestionar_usuarios')
@@ -57,6 +80,11 @@ def lista_usuarios(request):
     total = qs.count()
     paginator = Paginator(qs, 15)
     page_obj = paginator.get_page(request.GET.get('page'))
+
+    # Resumen de permisos efectivos: por cada usuario, los extras (fuera de
+    # su rol) que tiene otorgados.
+    for usr in page_obj:
+        usr.extras_etiquetas = _etiquetas_extras(_extras_otorgados(usr))
 
     return render(request, 'misastreria/usuarios/lista.html', {
         'page_obj': page_obj,
@@ -218,3 +246,82 @@ def toggle_activo_usuario(request, pk):
     estado = 'activado' if user_obj.is_active else 'desactivado'
     messages.success(request, f"Usuario «{user_obj.username}» {estado}.")
     return redirect('lista_usuarios')
+
+
+@login_required
+@permission_required('misastreria.gestionar_usuarios')
+def permisos_usuario(request, pk):
+    """Grilla de permisos adicionales de un usuario (módulo x acción).
+
+    Lo heredado del rol se muestra tildado y deshabilitado; sólo se guardan
+    como extra los que NO da el rol. La lista de permisos otorgables se valida
+    en el servidor (`roles.CODENAMES_OTORGABLES`): `gestionar_usuarios`,
+    `supervisar_caja` y cualquier permiso de otra app se rechazan aunque
+    alguien arme el POST a mano. Como en roles, nadie edita los propios.
+    """
+    user_obj = get_object_or_404(User, pk=pk)
+
+    if user_obj.pk == request.user.pk:
+        messages.error(request, "No podés cambiar tus propios permisos desde acá.")
+        return redirect('lista_usuarios')
+
+    heredados = _codenames_del_rol(user_obj)
+    extras = _extras_otorgados(user_obj)
+
+    if request.method == 'POST':
+        pedidos = set(request.POST.getlist('permisos'))
+        invalidos = pedidos - roles.CODENAMES_OTORGABLES
+        if invalidos:
+            # Se rechaza el envío COMPLETO: un POST con algo fuera de la lista
+            # no es un formulario legítimo y no debe guardar ni siquiera lo
+            # válido que traiga.
+            messages.error(
+                request,
+                "Se rechazó el envío: incluye permisos que no se pueden otorgar "
+                f"({', '.join(sorted(invalidos))}). No se guardó ningún cambio.",
+            )
+            return redirect('permisos_usuario', pk=user_obj.pk)
+
+        deseados = pedidos - heredados
+        with transaction.atomic():
+            por_codename = {
+                p.codename: p for p in Permission.objects.filter(
+                    content_type__app_label='misastreria', codename__in=deseados | extras,
+                )
+            }
+            quitar = [por_codename[c] for c in extras - deseados if c in por_codename]
+            agregar = [por_codename[c] for c in deseados - extras if c in por_codename]
+            if quitar:
+                user_obj.user_permissions.remove(*quitar)
+            if agregar:
+                user_obj.user_permissions.add(*agregar)
+        messages.success(request, f"Permisos adicionales de «{user_obj.username}» actualizados.")
+        return redirect('lista_usuarios')
+
+    modulos = []
+    for modulo in roles.modulos_otorgables():
+        celdas = []
+        for accion in roles.ACCIONES_GRILLA:
+            codename = modulo['acciones'].get(accion)
+            celdas.append({
+                'accion': accion,
+                'codename': codename,
+                'heredado': codename in heredados,
+                'marcado': codename in extras,
+            } if codename else None)
+        otros = [{
+            'codename': codename, 'etiqueta': etiqueta,
+            'heredado': codename in heredados, 'marcado': codename in extras,
+        } for codename, etiqueta in modulo['otros']]
+        modulos.append({'nombre': modulo['nombre'], 'celdas': celdas, 'otros': otros})
+
+    return render(request, 'misastreria/usuarios/permisos.html', {
+        'usuario_obj': user_obj,
+        'roles_usuario': list(user_obj.groups.filter(name__in=roles.ROLES.keys())
+                              .values_list('name', flat=True)),
+        'modulos': modulos,
+        'acciones': roles.ACCIONES_GRILLA,
+        'n_heredados': len(heredados),
+        'n_extras': len(extras - heredados),
+        'extras_etiquetas': _etiquetas_extras(extras - heredados),
+    })

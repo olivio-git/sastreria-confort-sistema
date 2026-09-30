@@ -73,6 +73,95 @@ ROLES = {
 }
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Permisos adicionales por usuario
+# ──────────────────────────────────────────────────────────────────────────────
+# Encima del rol, un Administrador puede sumarle a UN usuario permisos extra
+# (`user.user_permissions`) desde la pantalla de usuarios. Sólo se pueden
+# otorgar los que figuran acá — la lista se valida en el servidor, no sólo se
+# oculta en la grilla.
+#
+# Quedan FUERA a propósito:
+#   - `gestionar_usuarios`: administra roles, PINs y estos mismos extras; se
+#     obtiene únicamente con el rol Administrador.
+#   - `supervisar_caja`: ver/anular sesiones ajenas es una función de
+#     supervisión, no un permiso suelto.
+#   - `acceder_sistema`: lo da cualquier rol; un usuario sin rol no entra.
+# Aun otorgando `operar_caja`/`abrir_caja`/`registrar_cobro`, el turno de caja
+# sigue siendo una regla de propiedad (sólo el dueño de la sesión escribe en
+# ella): un extra habilita la pantalla, nunca saltea al dueño del turno.
+
+ACCIONES_GRILLA = ('ver', 'crear', 'editar', 'eliminar')
+
+# (módulo, modelo o None, permisos personalizados [(codename, etiqueta)])
+# Un modelo genera view_/add_/change_/delete_<modelo>; `solo_ver` limita a Ver.
+_MODULOS_OTORGABLES = [
+    ('Clientes', 'cliente', None, []),
+    ('Reparaciones', 'reparacion', None, []),
+    ('Ventas', 'venta', None, []),
+    ('Confecciones', 'confeccion', None, []),
+    ('Alquileres', 'alquiler', None, []),
+    ('Gastos y transacciones', 'transaccion', None, []),
+    ('Conceptos de gasto', 'tipogasto', None, []),
+    ('Inventario (prendas)', 'prendainventario', None, []),
+    ('Cortes', 'corte', ('ver',), []),
+    ('Conjuntos', 'conjunto', None, []),
+    ('Insumos', 'insumo', None, []),
+    ('Producción', 'ordenproduccion', None, []),
+    ('Empleados', 'empleado', None, []),
+    ('Caja y cobros', None, None, [
+        ('registrar_cobro', 'Registrar cobros'),
+        ('abrir_caja', 'Abrir sesión de caja'),
+        ('operar_caja', 'Operar su propia sesión de caja'),
+        ('ver_reportes_caja', 'Ver reportes de caja'),
+    ]),
+    ('Taller', None, None, [
+        ('cambiar_estado_taller', 'Cambiar estados de taller'),
+    ]),
+    ('Reportes y analítica', None, None, [
+        ('ver_reportes', 'Ver reportes generales'),
+        ('ver_analitica', 'Ver analítica'),
+    ]),
+    ('Etiquetas', None, None, [
+        ('imprimir_etiquetas', 'Imprimir etiquetas'),
+        ('configurar_etiquetas', 'Configurar etiquetas e impresora'),
+    ]),
+]
+
+_PREFIJO_ACCION = {'ver': 'view', 'crear': 'add', 'editar': 'change', 'eliminar': 'delete'}
+
+
+def modulos_otorgables():
+    """Módulos de la grilla de permisos adicionales.
+
+    Cada elemento: `{'nombre', 'acciones': {'ver'|'crear'|'editar'|'eliminar':
+    codename}, 'otros': [(codename, etiqueta)]}`.
+    """
+    modulos = []
+    for nombre, modelo, acciones_permitidas, otros in _MODULOS_OTORGABLES:
+        acciones = {}
+        if modelo:
+            for accion in (acciones_permitidas or ACCIONES_GRILLA):
+                acciones[accion] = f'{_PREFIJO_ACCION[accion]}_{modelo}'
+        modulos.append({'nombre': nombre, 'acciones': acciones, 'otros': list(otros)})
+    return modulos
+
+
+def _etiquetas_otorgables():
+    etiquetas = {}
+    for modulo in modulos_otorgables():
+        for accion, codename in modulo['acciones'].items():
+            etiquetas[codename] = f"{modulo['nombre']}: {accion}"
+        for codename, etiqueta in modulo['otros']:
+            etiquetas[codename] = etiqueta
+    return etiquetas
+
+
+# codename -> etiqueta legible ("Insumos: ver", "Registrar cobros", ...)
+ETIQUETAS_OTORGABLES = _etiquetas_otorgables()
+CODENAMES_OTORGABLES = frozenset(ETIQUETAS_OTORGABLES)
+
+
 def aplicar_roles(roles=None):
     """Crea/actualiza los 4 grupos y su set exacto de permisos.
 

@@ -214,6 +214,7 @@ urlpatterns = [
     path('usuarios/', views_usuarios.lista_usuarios, name='lista_usuarios'),
     path('usuarios/crear/', views_usuarios.crear_usuario, name='crear_usuario'),
     path('usuarios/<int:pk>/editar/', views_usuarios.editar_usuario, name='editar_usuario'),
+    path('usuarios/<int:pk>/permisos/', views_usuarios.permisos_usuario, name='permisos_usuario'),
     path('usuarios/<int:pk>/resetear-pin/', views_usuarios.resetear_pin_usuario, name='resetear_pin_usuario'),
     path('usuarios/<int:pk>/toggle-activo/', views_usuarios.toggle_activo_usuario, name='toggle_activo_usuario'),
 ]

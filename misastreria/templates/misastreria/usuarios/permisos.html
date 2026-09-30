@@ -1,0 +1,103 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Permisos de {{ usuario_obj.username }}{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <a href="{% url 'lista_usuarios' %}" class="btn btn-outline-secondary">
+        <i data-lucide="arrow-left"></i>Volver
+      </a>
+    </div>
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="shield-check" class="me-2 text-muted"></i>Permisos adicionales de «{{ usuario_obj.username }}»
+      </h2>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+<div class="row justify-content-center">
+  <div class="col-12 col-xl-10">
+    <div class="card mb-3">
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-12 col-md-4">
+            <div class="small fw-semibold text-muted">Rol(es)</div>
+            <div>{% for r in roles_usuario %}{{ r }}{% if not forloop.last %}, {% endif %}{% empty %}<span class="text-muted">Sin rol</span>{% endfor %}</div>
+          </div>
+          <div class="col-6 col-md-4">
+            <div class="small fw-semibold text-muted">Permisos del rol</div>
+            <div>{{ n_heredados }}</div>
+          </div>
+          <div class="col-6 col-md-4">
+            <div class="small fw-semibold text-muted">Permisos adicionales</div>
+            <div>{{ n_extras }}{% if extras_etiquetas %} <span class="text-muted small">({{ extras_etiquetas|join:", " }})</span>{% endif %}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <form method="post" id="permisosForm">
+      {% csrf_token %}
+      <div class="card">
+        <div class="card-header"><h3 class="card-title">Permisos por módulo</h3></div>
+        <div class="card-body pb-0">
+          <p class="text-muted small mb-2">
+            Los permisos que ya da el rol aparecen marcados y bloqueados. Marcá los que quieras sumar
+            <strong>sólo a este usuario</strong>. Estos permisos habilitan pantallas; el turno de caja sigue
+            siendo de quien abrió la sesión.
+          </p>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-vcenter card-table">
+            <thead>
+              <tr>
+                <th>Módulo</th>
+                {% for a in acciones %}<th class="text-center text-capitalize">{{ a }}</th>{% endfor %}
+                <th>Otros permisos</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for m in modulos %}
+              <tr>
+                <td class="fw-semibold">{{ m.nombre }}</td>
+                {% for c in m.celdas %}
+                <td class="text-center">
+                  {% if c %}
+                  <input type="checkbox" class="form-check-input" name="permisos"
+                         id="perm_{{ c.codename }}" value="{{ c.codename }}"
+                         {% if c.heredado or c.marcado %}checked{% endif %}
+                         {% if c.heredado %}disabled title="Lo da el rol"{% endif %}>
+                  {% else %}<span class="text-muted">—</span>{% endif %}
+                </td>
+                {% endfor %}
+                <td>
+                  {% for o in m.otros %}
+                  <label class="form-check mb-0">
+                    <input type="checkbox" class="form-check-input" name="permisos"
+                           id="perm_{{ o.codename }}" value="{{ o.codename }}"
+                           {% if o.heredado or o.marcado %}checked{% endif %}
+                           {% if o.heredado %}disabled title="Lo da el rol"{% endif %}>
+                    <span class="form-check-label">{{ o.etiqueta }}</span>
+                  </label>
+                  {% empty %}<span class="text-muted">—</span>{% endfor %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="card-footer text-end d-flex justify-content-end gap-2">
+          <a href="{% url 'lista_usuarios' %}" class="btn btn-outline-secondary">Cancelar</a>
+          <button type="submit" class="btn btn-primary">
+            <i data-lucide="check"></i>Guardar
+          </button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

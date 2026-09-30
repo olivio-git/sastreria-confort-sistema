@@ -62,6 +62,7 @@
           <th>Usuario</th>
           <th>Empleado vinculado</th>
           <th>Rol</th>
+          <th>Permisos adicionales</th>
           <th>Estado</th>
           <th>PIN de caja</th>
           <th>Acciones</th>
@@ -74,6 +75,15 @@
           <td>{{ usr.empleado|default:"—" }}</td>
           <td>
             {% for g in usr.groups.all %}{{ g.name }}{% if not forloop.last %}, {% endif %}{% empty %}<span class="text-muted">Sin rol</span>{% endfor %}
+          </td>
+          <td>
+            {% if usr.extras_etiquetas %}
+              <a href="{% url 'permisos_usuario' usr.pk %}" class="text-reset"
+                 title="{{ usr.extras_etiquetas|join:', ' }}">
+                +{{ usr.extras_etiquetas|length }} adicional{{ usr.extras_etiquetas|length|pluralize:"es" }}
+              </a>
+              <div class="small text-muted">{{ usr.extras_etiquetas|join:", "|truncatechars:70 }}</div>
+            {% else %}<span class="text-muted">—</span>{% endif %}
           </td>
           <td>
             {% if usr.is_active %}
@@ -95,6 +105,9 @@
             <div class="btn-actions">
               <a href="{% url 'editar_usuario' usr.pk %}" class="btn btn-sm btn-icon btn-ghost-primary" title="Editar">
                 <i data-lucide="pencil"></i>
+              </a>
+              <a href="{% url 'permisos_usuario' usr.pk %}" class="btn btn-sm btn-icon btn-ghost-secondary" title="Permisos adicionales">
+                <i data-lucide="shield-check"></i>
               </a>
               <form method="post" action="{% url 'resetear_pin_usuario' usr.pk %}" class="d-inline">
                 {% csrf_token %}
@@ -119,7 +132,7 @@
         </tr>
         {% empty %}
         <tr>
-          <td colspan="6">
+          <td colspan="7">
             <div class="empty-state">
               <i data-lucide="user-cog" style="width:2.5rem;height:2.5rem;opacity:.3;display:block;margin:0 auto .75rem"></i>
               No hay usuarios que coincidan con el filtro.
