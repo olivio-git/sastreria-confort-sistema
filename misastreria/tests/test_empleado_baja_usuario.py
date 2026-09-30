@@ -175,3 +175,53 @@ class GuardDeDominioTests(TestCase):
         emp.save()
         a2.refresh_from_db()
         self.assertFalse(a2.is_active)
+
+
+class EmpleadoAdminBajaTests(TestCase):
+    """Django admin: la baja de un Empleado vinculado sigue las mismas reglas
+    que `EmpleadoForm(actor=)`. Antes: la baja del último Administrador daba
+    un 500 (BajaNoPermitida sin capturar) y un superusuario podía darse de
+    baja a sí mismo (verify ronda 6, W2)."""
+
+    def setUp(self):
+        self.su = User.objects.create_superuser('super', 's@x.com', 'pw')
+        self.client.force_login(self.su)
+
+    def _post(self, emp, **extra):
+        data = {
+            'ci': emp.ci or '', 'nombres': emp.nombres,
+            'apellido_paterno': emp.apellido_paterno, 'apellido_materno': '',
+            'celular': '+59171234567', 'activo': 'on',
+            'fecha_ingreso': emp.fecha_ingreso.isoformat(),
+            'user': emp.user_id or '',
+        }
+        data.update(extra)
+        return self.client.post(
+            reverse('admin:misastreria_empleado_change', args=[emp.pk]), data)
+
+    def test_baja_del_ultimo_admin_muestra_error_y_no_500(self):
+        admin = make_administrador(username='unico')
+        emp = make_empleado(nombres='Ana', ci='1', user=admin)
+        resp = self._post(emp, fecha_baja='2026-01-10')
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'último Administrador activo')
+        admin.refresh_from_db()
+        self.assertTrue(admin.is_active)
+        self.assertIsNone(Empleado.objects.get(pk=emp.pk).fecha_baja)
+
+    def test_superusuario_no_se_da_de_baja_a_si_mismo(self):
+        emp = make_empleado(nombres='Su', ci='2', user=self.su)
+        resp = self._post(emp, fecha_baja='2026-01-10')
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'tu propio usuario')
+        self.su.refresh_from_db()
+        self.assertTrue(self.su.is_active)
+        self.assertIsNone(Empleado.objects.get(pk=emp.pk).fecha_baja)
+
+    def test_baja_de_un_usuario_comun_funciona(self):
+        cajero = make_cajero(username='caj')
+        emp = make_empleado(nombres='Beto', ci='3', user=cajero)
+        resp = self._post(emp, fecha_baja='2026-01-10')
+        self.assertEqual(resp.status_code, 302)
+        cajero.refresh_from_db()
+        self.assertFalse(cajero.is_active)

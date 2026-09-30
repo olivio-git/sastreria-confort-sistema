@@ -1,4 +1,5 @@
 from django.contrib import admin
+from .forms import EmpleadoForm
 from .models import (
     Cliente, PrendaInventario, PrendaItem, Corte, Insumo,
     Venta, VentaItem, Alquiler, AlquilerItem, Transaccion,
@@ -28,7 +29,35 @@ class ConfeccionAdmin(admin.ModelAdmin):
     readonly_fields = ['estado', 'adelanto']
 
 
-admin.site.register(Empleado)
+class EmpleadoAdminForm(EmpleadoForm):
+    """Mismas reglas de baja que la app (`EmpleadoForm(actor=)`): no se da de
+    baja al último Administrador activo ni al propio usuario. Sin esto la baja
+    del último Administrador reventaba con un 500 (BajaNoPermitida) y un
+    superusuario podía darse de baja a sí mismo."""
+
+    class Meta(EmpleadoForm.Meta):
+        fields = '__all__'
+        widgets = {}
+        labels = {}
+        help_texts = {}
+
+
+@admin.register(Empleado)
+class EmpleadoAdmin(admin.ModelAdmin):
+    form = EmpleadoAdminForm
+
+    def get_form(self, request, obj=None, **kwargs):
+        Form = super().get_form(request, obj, **kwargs)
+        actor = request.user
+
+        class ActorForm(Form):
+            def __init__(self, *args, **kw):
+                kw['actor'] = actor
+                super().__init__(*args, **kw)
+
+        return ActorForm
+
+
 admin.site.register(Permiso)
 admin.site.register(Falta)
 
