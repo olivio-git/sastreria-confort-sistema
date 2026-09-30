@@ -72,10 +72,14 @@ def es_ultimo_administrador_activo(user_obj, bloquear=False):
     ids = list(User.objects.filter(
         groups__name='Administrador', is_active=True,
     ).values_list('pk', flat=True))
-    # Sin JOIN: bloquear filas de la tabla de grupos no hace falta y MariaDB
-    # no soporta `FOR UPDATE OF`.
+    # El lock relee, en lectura "actual" (no la del snapshot de la transacción),
+    # AMBAS cosas: que siga activo y que siga en el grupo Administrador. Sin
+    # el join con el grupo, una degradación concurrente (quitarle el rol a
+    # otro Administrador) pasaba inadvertida: verify ronda 7, W2. MariaDB no
+    # soporta `FOR UPDATE OF`, así que el lock alcanza también a las filas de
+    # la tabla intermedia (justo lo que borra una degradación).
     activos = set(User.objects.select_for_update().filter(
-        pk__in=ids, is_active=True,
+        pk__in=ids, is_active=True, groups__name='Administrador',
     ).order_by('pk').values_list('pk', flat=True))
     return user_obj.pk in activos and not (activos - {user_obj.pk})
 

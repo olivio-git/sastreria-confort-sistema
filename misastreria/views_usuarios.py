@@ -11,12 +11,18 @@ Invariante (spec User Management): nunca se puede desactivar ni degradar
 (quitarle el rol Administrador) al último Administrador activo del sistema,
 ni actuar sobre la propia cuenta desde acá — evita que un Administrador se
 bloquee a sí mismo sin querer.
+
+Carreras: el chequeo "último Administrador" se hace con
+`es_ultimo_administrador_activo(bloquear=True)` DENTRO del atomic de cada ruta
+que desactiva o degrada (toggle, editar_usuario, baja de Empleado). Queda sin
+cubrir el formulario de usuario del admin de Django (sólo superusuario/staff,
+ninguna vista de la app lo usa): allí no hay guard de último Administrador.
 """
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import Group, Permission, User
 from django.core.paginator import Paginator
-from django.db import transaction
+from django.db import OperationalError, transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
@@ -28,6 +34,19 @@ from .permisos import permission_required
 
 
 _es_ultimo_administrador_activo = es_ultimo_administrador_activo
+
+# Deadlock (1213) o lock wait timeout (1205) de MariaDB: otra operación tenía
+# tomadas las mismas filas. La transacción se revirtió; no se guardó nada.
+MENSAJE_REINTENTAR = (
+    "No se pudo completar porque otra operación estaba modificando los mismos "
+    "datos. Intenta de nuevo."
+)
+
+
+class _RolRechazado(Exception):
+    """Corta el atomic de `editar_usuario` sin escribir nada (el error ya
+    quedó en el formulario)."""
+
 
 def puede_recibir_extras(user_obj):
     """Los extras cuelgan de un rol: sólo usuarios con al menos un rol del
@@ -159,41 +178,48 @@ def editar_usuario(request, pk):
         form = EditarUsuarioForm(request.POST, user_obj=user_obj)
         if form.is_valid():
             nuevos_roles = set(form.cleaned_data['roles'])
-            if 'Administrador' not in nuevos_roles and _es_ultimo_administrador_activo(user_obj):
-                form.add_error(None, "No podés quitarle el rol de Administrador al último Administrador activo.")
+            # Atómico (WARNING 7): reasignar roles + relink de Empleado son
+            # varias escrituras relacionadas. El chequeo "último Administrador"
+            # va DENTRO, con el lock de los Administradores activos, y relee
+            # actividad Y membresía al grupo: una desactivación o degradación
+            # concurrente ya no se le escapa (verify ronda 7, W2).
+            try:
+                with transaction.atomic():
+                    if 'Administrador' not in nuevos_roles and _es_ultimo_administrador_activo(user_obj, bloquear=True):
+                        form.add_error(None, "No podés quitarle el rol de Administrador al último Administrador activo.")
+                        raise _RolRechazado()
+                    # Sólo se tocan los grupos que SON roles del sistema
+                    # (WARNING 5: antes `.groups.clear()` borraba TODOS los
+                    # grupos del usuario, incluyendo cualquiera ajeno a
+                    # `roles.ROLES` que pudiera tener por otro motivo).
+                    # Se aplica la DIFERENCIA (no "quitar todos y volver a
+                    # agregar") para no pasar por un estado sin rol, que
+                    # limpiaría los permisos adicionales del usuario.
+                    # Primero se agrega y después se quita, por lo mismo.
+                    quitar = list(Group.objects.filter(name__in=roles.ROLES.keys()).exclude(name__in=nuevos_roles))
+                    for nombre_rol in nuevos_roles:
+                        grupo, _ = Group.objects.get_or_create(name=nombre_rol)
+                        user_obj.groups.add(grupo)
+                    if quitar:
+                        user_obj.groups.remove(*quitar)
+
+                    Empleado.objects.filter(user=user_obj).update(user=None)
+                    empleado = form.cleaned_data.get('empleado')
+                    if empleado:
+                        empleado.user = user_obj
+                        empleado.save(update_fields=['user'])
+                        if empleado.fecha_baja and user_obj.is_active:
+                            user_obj.is_active = False
+                            user_obj.save(update_fields=['is_active'])
+            except _RolRechazado:
+                pass
+            except BajaNoPermitida as exc:
+                form.add_error('empleado', str(exc))
+                return render(request, 'misastreria/usuarios/form.html', {'form': form, 'modo': 'editar', 'usuario_obj': user_obj})
+            except OperationalError:
+                messages.error(request, MENSAJE_REINTENTAR)
+                return redirect('lista_usuarios')
             else:
-                # Atómico (WARNING 7): reasignar roles + relink de Empleado
-                # son varias escrituras relacionadas.
-                try:
-                    with transaction.atomic():
-                        # Sólo se tocan los grupos que SON roles del sistema
-                        # (WARNING 5: antes `.groups.clear()` borraba TODOS los
-                        # grupos del usuario, incluyendo cualquiera ajeno a
-                        # `roles.ROLES` que pudiera tener por otro motivo).
-                        # Se aplica la DIFERENCIA (no "quitar todos y volver a
-                        # agregar") para no pasar por un estado sin rol, que
-                        # limpiaría los permisos adicionales del usuario.
-                        # Primero se agrega y después se quita, por lo mismo.
-                        quitar = list(Group.objects.filter(name__in=roles.ROLES.keys()).exclude(name__in=nuevos_roles))
-                        for nombre_rol in nuevos_roles:
-                            grupo, _ = Group.objects.get_or_create(name=nombre_rol)
-                            user_obj.groups.add(grupo)
-                        if quitar:
-                            user_obj.groups.remove(*quitar)
-
-                        Empleado.objects.filter(user=user_obj).update(user=None)
-                        empleado = form.cleaned_data.get('empleado')
-                        if empleado:
-                            empleado.user = user_obj
-                            empleado.save(update_fields=['user'])
-                            if empleado.fecha_baja and user_obj.is_active:
-                                user_obj.is_active = False
-                                user_obj.save(update_fields=['is_active'])
-
-                except BajaNoPermitida as exc:
-                    form.add_error('empleado', str(exc))
-                    return render(request, 'misastreria/usuarios/form.html', {'form': form, 'modo': 'editar', 'usuario_obj': user_obj})
-
                 messages.success(request, f"Usuario «{user_obj.username}» actualizado.")
                 return redirect('lista_usuarios')
     else:
@@ -241,26 +267,30 @@ def toggle_activo_usuario(request, pk):
         messages.error(request, "No podés desactivarte a vos mismo.")
         return redirect('lista_usuarios')
 
-    with transaction.atomic():
-        # Lock de los Administradores activos: dos desactivaciones cruzadas no
-        # pueden pasar las dos el chequeo "queda otro" (verify ronda 6, S3).
-        if user_obj.is_active and _es_ultimo_administrador_activo(user_obj, bloquear=True):
-            messages.error(request, "No podés desactivar al último Administrador activo.")
-            return redirect('lista_usuarios')
+    try:
+        with transaction.atomic():
+            # Lock de los Administradores activos: dos desactivaciones cruzadas no
+            # pueden pasar las dos el chequeo "queda otro" (verify ronda 6, S3).
+            if user_obj.is_active and _es_ultimo_administrador_activo(user_obj, bloquear=True):
+                messages.error(request, "No podés desactivar al último Administrador activo.")
+                return redirect('lista_usuarios')
 
-        empleado_vinculado = getattr(user_obj, 'empleado', None)
-        if not user_obj.is_active and empleado_vinculado and empleado_vinculado.fecha_baja:
-            # SUGGESTION 2: si el Empleado vinculado está de baja, reactivar el
-            # usuario desde acá lo dejaría con acceso sin que nadie haya dado de
-            # alta al Empleado de nuevo — la baja del Empleado manda.
-            messages.error(
-                request,
-                f"No se puede reactivar: el empleado vinculado «{empleado_vinculado}» está de baja.",
-            )
-            return redirect('lista_usuarios')
+            empleado_vinculado = getattr(user_obj, 'empleado', None)
+            if not user_obj.is_active and empleado_vinculado and empleado_vinculado.fecha_baja:
+                # SUGGESTION 2: si el Empleado vinculado está de baja, reactivar el
+                # usuario desde acá lo dejaría con acceso sin que nadie haya dado de
+                # alta al Empleado de nuevo — la baja del Empleado manda.
+                messages.error(
+                    request,
+                    f"No se puede reactivar: el empleado vinculado «{empleado_vinculado}» está de baja.",
+                )
+                return redirect('lista_usuarios')
 
-        user_obj.is_active = not user_obj.is_active
-        user_obj.save(update_fields=['is_active'])
+            user_obj.is_active = not user_obj.is_active
+            user_obj.save(update_fields=['is_active'])
+    except OperationalError:
+        messages.error(request, MENSAJE_REINTENTAR)
+        return redirect('lista_usuarios')
     estado = 'activado' if user_obj.is_active else 'desactivado'
     messages.success(request, f"Usuario «{user_obj.username}» {estado}.")
     return redirect('lista_usuarios')

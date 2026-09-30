@@ -6,7 +6,8 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.contrib import messages
 from django.db.models import Sum, F, ExpressionWrapper, DecimalField, Count, Q, Avg, OuterRef, Subquery, Value, Exists
 from django.db.models.functions import Coalesce, Greatest
-from django.db import transaction, IntegrityError
+from django.db import transaction, IntegrityError, OperationalError
+from .views_usuarios import MENSAJE_REINTENTAR
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.auth.decorators import login_required
 from .permisos import permission_required, any_permission_required
@@ -245,6 +246,9 @@ def editar_empleado(request, id):
             except BajaNoPermitida as exc:
                 # Backstop del guard de dominio de `Empleado.save`.
                 form.add_error('fecha_baja', str(exc))
+            except OperationalError:
+                # Deadlock / lock wait en el lock de Administradores (baja).
+                form.add_error('fecha_baja', MENSAJE_REINTENTAR)
             else:
                 return redirect('lista_empleados')
     else:
@@ -10164,6 +10168,8 @@ def abrir_sesion_caja(request):
                 form.add_error(None, "Ya existe una sesión de caja abierta. Ciérrala antes de abrir una nueva.")
             except caja_turno.TurnoCajaError as exc:
                 form.add_error(None, str(exc))
+            except OperationalError:
+                form.add_error(None, MENSAJE_REINTENTAR)
     else:
         form = CajaSesionAperturaForm()
 
