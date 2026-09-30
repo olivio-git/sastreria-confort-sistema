@@ -1085,3 +1085,85 @@ class EditarConfeccionTransicionesSinPermisoTallerTests(TestCase):
         conf.refresh_from_db()
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(conf.estado, 'entregado')
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# W4 (cuarta verificación) — tests que SÍ ejercitan `autorizar_cambio_estado`
+# en `editar_confeccion`. Las regresiones desde 'entregado' las corta antes
+# `ConfeccionForm.clean_estado`, y `count()==0` valía trivialmente sin sesión
+# abierta: con saldo 0 (todo pagado) no hay ningún cobro de por medio, así que
+# lo único que puede impedir a un Vendedor marcar 'entregado' es el chequeo de
+# permiso de la matriz. Si se quita `autorizar_cambio_estado` de la vista,
+# estos tests fallan.
+# ──────────────────────────────────────────────────────────────────────────────
+
+class EditarConfeccionMatrizDeEstadoAisladaTests(TestCase):
+    def setUp(self):
+        self.dueno = make_cajero(username='dueno_conf')
+        make_sesion_caja(usuario=self.dueno)
+        self.conf = make_confeccion(
+            precio=Decimal('300'), adelanto=Decimal('0'), estado='en_proceso',
+            usuario=self.dueno,
+        )
+        from misastreria.caja_signals import registrar_pago_confeccion
+        registrar_pago_confeccion(self.conf, Decimal('300'), 'efectivo', '', self.dueno)
+        self.conf.refresh_from_db()
+        self.assertEqual(self.conf.saldo_pendiente, Decimal('0'), 'precondición: sin saldo')
+
+    def _datos(self, estado, color=None):
+        return {
+            'fecha_inicio': date.today().isoformat(),
+            'color': color or self.conf.color, 'modelo': self.conf.modelo,
+            'precio': '300.00', 'estado': estado,
+            'items-TOTAL_FORMS': '0', 'items-INITIAL_FORMS': '0',
+            'items-MIN_NUM_FORMS': '0', 'items-MAX_NUM_FORMS': '1000',
+        }
+
+    def _post(self, user, estado, **kw):
+        self.client.force_login(user)
+        return self.client.post(
+            reverse('editar_confeccion', kwargs={'id': self.conf.id}), self._datos(estado, **kw))
+
+    def test_vendedor_no_marca_entregado_con_saldo_cero_por_falta_de_permiso(self):
+        resp = self._post(make_vendedor(), 'entregado')
+        self.conf.refresh_from_db()
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(self.conf.estado, 'en_proceso')
+        self.assertIn(
+            'No tenés permiso para marcar esto como entregado.',
+            list(resp.context['form'].non_field_errors()),
+        )
+
+    def test_vendedor_no_cambia_estado_a_pendiente_por_falta_de_permiso(self):
+        resp = self._post(make_vendedor(), 'pendiente')
+        self.conf.refresh_from_db()
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(self.conf.estado, 'en_proceso')
+        self.assertIn(
+            'No tenés permiso para cambiar el estado de esto.',
+            list(resp.context['form'].non_field_errors()),
+        )
+
+    def test_vendedor_si_edita_otros_campos_sin_tocar_el_estado(self):
+        """Triangulación: no es un rechazo generalizado; sin cambio de estado
+        el Vendedor edita normalmente."""
+        resp = self._post(make_vendedor(), 'en_proceso', color='Azul')
+        self.conf.refresh_from_db()
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual((self.conf.estado, self.conf.color), ('en_proceso', 'Azul'))
+
+    def test_admin_pasa_en_proceso_a_pendiente(self):
+        resp = self._post(make_administrador(), 'pendiente')
+        self.conf.refresh_from_db()
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(self.conf.estado, 'pendiente')
+
+    def test_admin_marca_entregado_con_saldo_cero_sin_turno_propio(self):
+        resp = self._post(make_administrador(), 'entregado')
+        self.conf.refresh_from_db()
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(self.conf.estado, 'entregado')
+        self.assertEqual(
+            CajaMovimiento.objects.filter(referencia_confeccion=self.conf, concepto='confeccion_saldo').count(),
+            0, 'saldo 0: no hay saldo final que cobrar',
+        )
