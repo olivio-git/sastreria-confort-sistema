@@ -15,12 +15,16 @@ así que el chequeo ocurre recién cuando terminó de agregar. También cubre
 los usuarios en `pre_clear`) y `Group.delete()` (que borra las filas de la
 tabla intermedia sin emitir m2m_changed).
 """
+import logging
+
 from django.contrib.auth.models import Group, User
 from django.db import transaction
 from django.db.models.signals import m2m_changed, pre_delete
 from django.dispatch import receiver
 
 from . import roles
+
+logger = logging.getLogger(__name__)
 
 
 def limpiar_extras_si_sin_rol(user):
@@ -40,10 +44,16 @@ def _limpiar_al_confirmar(user_pks):
         return
 
     def _correr():
+        # Corre DESPUÉS del commit: un error acá no puede revertir nada ni
+        # tumbar la respuesta, y un usuario que falle no debe impedir que se
+        # limpie a los demás.
         for user in User.objects.filter(pk__in=pks):
-            limpiar_extras_si_sin_rol(user)
+            try:
+                limpiar_extras_si_sin_rol(user)
+            except Exception:
+                logger.exception('No se pudieron limpiar los extras del usuario %s', user.pk)
 
-    transaction.on_commit(_correr)
+    transaction.on_commit(_correr, robust=True)
 
 
 @receiver(m2m_changed, sender=User.groups.through)
