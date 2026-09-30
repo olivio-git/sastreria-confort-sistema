@@ -20,6 +20,7 @@ completo se rechaza — nada queda persistido — y no hay 500.
 from datetime import date, timedelta
 from decimal import Decimal
 
+from django.contrib.auth.models import Permission, User
 from django.contrib.messages import get_messages
 from django.test import TestCase
 from django.urls import reverse
@@ -978,10 +979,19 @@ class PagarComisionPorMontoOwnershipTests(TestCase):
     def test_cajero_b_es_rechazado(self):
         make_sesion_caja(usuario=make_cajero(username='cajero_a_monto2'))
         cajero_b = make_cajero(username='cajero_b_monto')
+        # Sin el extra `change_empleado` el Cajero recibe 403 antes de llegar
+        # al guard de turno y el test no probaría nada del turno: se le
+        # otorga para que el único freno sea que la caja es de otro.
+        cajero_b.user_permissions.add(
+            Permission.objects.get(content_type__app_label='misastreria', codename='change_empleado'))
+        cajero_b = User.objects.get(pk=cajero_b.pk)
 
         resp = self._pagar_por_monto(cajero_b)
 
-        self.assertNotEqual(resp.status_code, 500)
+        self.assertEqual(resp.status_code, 302, 'debe llegar al guard de turno, no a un 403')
+        mensajes = [str(m) for m in get_messages(resp.wsgi_request)]
+        self.assertTrue(
+            any('La caja abierta es de cajero_a_monto2' in m for m in mensajes), mensajes)
         self._nada_registrado()
 
     def test_dueno_puede_pagar_por_monto(self):
