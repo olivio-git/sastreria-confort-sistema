@@ -35,6 +35,11 @@ todo y lo deshace al final, así que muestra exactamente lo que va a pasar. Ante
 de borrar un SKU se verifica que quedó vacío: si alguien le cargó una unidad
 mientras tanto, se aborta todo en vez de borrarla en cascada.
 
+OJO: deshacer sólo funciona si las tablas son transaccionales. En producción
+eran MyISAM, que ignora el rollback: el 2026-10-04 un simulacro aplicó los
+cambios de verdad. Por eso, si alguna tabla no es InnoDB, el simulacro se niega
+a correr; con --confirmar corre igual, pero avisa que no hay vuelta atrás.
+
   manage.py unir_prendas_repetidas                           # simulacro
   manage.py unir_prendas_repetidas --renumerar               # simulacro
   manage.py unir_prendas_repetidas --renumerar --confirmar   # aplica
@@ -42,9 +47,9 @@ mientras tanto, se aborta todo en vez de borrarla en cascada.
 import re
 
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
+from django.db import connection, transaction
 
-from misastreria.models import PrendaInventario, PrendaItem
+from misastreria.models import OrdenProduccion, PrendaInventario, PrendaItem
 
 # Lo que tiene que coincidir para que juntar dos SKU no cambie ningún precio.
 CAMPOS_QUE_DEBEN_COINCIDIR = (
@@ -54,6 +59,20 @@ CAMPOS_QUE_DEBEN_COINCIDIR = (
 
 # Un código de unidad tipeado en «Código de referencia» (PRN-12-ITM-001).
 _RE_REFERENCIA_FALSA = re.compile(r'^\s*PRN-\d+-ITM-\d+\s*$', re.IGNORECASE)
+
+
+def tablas_sin_transacciones():
+    """Tablas que toca el comando y que no deshacen un rollback (MyISAM).
+    Sólo aplica a MySQL/MariaDB; SQLite y PostgreSQL son siempre transaccionales."""
+    if connection.vendor != 'mysql':
+        return []
+    tablas = [m._meta.db_table for m in (PrendaInventario, PrendaItem, OrdenProduccion)]
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = DATABASE() AND engine <> 'InnoDB' "
+            "AND table_name IN (%s)" % ', '.join(['%s'] * len(tablas)), tablas)
+        return [fila[0] for fila in cursor.fetchall()]
 
 
 def _normalizar(texto):
@@ -108,6 +127,16 @@ class Command(BaseCommand):
 
     def handle(self, *args, **opciones):
         aplicar = opciones['confirmar']
+        sin_rollback = tablas_sin_transacciones()
+        if sin_rollback and not aplicar:
+            raise CommandError(
+                'No se puede simular: %s no son transaccionales (no InnoDB) y el '
+                'simulacro aplicaría los cambios de verdad. Conviértanlas a InnoDB '
+                'o corran con --confirmar después de un respaldo.' % ', '.join(sin_rollback))
+        if sin_rollback:
+            self.stdout.write(self.style.WARNING(
+                'AVISO: %s no son transaccionales: si algo falla a mitad de camino '
+                'no se deshace. Tengan el respaldo a mano.\n' % ', '.join(sin_rollback)))
         if not aplicar:
             self.stdout.write(self.style.WARNING(
                 'SIMULACRO: se aplica todo y se deshace al final. '

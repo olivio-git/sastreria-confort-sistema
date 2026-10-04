@@ -243,3 +243,35 @@ class RenumerarTests(TestCase):
         self.cuatro.refresh_from_db()
         self.assertEqual(self.cuatro.codigo, 'PRN-004')
         self.assertEqual(self.cuatro.codigo_referencia, 'PRN-004-ITM-001')
+
+
+class SinTransaccionesTests(TestCase):
+    """Con tablas MyISAM el rollback no deshace nada: el simulacro aplicaría
+    los cambios de verdad (pasó en producción el 2026-10-04)."""
+
+    MODULO = 'misastreria.management.commands.unir_prendas_repetidas.tablas_sin_transacciones'
+
+    def setUp(self):
+        _saco('PRN-001')
+        _saco('PRN-002')
+
+    def test_el_simulacro_se_niega_si_las_tablas_no_son_transaccionales(self):
+        from unittest import mock
+        from django.core.management.base import CommandError
+        with mock.patch(self.MODULO, return_value=['misastreria_prendaitem']):
+            with self.assertRaisesMessage(CommandError, 'No se puede simular'):
+                _correr('--renumerar')
+        self.assertEqual(PrendaInventario.objects.count(), 2)
+
+    def test_con_confirmar_corre_pero_avisa(self):
+        from unittest import mock
+        with mock.patch(self.MODULO, return_value=['misastreria_prendaitem']):
+            salida = _correr('--confirmar')
+        self.assertIn('no son transaccionales', salida)
+        self.assertEqual(PrendaInventario.objects.count(), 1)
+
+    def test_en_sqlite_no_hay_tablas_sin_transacciones(self):
+        from misastreria.management.commands.unir_prendas_repetidas import (
+            tablas_sin_transacciones,
+        )
+        self.assertEqual(tablas_sin_transacciones(), [])
