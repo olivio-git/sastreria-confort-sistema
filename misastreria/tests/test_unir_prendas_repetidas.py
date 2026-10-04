@@ -164,8 +164,82 @@ class UnirPrendasRepetidasTests(TestCase):
         lineas = lambda s: [l for l in s.splitlines() if '→' in l]
         self.assertEqual(lineas(simulacro), lineas(aplicado))
 
+    def test_el_codigo_de_unidad_tipeado_como_referencia_no_se_informa(self):
+        self.b.codigo_referencia = 'PRN-022-ITM-001'
+        self.b.save()
+        self.assertNotIn('se descarta', _correr())
+
     def test_correrlo_dos_veces_no_cambia_nada(self):
         _correr('--confirmar')
         salida = _correr('--confirmar')
         self.assertIn('No hay SKU repetidos', salida)
         self.assertEqual(PrendaItem.objects.filter(prenda=self.a).count(), 3)
+
+
+class RenumerarTests(TestCase):
+    """Después de unir no quedan huecos: PRN-001, PRN-002… en el mismo orden."""
+
+    def setUp(self):
+        # PRN-001 único · PRN-002/003 repetidos · PRN-004 único
+        self.uno = _saco('PRN-001', talla='46')
+        self.dos = _saco('PRN-002')
+        self.tres = _saco('PRN-003')
+        self.cuatro = _saco('PRN-004', talla='50',
+                            codigo_referencia='PRN-004-ITM-001')
+
+    def test_cierra_los_huecos_y_corre_las_unidades(self):
+        salida = _correr('--renumerar', '--confirmar')
+        self.assertEqual(list(PrendaInventario.objects.order_by('codigo')
+                              .values_list('codigo', flat=True)),
+                         ['PRN-001', 'PRN-002', 'PRN-003'])
+        self.cuatro.refresh_from_db()
+        self.assertEqual(self.cuatro.codigo, 'PRN-003')
+        self.assertEqual(list(self.cuatro.items.values_list('codigo_item', flat=True)),
+                         ['PRN-003-ITM-01'])
+        self.dos.refresh_from_db()
+        self.assertEqual(sorted(self.dos.items.values_list('codigo_item', flat=True)),
+                         ['PRN-002-ITM-01', 'PRN-002-ITM-02'])
+        self.assertIn('el próximo alta será PRN-004', salida)
+
+    def test_vacia_las_referencias_que_son_codigos_de_unidad(self):
+        self.uno.codigo_referencia = 'SM-2024-042'                 # una de verdad
+        self.uno.save()
+        _correr('--renumerar', '--confirmar')
+        self.uno.refresh_from_db()
+        self.cuatro.refresh_from_db()
+        self.assertEqual(self.uno.codigo_referencia, 'SM-2024-042')
+        self.assertEqual(self.cuatro.codigo_referencia, '')
+
+    def test_la_reserva_sigue_en_la_misma_unidad_despues_de_renumerar(self):
+        item = self.cuatro.items.get()
+        reserva = make_alquiler_item(
+            alquiler=make_alquiler(estado='reservado'), prenda_item=item,
+            precio_unitario=Decimal('185'))
+        _correr('--renumerar', '--confirmar')
+        reserva.refresh_from_db()
+        item.refresh_from_db()
+        self.assertEqual(reserva.prenda_item_id, item.id)
+        self.assertEqual(item.codigo_item, 'PRN-003-ITM-01')
+
+    def test_renumera_tambien_los_dados_de_baja_para_no_chocar(self):
+        baja = _saco('PRN-006', talla='60', estado='BAJ')
+        _correr('--renumerar', '--confirmar')
+        baja.refresh_from_db()
+        self.assertEqual(baja.codigo, 'PRN-004')
+        self.assertEqual(PrendaInventario.siguiente_codigo(), 'PRN-005')
+
+    def test_no_toca_historicos_ni_apartados(self):
+        hist = _saco('H-PRN-010', talla='60')
+        apartado = _saco('TMP-001', talla='60')
+        _correr('--renumerar', '--confirmar')
+        hist.refresh_from_db()
+        apartado.refresh_from_db()
+        self.assertEqual((hist.codigo, apartado.codigo), ('H-PRN-010', 'TMP-001'))
+
+    def test_el_simulacro_no_renumera_nada(self):
+        salida = _correr('--renumerar')
+        self.assertIn('PRN-004 → PRN-003', salida)
+        self.assertEqual(PrendaInventario.objects.count(), 4)
+        self.cuatro.refresh_from_db()
+        self.assertEqual(self.cuatro.codigo, 'PRN-004')
+        self.assertEqual(self.cuatro.codigo_referencia, 'PRN-004-ITM-001')

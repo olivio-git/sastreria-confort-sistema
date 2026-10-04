@@ -24,15 +24,20 @@ Del resto de los datos del SKU no se pierde nada en silencio: las notas de los
 borrados se agregan a las del que queda, el stock mínimo se toma si el que
 queda no tiene, y el código de referencia que se descarta se informa.
 
-Todo corre en una sola transacción, con los SKU bloqueados, y antes de borrar
-un SKU se verifica que quedó vacío: si alguien le cargó una unidad mientras
-tanto, se aborta todo en vez de borrarla en cascada.
+`--renumerar` cierra los huecos que dejan los SKU borrados: todos los PRN-
+pasan a PRN-001, PRN-002… en el mismo orden que tenían, y sus unidades con
+ellos (PRN-024-ITM-03 → PRN-003-ITM-03). Además vacía los códigos de referencia
+que son en realidad un código de unidad tipeado a mano (PRN-012-ITM-001):
+después de renumerar apuntarían a otra prenda. Hacerlo sólo antes de etiquetar.
 
-  manage.py unir_prendas_repetidas               # simulacro, no toca nada
-  manage.py unir_prendas_repetidas --confirmar   # aplica
+Todo corre en una sola transacción, con los SKU bloqueados. El simulacro aplica
+todo y lo deshace al final, así que muestra exactamente lo que va a pasar. Antes
+de borrar un SKU se verifica que quedó vacío: si alguien le cargó una unidad
+mientras tanto, se aborta todo en vez de borrarla en cascada.
 
-La lista que imprime (código viejo → código nuevo) es la que hay que usar al
-etiquetar.
+  manage.py unir_prendas_repetidas                           # simulacro
+  manage.py unir_prendas_repetidas --renumerar               # simulacro
+  manage.py unir_prendas_repetidas --renumerar --confirmar   # aplica
 """
 import re
 
@@ -46,6 +51,9 @@ CAMPOS_QUE_DEBEN_COINCIDIR = (
     'precio', 'precio_alquiler_base', 'precio_alquiler_minimo_pct',
     'max_usos_default',
 )
+
+# Un código de unidad tipeado en «Código de referencia» (PRN-12-ITM-001).
+_RE_REFERENCIA_FALSA = re.compile(r'^\s*PRN-\d+-ITM-\d+\s*$', re.IGNORECASE)
 
 
 def _normalizar(texto):
@@ -92,28 +100,32 @@ class Command(BaseCommand):
     help = 'Une los SKU PRN- repetidos (mismo nombre, modelo, talla y color) en uno solo.'
 
     def add_arguments(self, parser):
+        parser.add_argument('--renumerar', action='store_true',
+                            help='Después de unir, numera los PRN- seguidos desde '
+                                 'PRN-001 y vacía las referencias que son códigos de unidad.')
         parser.add_argument('--confirmar', action='store_true',
                             help='Aplica los cambios. Sin esto es un simulacro.')
 
     def handle(self, *args, **opciones):
         aplicar = opciones['confirmar']
-        with transaction.atomic():
-            self._unir(aplicar)
-
-    def _unir(self, aplicar):
-        unibles, conflictos = grupos_repetidos()
-
-        if not unibles and not conflictos:
-            self.stdout.write(self.style.SUCCESS('No hay SKU repetidos.'))
-            return
-
         if not aplicar:
             self.stdout.write(self.style.WARNING(
-                'SIMULACRO: no se cambia nada. Para aplicar: --confirmar\n'))
+                'SIMULACRO: se aplica todo y se deshace al final. '
+                'Para aplicar: --confirmar\n'))
+        with transaction.atomic():
+            resumen = self._unir()
+            if opciones['renumerar']:
+                resumen += self._renumerar()
+            if not aplicar:
+                transaction.set_rollback(True)
+        self.stdout.write(self.style.SUCCESS(resumen) if aplicar else resumen)
+
+    def _unir(self):
+        unibles, conflictos = grupos_repetidos()
 
         movidas = borrados = 0
         for destino, origenes in unibles:
-            movidas += self._unir_grupo(destino, origenes, aplicar)
+            movidas += self._unir_grupo(destino, origenes)
             borrados += len(origenes)
 
         for clave, skus, campos in conflictos:
@@ -122,16 +134,17 @@ class Command(BaseCommand):
                     ' / '.join(clave), ', '.join(s.codigo for s in skus),
                     ', '.join(campos))))
 
-        resumen = '\n%d grupos · %d unidades movidas · %d SKU %s' % (
-            len(unibles), movidas, borrados,
-            'borrados' if aplicar else 'a borrar')
+        if not unibles and not conflictos:
+            return '\nNo hay SKU repetidos.'
+        resumen = '\n%d grupos unidos · %d unidades movidas · %d SKU borrados' % (
+            len(unibles), movidas, borrados)
         if conflictos:
             resumen += ' · %d grupos sin unir' % len(conflictos)
-        self.stdout.write(self.style.SUCCESS(resumen) if aplicar else resumen)
+        return resumen
 
-    def _unir_grupo(self, destino, origenes, aplicar):
+    def _unir_grupo(self, destino, origenes):
         """Mueve las unidades de `origenes` a `destino` y borra los vacíos.
-        Devuelve cuántas unidades movió (o movería, en el simulacro)."""
+        Devuelve cuántas unidades movió."""
         self.stdout.write(self.style.MIGRATE_HEADING(
             '%s  %s  ←  %s' % (destino.codigo, destino,
                                ', '.join(o.codigo for o in origenes))))
@@ -148,44 +161,74 @@ class Command(BaseCommand):
             if destino.stock_minimo is None and origen.stock_minimo is not None:
                 destino.stock_minimo = origen.stock_minimo
             ref = origen.codigo_referencia.strip()
-            if ref and ref != destino.codigo_referencia.strip():
+            if (ref and ref != destino.codigo_referencia.strip()
+                    and not _RE_REFERENCIA_FALSA.match(ref)):
                 self.stdout.write('    se descarta la referencia «%s» de %s' % (
                     ref, origen.codigo))
         destino.notas = '\n'.join(notas)
+        destino.save(update_fields=['notas', 'stock_minimo'])
 
-        # El próximo número se lleva a mano: en el simulacro nada se guarda y
-        # siguiente_codigo() devolvería siempre el mismo. Se saltan los códigos
-        # que ya use otra unidad, para que el simulacro muestre lo que pasará.
-        siguiente = int(PrendaItem.siguiente_codigo(destino).rsplit('-', 1)[1])
         movidas = 0
         for origen in origenes:
             for item in origen.items.order_by('codigo_item'):
-                nuevo = '%s-ITM-%02d' % (destino.codigo, siguiente)
-                while PrendaItem.objects.filter(codigo_item=nuevo).exists():
-                    siguiente += 1
-                    nuevo = '%s-ITM-%02d' % (destino.codigo, siguiente)
-                siguiente += 1
+                viejo = item.codigo_item
+                item.prenda = destino
+                item.codigo_item = PrendaItem.siguiente_codigo(destino)
+                while PrendaItem.objects.filter(codigo_item=item.codigo_item).exists():
+                    # Un código suelto de otro SKU ya lo usa: se salta.
+                    numero = int(item.codigo_item.rsplit('-', 1)[1]) + 1
+                    item.codigo_item = '%s-ITM-%02d' % (destino.codigo, numero)
+                item.save(update_fields=['prenda', 'codigo_item', 'actualizado'])
                 self.stdout.write('    %s → %s  (%s)' % (
-                    item.codigo_item, nuevo, item.get_estado_display()))
-                if aplicar:
-                    item.prenda = destino
-                    item.codigo_item = nuevo
-                    item.save(update_fields=['prenda', 'codigo_item', 'actualizado'])
+                    viejo, item.codigo_item, item.get_estado_display()))
                 movidas += 1
 
-            ordenes = origen.ordenes_produccion.count()
+            ordenes = origen.ordenes_produccion.update(prenda_inventario=destino)
             if ordenes:
                 self.stdout.write('    %d orden(es) de producción de %s pasan a %s' % (
                     ordenes, origen.codigo, destino.codigo))
-            if aplicar:
-                origen.ordenes_produccion.update(prenda_inventario=destino)
-                if origen.items.exists():
-                    raise CommandError(
-                        '%s todavía tiene unidades: alguien cargó una mientras '
-                        'corría el comando. No se cambió nada; vuelvan a correrlo.'
-                        % origen.codigo)
-                origen.delete()
-
-        if aplicar:
-            destino.save(update_fields=['notas', 'stock_minimo'])
+            if origen.items.exists():
+                raise CommandError(
+                    '%s todavía tiene unidades: alguien cargó una mientras '
+                    'corría el comando. No se cambió nada; vuelvan a correrlo.'
+                    % origen.codigo)
+            origen.delete()
         return movidas
+
+    def _renumerar(self):
+        """PRN-001, PRN-002… seguidos, en el orden que ya tenían, con sus
+        unidades. Ir de menor a mayor garantiza que el número que toma cada SKU
+        ya está libre: es el suyo o el de uno que ya se corrió más abajo."""
+        P = PrendaInventario.PREFIJO
+        self.stdout.write(self.style.MIGRATE_HEADING('\nRenumeración'))
+        skus = sorted(PrendaInventario.objects.select_for_update()
+                      .filter(codigo__startswith=P + '-'), key=_numero)
+
+        corridos = referencias = 0
+        for n, sku in enumerate(skus, start=1):
+            if _RE_REFERENCIA_FALSA.match(sku.codigo_referencia):
+                sku.codigo_referencia = ''
+                sku.save(update_fields=['codigo_referencia'])
+                referencias += 1
+
+            nuevo = '%s-%03d' % (P, n)
+            if sku.codigo == nuevo:
+                continue
+            viejo = sku.codigo
+            sku.codigo = nuevo
+            sku.save(update_fields=['codigo'])
+            for item in sku.items.all():
+                sufijo = item.codigo_item.rsplit('-ITM-', 1)
+                if len(sufijo) != 2 or sufijo[0] != viejo:
+                    raise CommandError(
+                        'La unidad %s no sigue el formato de %s. No se cambió nada.'
+                        % (item.codigo_item, viejo))
+                item.codigo_item = '%s-ITM-%s' % (nuevo, sufijo[1])
+                item.save(update_fields=['codigo_item', 'actualizado'])
+            self.stdout.write('    %s → %s  %s' % (viejo, nuevo, sku))
+            corridos += 1
+
+        return ('\n%d SKU renumerados (PRN-001 a %s-%03d) · %d referencias vaciadas'
+                ' · el próximo alta será %s' % (
+                    corridos, P, len(skus), referencias,
+                    PrendaInventario.siguiente_codigo()))
