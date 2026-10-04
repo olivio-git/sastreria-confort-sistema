@@ -17,8 +17,10 @@ from django.utils import timezone
 from misastreria import views
 from .factories import (
     make_user, make_sesion_caja, make_movimiento_caja, make_cliente,
-    make_reparacion,
+    make_reparacion, desbloquear_caja_test,
 )
+from misastreria.models import PerfilUsuario
+from django.contrib.auth.hashers import make_password
 
 LP = timezone.get_current_timezone()
 
@@ -121,6 +123,11 @@ class CajaReportesTests(Base):
 
     def setUp(self):
         super().setUp()
+        # Las vistas /caja/* piden PIN (CajaPinMiddleware): el usuario lo
+        # tiene configurado y ya lo ingresó en esta sesión.
+        PerfilUsuario.objects.update_or_create(
+            user=self.user, defaults={'pin_hash': make_password('1234')})
+        desbloquear_caja_test(self.client, self.user)
         self.ayer = self.hoy - timedelta(days=1)
 
     def test_lista_movimientos_filtra_por_dia_local(self):
