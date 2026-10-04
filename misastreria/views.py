@@ -12,6 +12,7 @@ from django.utils import timezone as django_tz
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 from .models import Empleado, TipoContrato, Cliente, Reparacion, ReparacionItem, TipoPrenda, TipoReparacion, Venta, VentaItem, Confeccion, ConfeccionItem, Alquiler, AlquilerItem, EstadoAlquiler, Transaccion, PrendaInventario, PrendaItem, Corte, UbicacionItem, Insumo, TipoMaterial, UnidadMedida, Permiso, Falta, OrdenProduccion, InsumoCortado, CajaSesion, CajaMovimiento, TipoGasto, Conjunto, ConjuntoSlot, PagoComisionEmpleado, ModeloConfeccion, VentaItemEmpleado, AlquilerItemEmpleado, KardexEvento, ReparacionEmpleado, ConfeccionEmpleado, OrdenProduccionEmpleado, AplicacionPagoComision
 from . import comisiones
+from .fechas import filtro_rango, sumar_por_dia, fecha_local
 from .forms import EmpleadoForm, ClienteForm, ReparacionForm, ReparacionItemForm, VentaForm, VentaItemForm, ConfeccionForm, ConfeccionItemFormSet, AlquilerForm, AlquilerItemForm, TransaccionForm, PrendaInventarioForm, InsumoForm, PermisoForm, FaltaForm, EmpleadoReporteForm, ClienteReporteForm, ReparacionReporteForm, OrdenProduccionForm, InsumoCortadoForm, CajaSesionAperturaForm, CajaSesionCierreForm, CajaMovimientoManualForm, TipoGastoForm, ConjuntoForm, ConjuntoSlotFormSet, PagoComisionEmpleadoForm
 from django.core.paginator import Paginator
 from datetime import date, datetime, timedelta
@@ -113,8 +114,7 @@ def dashboard(request):
     # Caja de hoy
     hoy = django_tz.localdate()
     caja_hoy_qs = CajaMovimiento.objects.filter(
-        fecha__date__gte=hoy,
-        fecha__date__lte=hoy,
+        **filtro_rango('fecha', hoy, hoy),
         movimiento_reverso__isnull=True,
         via_caja=True,
     )
@@ -6763,8 +6763,7 @@ def reporte_transacciones(request):
     concepto_filter = request.GET.get('concepto', '').strip()
 
     qs = CajaMovimiento.objects.filter(
-        fecha__date__gte=desde,
-        fecha__date__lte=hasta,
+        **filtro_rango('fecha', desde, hasta),
         movimiento_reverso__isnull=True,
         reverso_de__isnull=True,
         via_caja=True,
@@ -7482,8 +7481,7 @@ def kardex_financiero(request):
 
     # Read totals from CajaMovimiento ledger (KARDEX-01)
     movimientos_qs = CajaMovimiento.objects.filter(
-        fecha__date__gte=desde,
-        fecha__date__lte=hasta,
+        **filtro_rango('fecha', desde, hasta),
         movimiento_reverso__isnull=True,
         reverso_de__isnull=True,
         via_caja=True,
@@ -7597,8 +7595,7 @@ def _build_resumen_context(request):
     periodo = request.GET.get('periodo', 'hoy')
 
     base_qs = CajaMovimiento.objects.filter(
-        fecha__date__gte=desde,
-        fecha__date__lte=hasta,
+        **filtro_rango('fecha', desde, hasta),
         movimiento_reverso__isnull=True,
         reverso_de__isnull=True,
         via_caja=True,
@@ -7623,37 +7620,26 @@ def _build_resumen_context(request):
     )
 
     # Daily flow: list of {'fecha': date, 'ingresos': Decimal, 'egresos': Decimal}
-    flujo_por_dia_ingresos = (
-        base_qs.filter(tipo='ingreso')
-        .values('fecha__date')
-        .annotate(total=Sum('monto'))
-    )
-    flujo_por_dia_egresos = (
-        base_qs.filter(tipo='egreso')
-        .values('fecha__date')
-        .annotate(total=Sum('monto'))
-    )
+    # Agrupado en Python por dia local (sin CONVERT_TZ: ver misastreria/fechas.py)
+    flujo_por_dia_ingresos = sumar_por_dia(base_qs.filter(tipo='ingreso'))
+    flujo_por_dia_egresos = sumar_por_dia(base_qs.filter(tipo='egreso'))
 
     flujo_map = {}
-    for row in flujo_por_dia_ingresos:
-        d = row['fecha__date']
+    for d, total in flujo_por_dia_ingresos.items():
         flujo_map.setdefault(d, {'fecha': d, 'ingresos': Decimal('0'), 'egresos': Decimal('0')})
-        flujo_map[d]['ingresos'] += row['total']
-    for row in flujo_por_dia_egresos:
-        d = row['fecha__date']
+        flujo_map[d]['ingresos'] += total
+    for d, total in flujo_por_dia_egresos.items():
         flujo_map.setdefault(d, {'fecha': d, 'ingresos': Decimal('0'), 'egresos': Decimal('0')})
-        flujo_map[d]['egresos'] += row['total']
+        flujo_map[d]['egresos'] += total
 
     flujo_diario = sorted(flujo_map.values(), key=lambda x: x['fecha'])
 
     sesiones_periodo = CajaSesion.objects.filter(
-        fecha_apertura__date__gte=desde,
-        fecha_apertura__date__lte=hasta,
+        **filtro_rango('fecha_apertura', desde, hasta),
     ).order_by('-fecha_apertura')
 
     movimientos_detalle = CajaMovimiento.objects.filter(
-        fecha__date__gte=desde,
-        fecha__date__lte=hasta,
+        **filtro_rango('fecha', desde, hasta),
         via_caja=True,
     ).select_related('sesion', 'cliente', 'tipo_gasto').order_by('-fecha')
 
@@ -7686,8 +7672,7 @@ def _dashboard_kpis(hoy):
 
     # Current month ingresos (excluding operational concepts)
     ingresos_qs = CajaMovimiento.objects.filter(
-        fecha__date__gte=mes_inicio,
-        fecha__date__lte=hoy,
+        **filtro_rango('fecha', mes_inicio, hoy),
         movimiento_reverso__isnull=True,
         via_caja=True,
         tipo='ingreso',
@@ -7695,8 +7680,7 @@ def _dashboard_kpis(hoy):
     ingresos_actual = ingresos_qs.aggregate(t=Sum('monto'))['t'] or Decimal('0')
 
     egresos_qs = CajaMovimiento.objects.filter(
-        fecha__date__gte=mes_inicio,
-        fecha__date__lte=hoy,
+        **filtro_rango('fecha', mes_inicio, hoy),
         movimiento_reverso__isnull=True,
         via_caja=True,
         tipo='egreso',
@@ -7707,8 +7691,7 @@ def _dashboard_kpis(hoy):
     mes_anterior_fin = mes_inicio - timedelta(days=1)
     mes_anterior_inicio = mes_anterior_fin.replace(day=1)
     ingresos_anterior = CajaMovimiento.objects.filter(
-        fecha__date__gte=mes_anterior_inicio,
-        fecha__date__lte=mes_anterior_fin,
+        **filtro_rango('fecha', mes_anterior_inicio, mes_anterior_fin),
         movimiento_reverso__isnull=True,
         via_caja=True,
         tipo='ingreso',
@@ -7729,8 +7712,7 @@ def _dashboard_kpis(hoy):
 
     # Nuevos clientes del mes
     clientes_nuevos = Cliente.objects.filter(
-        creado__date__gte=mes_inicio,
-        creado__date__lte=hoy,
+        **filtro_rango('creado', mes_inicio, hoy),
     ).count()
 
     return {
@@ -7753,28 +7735,25 @@ def _dashboard_trend_chart(hoy):
     base_qs = (
         CajaMovimiento.objects
         .filter(
-            fecha__date__gte=fecha_inicio_trend,
-            fecha__date__lte=hoy,
+            **filtro_rango('fecha', fecha_inicio_trend, hoy),
             movimiento_reverso__isnull=True,
             via_caja=True,
         )
         .exclude(concepto__in=CONCEPTOS_OPERATIVOS)
     )
 
-    ingresos_rows = base_qs.filter(tipo='ingreso').values('fecha__date').annotate(total=Sum('monto'))
-    egresos_rows  = base_qs.filter(tipo='egreso').values('fecha__date').annotate(total=Sum('monto'))
+    ingresos_rows = sumar_por_dia(base_qs.filter(tipo='ingreso'))
+    egresos_rows  = sumar_por_dia(base_qs.filter(tipo='egreso'))
 
     week_data = defaultdict(lambda: {'ingresos': 0.0, 'egresos': 0.0, 'start': None})
-    for row in ingresos_rows:
-        d = row['fecha__date']
+    for d, total in ingresos_rows.items():
         key = d - timedelta(days=d.weekday())  # Monday of that week
-        week_data[key]['ingresos'] += float(row['total'])
+        week_data[key]['ingresos'] += float(total)
         if week_data[key]['start'] is None:
             week_data[key]['start'] = key
-    for row in egresos_rows:
-        d = row['fecha__date']
+    for d, total in egresos_rows.items():
         key = d - timedelta(days=d.weekday())
-        week_data[key]['egresos'] += float(row['total'])
+        week_data[key]['egresos'] += float(total)
         if week_data[key]['start'] is None:
             week_data[key]['start'] = key
 
@@ -7806,8 +7785,7 @@ def _dashboard_donut_chart(hoy):
     rows = (
         CajaMovimiento.objects
         .filter(
-            fecha__date__gte=mes_inicio,
-            fecha__date__lte=hoy,
+            **filtro_rango('fecha', mes_inicio, hoy),
             tipo='ingreso',
             concepto__in=all_conceptos,
             movimiento_reverso__isnull=True,
@@ -7914,7 +7892,7 @@ def _top_clients(fecha_inicio, fecha_fin, limit=10):
     Generalized cross-service LTV helper.
     Returns list of dicts sorted by total_global DESC, truncated to limit.
     fecha_inicio and fecha_fin are date instances.
-    Uses __date__gte / __date__lte filters on each service queryset.
+    Filtra cada queryset de servicio por fecha (DateField) o por rango local (DateTimeField).
     Guards Confeccion.precio with or 0.
     """
     from collections import defaultdict
@@ -7953,8 +7931,7 @@ def _top_clients(fecha_inicio, fecha_fin, limit=10):
 
     # Reparaciones (costo nullable)
     for row in Reparacion.objects.filter(
-        creado__date__gte=fecha_inicio,
-        creado__date__lte=fecha_fin,
+        **filtro_rango('creado', fecha_inicio, fecha_fin),
         cliente__isnull=False,
     ).values('cliente_id').annotate(subtotal=Sum('total'), num=Count('id')):
         totals[row['cliente_id']]['total_reparaciones'] += float(row['subtotal'] or 0)
@@ -8101,8 +8078,7 @@ def _top_empleados(fecha_inicio, fecha_fin, limit=200):
     # Reparaciones (costo, nullable)
     for row in Reparacion.objects.filter(
         empleado__isnull=False,
-        creado__date__gte=fecha_inicio,
-        creado__date__lte=fecha_fin,
+        **filtro_rango('creado', fecha_inicio, fecha_fin),
     ).values('empleado_id').annotate(num=Count('id'), ingreso=Sum('total')):
         eid = row['empleado_id']
         merged.setdefault(eid, _empty_empleado_row())
@@ -8157,11 +8133,10 @@ def _kpis_operativas(fecha_inicio, fecha_fin):
     # Reparacion turnaround (creado is DateTimeField, fecha_entrega is DateField)
     # fecha_entrega is required/never null — filter by estado='entregado' for actual turnarounds
     pares_rep = list(Reparacion.objects.filter(
-        creado__date__gte=fecha_inicio,
-        creado__date__lte=fecha_fin,
+        **filtro_rango('creado', fecha_inicio, fecha_fin),
         estado='entregado',
     ).values_list('creado', 'fecha_entrega'))
-    dur_rep = [(b - a.date()).days for a, b in pares_rep if a and b]
+    dur_rep = [(b - fecha_local(a)).days for a, b in pares_rep if a and b]
 
     # Inventario occupation — fecha_devolucion is required (never null), use estado instead
     total_items = PrendaItem.objects.count()
@@ -8198,7 +8173,7 @@ def _kpis_operativas(fecha_inicio, fecha_fin):
 def _yoy_totals(fecha_inicio, fecha_fin):
     """
     Computes service-model totals for a single period.
-    Uses __date__gte / __date__lte. Does NOT touch CajaMovimiento (per D2).
+    Filtra por fecha/rango local. Does NOT touch CajaMovimiento (per D2).
     Guards Confeccion.precio with or 0.
     """
     v = Venta.objects.filter(
@@ -8214,8 +8189,7 @@ def _yoy_totals(fecha_inicio, fecha_fin):
         fecha_inicio__lte=fecha_fin,
     ).aggregate(total=Sum('precio'), count=Count('id'))
     r = Reparacion.objects.filter(
-        creado__date__gte=fecha_inicio,
-        creado__date__lte=fecha_fin,
+        **filtro_rango('creado', fecha_inicio, fecha_fin),
     ).aggregate(total=Sum('total'), count=Count('id'))
     ventas = float(v['total'] or 0)
     alquileres = float(a['total'] or 0)
@@ -8490,6 +8464,10 @@ def analitica_comparativas(request):
     })
 
 
+def _año_local(dt):
+    return fecha_local(dt).year if dt else None
+
+
 @login_required
 def estacionalidad(request):
     hoy = django_tz.localdate()
@@ -8499,7 +8477,7 @@ def estacionalidad(request):
         Alquiler.objects.order_by('fecha_alquiler').values_list('fecha_alquiler__year', flat=True).first(),
         Venta.objects.order_by('fecha_venta').values_list('fecha_venta__year', flat=True).first(),
         Confeccion.objects.order_by('fecha_inicio').values_list('fecha_inicio__year', flat=True).first(),
-        Reparacion.objects.order_by('creado').values_list('creado__year', flat=True).first(),
+        _año_local(Reparacion.objects.order_by('creado').values_list('creado', flat=True).first()),
     ]
     año_min = min((y for y in años_candidatos if y), default=hoy.year)
     años_disponibles = list(range(año_min, hoy.year + 1))
@@ -8518,7 +8496,13 @@ def estacionalidad(request):
     alq  = _por_mes(Alquiler.objects.filter(fecha_alquiler__year=año),   'fecha_alquiler__month')
     ven  = _por_mes(Venta.objects.filter(fecha_venta__year=año),          'fecha_venta__month')
     conf = _por_mes(Confeccion.objects.filter(fecha_inicio__year=año),    'fecha_inicio__month')
-    rep  = _por_mes(Reparacion.objects.filter(creado__year=año),          'creado__month')
+    # Reparacion.creado es DateTimeField: rango del año local + agrupado por mes en Python
+    rep_ini = django_tz.make_aware(datetime(año, 1, 1))
+    rep_fin = django_tz.make_aware(datetime(año + 1, 1, 1))
+    rep = {}
+    for dt in Reparacion.objects.filter(creado__gte=rep_ini, creado__lt=rep_fin).values_list('creado', flat=True):
+        m = fecha_local(dt).month
+        rep[m] = rep.get(m, 0) + 1
 
     def _arr(d):
         return [d.get(m, 0) for m in range(1, 13)]
@@ -9209,28 +9193,26 @@ def _kardex_daily_chart(movimientos_qs, desde, hasta):
 
     base_qs = movimientos_qs.exclude(concepto__in=CONCEPTOS_OPERATIVOS)
 
-    # Use two separate queries (combining fecha__date transform + tipo in values() is broken in Django 5.2)
-    ingresos_rows = base_qs.filter(tipo='ingreso').values('fecha__date').annotate(total=Sum('monto'))
-    egresos_rows = base_qs.filter(tipo='egreso').values('fecha__date').annotate(total=Sum('monto'))
+    # Agrupado en Python por dia local (sin CONVERT_TZ: ver misastreria/fechas.py)
+    ingresos_rows = sumar_por_dia(base_qs.filter(tipo='ingreso'))
+    egresos_rows = sumar_por_dia(base_qs.filter(tipo='egreso'))
 
     if use_weekly:
         # ISO week bucketing
         week_data = defaultdict(lambda: {'ingresos': 0.0, 'egresos': 0.0})
         seen_weeks = []
-        for row in ingresos_rows:
-            d = row['fecha__date']
+        for d, total in ingresos_rows.items():
             year, week, _ = d.isocalendar()
             key = (year, week)
             if key not in week_data:
                 seen_weeks.append(key)
-            week_data[key]['ingresos'] += float(row['total'])
-        for row in egresos_rows:
-            d = row['fecha__date']
+            week_data[key]['ingresos'] += float(total)
+        for d, total in egresos_rows.items():
             year, week, _ = d.isocalendar()
             key = (year, week)
             if key not in week_data:
                 seen_weeks.append(key)
-            week_data[key]['egresos'] += float(row['total'])
+            week_data[key]['egresos'] += float(total)
 
         result = [
             {
@@ -9247,14 +9229,14 @@ def _kardex_daily_chart(movimientos_qs, desde, hasta):
         while current <= hasta:
             day_data[str(current)] = {'ingresos': 0.0, 'egresos': 0.0}
             current += timedelta(days=1)
-        for row in ingresos_rows:
-            key = str(row['fecha__date'])
+        for d, total in ingresos_rows.items():
+            key = str(d)
             if key in day_data:
-                day_data[key]['ingresos'] += float(row['total'])
-        for row in egresos_rows:
-            key = str(row['fecha__date'])
+                day_data[key]['ingresos'] += float(total)
+        for d, total in egresos_rows.items():
+            key = str(d)
             if key in day_data:
-                day_data[key]['egresos'] += float(row['total'])
+                day_data[key]['egresos'] += float(total)
 
         result = [
             {'label': d, 'ingresos': v['ingresos'], 'egresos': v['egresos']}
@@ -9345,10 +9327,7 @@ def lista_movimientos_caja(request):
         qs = qs.filter(origen=origen)
     if sesion_id:
         qs = qs.filter(sesion_id=sesion_id)
-    if desde:
-        qs = qs.filter(fecha__date__gte=desde)
-    if hasta:
-        qs = qs.filter(fecha__date__lte=hasta)
+    qs = qs.filter(**filtro_rango('fecha', desde, hasta))
 
     total = qs.count()
     paginator = Paginator(qs, 15)
