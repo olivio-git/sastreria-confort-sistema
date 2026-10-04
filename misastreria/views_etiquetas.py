@@ -16,6 +16,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from .permisos import permission_required, any_permission_required
 from django.core.exceptions import ValidationError
 from django.db.models import Count, Q
 from django.http import Http404, HttpResponse, JsonResponse
@@ -83,6 +84,7 @@ def _copias(datos):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @login_required
+@any_permission_required('misastreria.imprimir_etiquetas', 'misastreria.configurar_etiquetas')
 def simbolo_png(request, clave):
     """Sirve un símbolo de cuidado como PNG, para el lienzo del diseñador.
 
@@ -108,6 +110,7 @@ def simbolo_png(request, clave):
 
 
 @login_required
+@permission_required('misastreria.acceder_sistema')
 def buscar_items(request):
     """Busca unidades físicas de inventario para los selectores de prendas.
 
@@ -280,6 +283,7 @@ def buscar_items(request):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @login_required
+@permission_required('misastreria.configurar_etiquetas')
 def lista_plantillas(request):
     plantillas = PlantillaEtiqueta.objects.all()
     return render(request, 'misastreria/etiquetas/lista.html', {
@@ -292,6 +296,7 @@ def lista_plantillas(request):
 
 
 @login_required
+@permission_required('misastreria.configurar_etiquetas')
 def disenador(request, id=None):
     """La pantalla del diseñador.
 
@@ -374,6 +379,7 @@ def disenador(request, id=None):
 
 
 @login_required
+@permission_required('misastreria.configurar_etiquetas')
 @require_POST
 def guardar_plantilla(request, id=None):
     """Crea o actualiza una plantilla. Responde JSON para el diseñador."""
@@ -423,6 +429,7 @@ def guardar_plantilla(request, id=None):
 
 
 @login_required
+@permission_required('misastreria.configurar_etiquetas')
 def eliminar_plantilla(request, id):
     plantilla = get_object_or_404(PlantillaEtiqueta, pk=id)
 
@@ -466,6 +473,7 @@ def eliminar_plantilla(request, id):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @login_required
+@any_permission_required('misastreria.imprimir_etiquetas', 'misastreria.configurar_etiquetas')
 @require_POST
 def previsualizar_pdf(request):
     """El PDF de lo que hay en el lienzo. Es la vista previa fiel.
@@ -491,6 +499,7 @@ def previsualizar_pdf(request):
 
 
 @login_required
+@any_permission_required('misastreria.imprimir_etiquetas', 'misastreria.configurar_etiquetas')
 @require_POST
 def previsualizar_zpl(request):
     """El ZPL de lo que hay en el lienzo, como texto. No imprime nada."""
@@ -512,6 +521,7 @@ def previsualizar_zpl(request):
 
 
 @login_required
+@any_permission_required('misastreria.imprimir_etiquetas', 'misastreria.configurar_etiquetas')
 @require_POST
 def descargar_zpl(request):
     """Descarga el ZPL como archivo .zpl.
@@ -540,6 +550,7 @@ def descargar_zpl(request):
 
 
 @login_required
+@permission_required('misastreria.imprimir_etiquetas')
 @require_POST
 def imprimir(request):
     """Manda a la SAT lo que hay en el lienzo. Acá sí sale papel.
@@ -631,6 +642,7 @@ def _sin_plantilla(request):
 
 
 @login_required
+@permission_required('misastreria.imprimir_etiquetas')
 def etiqueta_item_pdf(request, id):
     """Etiqueta de UNA unidad física de inventario (PrendaItem)."""
     item = get_object_or_404(
@@ -643,6 +655,7 @@ def etiqueta_item_pdf(request, id):
 
 
 @login_required
+@permission_required('misastreria.imprimir_etiquetas')
 def etiquetas_prenda_pdf(request, id):
     """Etiquetas de TODAS las unidades activas de un SKU, una por página.
 
@@ -705,6 +718,7 @@ def _zpl_de_lote(lote):
 
 
 @login_required
+@permission_required('misastreria.imprimir_etiquetas')
 def zpl_etiqueta_item(request, id):
     """ZPL de la etiqueta de UNA unidad, para imprimirla por el puente."""
     item = get_object_or_404(
@@ -713,6 +727,7 @@ def zpl_etiqueta_item(request, id):
 
 
 @login_required
+@permission_required('misastreria.imprimir_etiquetas')
 def zpl_etiquetas_prenda(request, id):
     """ZPL de las etiquetas de todas las unidades activas de un SKU."""
     prenda = get_object_or_404(PrendaInventario, id=id)
@@ -725,6 +740,7 @@ def zpl_etiquetas_prenda(request, id):
 
 
 @login_required
+@permission_required('misastreria.imprimir_etiquetas')
 def etiqueta_reparacion_pdf(request, id):
     from .models import Reparacion
     reparacion = get_object_or_404(Reparacion.objects.select_related('cliente'), id=id)
@@ -736,6 +752,7 @@ def etiqueta_reparacion_pdf(request, id):
 
 
 @login_required
+@permission_required('misastreria.imprimir_etiquetas')
 def etiqueta_confeccion_pdf(request, id):
     from .models import Confeccion
     confeccion = get_object_or_404(Confeccion.objects.select_related('cliente'), id=id)
@@ -747,6 +764,7 @@ def etiqueta_confeccion_pdf(request, id):
 
 
 @login_required
+@permission_required('misastreria.configurar_etiquetas')
 def etiqueta_demo_pdf(request, id=None):
     """Etiqueta de muestra con datos ficticios.
 
@@ -765,6 +783,7 @@ def etiqueta_demo_pdf(request, id=None):
 
 
 @login_required
+@permission_required('misastreria.configurar_etiquetas')
 def calibrar(request):
     """Página de calibración: comparar el diseño contra el rollo físico.
 
@@ -780,6 +799,7 @@ def calibrar(request):
 
 
 @login_required
+@permission_required('misastreria.configurar_etiquetas')
 def zpl_calibracion(request):
     """El comando de calibración, para que el puente se lo mande a la impresora.
 
@@ -790,6 +810,7 @@ def zpl_calibracion(request):
 
 
 @login_required
+@permission_required('misastreria.configurar_etiquetas')
 @require_POST
 def fijar_impresora(request):
     """Guarda oscuridad, velocidad, encuadre y tipo de papel del cabezal.

@@ -10,6 +10,7 @@ from django.dispatch import receiver
 from django.utils import timezone
 
 from .models import Alquiler, Venta, Confeccion, Reparacion, CajaSesion, CajaMovimiento, PagoComisionEmpleado
+from .caja_turno import CajaSinSesionError, TurnoCajaError
 
 
 # ============================================================
@@ -17,22 +18,31 @@ from .models import Alquiler, Venta, Confeccion, Reparacion, CajaSesion, CajaMov
 # ============================================================
 
 def _sesion_activa():
-    """Retorna la CajaSesion con estado='abierta', o None si no existe."""
-    return CajaSesion.objects.filter(estado='abierta').first()
+    """Retorna la CajaSesion con estado='abierta', o None si no existe.
+    Con 2+ abiertas falla cerrado (CajasAbiertasMultiplesError): ver
+    `caja_turno.sesion_abierta`."""
+    from .caja_turno import sesion_abierta
+    return sesion_abierta()
 
 
-def _reversar_movimientos_activos(*, referencia_field, instance, usuario=None):
-    """
-    Reversa todos los CajaMovimientos activos vinculados a un servicio.
-    Llamar ANTES de eliminar la instancia del servicio.
-    """
+def _reversar_movimientos_activos_impl(*, referencia_field, instance, usuario, verificar):
+    """Implementación compartida por `_reversar_movimientos_activos` (con
+    actor) y `_reversar_movimientos_activos_sistema` (sin actor, red de
+    seguridad `pre_delete`). `verificar` es un callable sin argumentos que
+    devuelve la sesión donde asentar el reverso, o levanta el error de turno
+    correspondiente — así cada camino público define SU propia regla de
+    autorización sin duplicar el loop de reversión."""
     from django.db import transaction as db_transaction
     filtro = {referencia_field: instance, 'movimiento_reverso__isnull': True}
-    sesion = _sesion_activa()
+    sesion = None
+    sesion_resuelta = False
     # Exclude 'anulacion_cobro' to prevent reversing reversals (cycle prevention)
     for mov in CajaMovimiento.objects.filter(**filtro).exclude(concepto='anulacion_cobro'):
         if mov.fue_reversado:
             continue
+        if not sesion_resuelta:
+            sesion = verificar()
+            sesion_resuelta = True
         tipo_reverso = 'egreso' if mov.tipo == 'ingreso' else 'ingreso'
         with db_transaction.atomic():
             reverso = CajaMovimiento.objects.create(
@@ -50,6 +60,70 @@ def _reversar_movimientos_activos(*, referencia_field, instance, usuario=None):
             )
             mov.movimiento_reverso = reverso
             mov.save(update_fields=['movimiento_reverso'])
+
+
+def _sesion_activa_o_error_sistema():
+    """Resolver de sesión para el camino SIN actor (red de seguridad
+    `pre_delete`): sólo exige que haya una caja abierta, sin chequear de
+    quién es."""
+    sesion = _sesion_activa()
+    if sesion is None:
+        raise CajaSinSesionError(
+            "No se puede reversar: tiene movimientos de caja activos y no hay "
+            "ninguna caja abierta para reversarlos."
+        )
+    return sesion
+
+
+def _reversar_movimientos_activos(*, referencia_field, instance, usuario):
+    """
+    Reversa todos los CajaMovimientos activos vinculados a un servicio.
+    Llamar ANTES de eliminar la instancia del servicio.
+
+    `usuario` es OBLIGATORIO: quien está revirtiendo tiene que ser el dueño
+    de la sesión abierta O un Administrador (`caja_turno.
+    verificar_turno_reversion` — WARNING 1 del reporte de verificación,
+    regla confirmada por el dueño del producto: "revertir: dueño o
+    Administrador"). Las vistas `eliminar_*` SIEMPRE pasan
+    `usuario=request.user`.
+
+    Para el ÚNICO camino sin actor identificable (la red de seguridad
+    `pre_delete` — Django admin de superusuario, shell, borrados que no
+    pasan por ninguna vista), usar `_reversar_movimientos_activos_sistema`
+    en su lugar. NUNCA se debe inventar/adivinar un `usuario` acá.
+    """
+    from .caja_turno import verificar_turno_reversion
+    if usuario is None:
+        raise TurnoCajaError(
+            "No se puede reversar sin identificar quién lo hace (falta "
+            "'usuario'); usar _reversar_movimientos_activos_sistema para el "
+            "camino sin actor identificable."
+        )
+    return _reversar_movimientos_activos_impl(
+        referencia_field=referencia_field, instance=instance, usuario=usuario,
+        verificar=lambda: verificar_turno_reversion(usuario),
+    )
+
+
+def _reversar_movimientos_activos_sistema(*, referencia_field, instance):
+    """Camino EXCLUSIVO de la red de seguridad `pre_delete`
+    (`servicio_pre_delete_reversar_caja`): borrados de un servicio que NO
+    pasan por ninguna vista (Django admin de superusuario, shell,
+    `.delete()` directo) y por lo tanto no tienen un actor identificable.
+
+    Es la ÚNICA excepción documentada al choke point de caja "todo
+    movimiento nuevo/reverso tiene un dueño": sólo exige que haya una
+    sesión abierta (sin chequear de quién es). Se considera segura porque
+    (a) revertir YA está permitido para cualquier Administrador vía
+    `verificar_turno_reversion`, y (b) este camino sólo es alcanzable por
+    quien tiene acceso de superusuario a Django admin o a una shell del
+    servidor — nunca por un usuario logueado normal a través de una vista
+    (las vistas `eliminar_*` siempre pasan `usuario=request.user` a
+    `_reversar_movimientos_activos`, no a esta función)."""
+    return _reversar_movimientos_activos_impl(
+        referencia_field=referencia_field, instance=instance, usuario=None,
+        verificar=_sesion_activa_o_error_sistema,
+    )
 
 
 # Red de seguridad: reversar movimientos de caja ANTES de borrar un servicio,
@@ -75,10 +149,10 @@ def servicio_pre_delete_reversar_caja(sender, instance, **kwargs):
     referencia_field = _SERVICIO_REFERENCIA_FIELD.get(sender)
     if not referencia_field:
         return
-    _reversar_movimientos_activos(referencia_field=referencia_field, instance=instance)
+    _reversar_movimientos_activos_sistema(referencia_field=referencia_field, instance=instance)
 
 
-def _ajustar_total_en_caja(*, referencia_field, instance, concepto_cobro, nuevo_total, forma_pago, cliente=None, old_total=None):
+def _ajustar_total_en_caja(*, referencia_field, instance, concepto_cobro, nuevo_total, forma_pago, usuario, cliente=None, old_total=None):
     """
     Reconcilia la caja con el nuevo total de un servicio editado.
 
@@ -94,6 +168,13 @@ def _ajustar_total_en_caja(*, referencia_field, instance, concepto_cobro, nuevo_
     `pagado` se calcula sobre los movimientos activos del servicio, excluyendo
     garantías de alquiler (que tienen su propio flujo). `concepto_cobro` y
     `old_total` se conservan por compatibilidad de firma pero ya no se usan.
+
+    `usuario` es OBLIGATORIO (sin default): el egreso de devolución es un
+    movimiento de caja como cualquier otro — sólo el dueño de la sesión
+    abierta puede generarlo (WARNING 2 del reporte de verificación: antes
+    sólo se chequeaba "hay sesión", no "es la mía", así que editar el total
+    de un servicio ajeno podía sacarle plata del cajón a otro cajero). La
+    verificación de dueño la hace `_crear_mov_auto` — acá sólo se threadea.
     """
     from django.db.models import Sum
     if nuevo_total is None or Decimal(str(nuevo_total)) < 0:
@@ -114,20 +195,53 @@ def _ajustar_total_en_caja(*, referencia_field, instance, concepto_cobro, nuevo_
         monto=exceso,
         forma_pago=forma_pago or 'efectivo',
         descripcion=f"Devolución por edición — {instance} (-Bs {exceso})",
+        usuario=usuario,
         **{referencia_field: instance},
         cliente=cliente,
     )
 
 
-def _crear_mov_auto(*, concepto, monto, forma_pago, descripcion, via_caja=True, **fks):
+def _crear_mov_auto(*, concepto, monto, forma_pago, descripcion, usuario, via_caja=True, **fks):
     """
-    Helper centralizado para crear movimientos automáticos.
-    Checks idempotency via the referencia_* + concepto + movimiento_reverso__isnull=True query.
-    Note: callers perform the idempotency check before calling this function.
+    Helper centralizado para crear movimientos automáticos — el ÚNICO punto
+    donde se escribe un CajaMovimiento "nuevo" (no reverso). Ver
+    architecture/caja-ownership-chokepoint.
+
+    `usuario` es OBLIGATORIO, sin default (choke point, tercera vuelta de
+    sdd-verify: dejar `usuario=None` acá es exactamente el agujero por el
+    que se coló CRITICAL 1 — `registrar_pago_comision_empleado` escribía un
+    egreso en la caja de otro cajero porque nadie chequeaba el dueño en este
+    helper, sólo "hay sesión"). Antes de crear el movimiento:
+      1. Si no hay NINGUNA caja abierta → `CajaSinSesionError` (defensa en
+         profundidad: nunca se crea un movimiento con `sesion=None`).
+      2. Si `usuario` es `None` o no es el dueño de la sesión abierta →
+         `TurnoCajaError` (`caja_turno.verificar_turno_cobro`) — nuevo
+         ingreso/egreso: sólo el dueño, Administrador NO exento.
+    Las vistas deben seguir validando el turno ANTES de llegar acá
+    (`caja_turno.verificar_turno_cobro`) para mostrar un mensaje amable
+    temprano; este helper es la enforcement real, no una capa cosmética.
+
+    `via_caja=False` es la reserva intencional (decisión del dueño del
+    producto, architecture/caja-pagos-reserva): un pago que SÍ es plata real
+    cobrada ahora por quien tiene su turno abierto, pero que todavía NO
+    cuenta para el saldo de NINGUNA sesión hasta que se "libere" (ver
+    `_liberar_pagos_reservados`) — por eso exige exactamente el mismo "dueño
+    del turno abierto" que `via_caja=True`; la única diferencia es el flag,
+    no el requisito de turno.
     """
     if monto is None or Decimal(str(monto)) <= 0:
         return None
-    sesion = _sesion_activa()
+    if _sesion_activa() is None:
+        raise CajaSinSesionError(
+            f"No se puede registrar '{concepto}': no hay ninguna caja abierta."
+        )
+    from .caja_turno import verificar_turno_cobro
+    if usuario is None:
+        raise TurnoCajaError(
+            f"No se puede registrar '{concepto}' sin identificar quién lo hace "
+            "(falta 'usuario')."
+        )
+    sesion = verificar_turno_cobro(usuario)
     return CajaMovimiento.objects.create(
         sesion=sesion,
         tipo=CajaMovimiento.concepto_tipo(concepto),
@@ -138,28 +252,72 @@ def _crear_mov_auto(*, concepto, monto, forma_pago, descripcion, via_caja=True, 
         via_caja=via_caja,
         fecha=timezone.now(),
         descripcion=descripcion,
+        usuario=usuario,
         **fks,
     )
 
 
-def _liberar_pagos_reservados(referencia_field, instance):
-    """Convierte todos los pagos via_caja=False de un servicio a via_caja=True."""
-    CajaMovimiento.objects.filter(
+def _liberar_pagos_reservados(referencia_field, instance, usuario):
+    """Libera los pagos reservados (`via_caja=False`) de un servicio: los
+    marca `via_caja=True` Y los reasigna a la sesión abierta de `usuario`
+    (WARNING 1, decisión del dueño del producto) — sin importar en qué
+    sesión (o sin sesión, `sesion=None`, para filas reservadas de antes de
+    este fix) se hayan creado originalmente. Quien libera necesita su propio
+    turno abierto, igual que para cualquier otro cobro: si no lo tiene, NO
+    se libera nada (atómico) y se levanta `TurnoCajaError` para que el
+    llamador lo convierta en un mensaje.
+
+    No hace falta una migración de datos para las filas viejas con
+    `sesion=None`: quedan tal cual hasta que alguien con turno propio las
+    libere, momento en el que esta misma función les asigna la sesión.
+    """
+    from django.db import transaction as db_transaction
+    from .caja_turno import verificar_turno_cobro
+    sesion = verificar_turno_cobro(usuario)
+    with db_transaction.atomic():
+        CajaMovimiento.objects.filter(
+            **{referencia_field: instance},
+            via_caja=False,
+            movimiento_reverso__isnull=True,
+        ).update(via_caja=True, sesion=sesion)
+
+
+def _liberar_reservas_por_entrega(referencia_field, instance, actor):
+    """Libera las reservas (`via_caja=False`) de un servicio cuando la prenda
+    se ENTREGA (decisión del dueño, architecture/caja-pagos-reserva: la
+    reserva es efectivo guardado aparte hasta la entrega). Se asientan en la
+    sesión abierta de `actor`, que tiene que ser su dueño — igual que
+    cualquier otro cobro. Si no hay reservas pendientes no exige nada.
+
+    Se llama desde los post_save de la transición a 'entregado' (y desde
+    `registrar_pago_venta` cuando la venta pasa a efectuada), dentro de la
+    transacción de la vista: si `actor` falta o no es el dueño se levanta
+    `TurnoCajaError` y la entrega completa se revierte."""
+    hay_reservas = CajaMovimiento.objects.filter(
         **{referencia_field: instance},
         via_caja=False,
         movimiento_reverso__isnull=True,
-    ).update(via_caja=True)
+    ).exists()
+    if not hay_reservas:
+        return
+    if actor is None:
+        raise TurnoCajaError(
+            "No se puede entregar: hay pagos reservados por liberar y falta "
+            "identificar quién entrega (falta 'usuario')."
+        )
+    _liberar_pagos_reservados(referencia_field, instance, actor)
 
 
 # ============================================================
 # ALQUILER
 # ============================================================
 
-def registrar_alquiler_en_caja(instance, adelanto=Decimal('0'), forma_pago='efectivo'):
+def registrar_alquiler_en_caja(instance, adelanto=Decimal('0'), forma_pago='efectivo', *, usuario):
     """
     Registra el cobro inicial (adelanto) de un Alquiler en caja.
     Llamar explícitamente desde la vista DESPUÉS de recalcular_totales().
-    Si adelanto == 0, no crea movimiento.
+    Si adelanto == 0, no crea movimiento. `usuario` es obligatorio — lo
+    verifica `_crear_mov_auto` (choke point).
     """
     if not adelanto or adelanto <= 0:
         return
@@ -175,6 +333,7 @@ def registrar_alquiler_en_caja(instance, adelanto=Decimal('0'), forma_pago='efec
         monto=adelanto,
         forma_pago=forma_pago or 'efectivo',
         descripcion=f"Cobro inicial de alquiler #{instance.pk}",
+        usuario=usuario,
         referencia_alquiler=instance,
         cliente=getattr(instance, 'cliente', None),
     )
@@ -207,22 +366,20 @@ def registrar_pago_alquiler(alquiler, monto, forma_pago, descripcion, usuario, v
     Registra un pago parcial de alquiler en caja.
     Sin guarda de idempotencia — múltiples pagos son intencionales.
     """
-    mov = _crear_mov_auto(
+    _crear_mov_auto(
         concepto='alquiler_pago',
         monto=monto,
         forma_pago=forma_pago or 'efectivo',
         descripcion=descripcion or f"Pago de alquiler {alquiler.codigo}",
+        usuario=usuario,
         referencia_alquiler=alquiler,
         cliente=getattr(alquiler, 'cliente', None),
         via_caja=via_caja,
     )
-    if mov and usuario:
-        mov.usuario = usuario
-        mov.save(update_fields=['usuario'])
     if via_caja:
         alquiler.refresh_from_db()
         if alquiler.saldo_pendiente <= Decimal('0'):
-            _liberar_pagos_reservados('referencia_alquiler', alquiler)
+            _liberar_pagos_reservados('referencia_alquiler', alquiler, usuario)
 
 
 def registrar_recargo_alquiler(alquiler, monto, forma_pago, descripcion, usuario, via_caja=True):
@@ -231,25 +388,23 @@ def registrar_recargo_alquiler(alquiler, monto, forma_pago, descripcion, usuario
     Es un ingreso EXTRA, independiente del total/saldo del alquiler — por eso
     se excluye de _calcular_pagado_alquiler. Sin guarda de idempotencia.
     """
-    mov = _crear_mov_auto(
+    return _crear_mov_auto(
         concepto='alquiler_recargo',
         monto=monto,
         forma_pago=forma_pago or 'efectivo',
         descripcion=descripcion or f"Recargo por devolución tardía {alquiler.codigo}",
+        usuario=usuario,
         referencia_alquiler=alquiler,
         cliente=getattr(alquiler, 'cliente', None),
         via_caja=via_caja,
     )
-    if mov and usuario:
-        mov.usuario = usuario
-        mov.save(update_fields=['usuario'])
-    return mov
 
 
-def registrar_reparacion_en_caja(instance):
+def registrar_reparacion_en_caja(instance, *, usuario):
     """
     Registra el cobro de una Reparacion en caja cuando estado='entregado'.
     Llamar explícitamente desde la vista al crear una reparacion ya entregada.
+    `usuario` es obligatorio — lo verifica `_crear_mov_auto` (choke point).
     """
     if instance.estado != 'entregado':
         return
@@ -267,6 +422,7 @@ def registrar_reparacion_en_caja(instance):
         monto=total,
         forma_pago=getattr(instance, 'forma_pago', 'efectivo') or 'efectivo',
         descripcion=f"Cobro automático reparación #{instance.pk}",
+        usuario=usuario,
         referencia_reparacion=instance,
         cliente=getattr(instance, 'cliente', None),
     )
@@ -275,10 +431,11 @@ def registrar_reparacion_en_caja(instance):
 _GARANTIA_TIPOS_MONETARIOS = ('efectivo', 'qr', 'transferencia')
 
 
-def registrar_garantia_alquiler_en_caja(instance):
+def registrar_garantia_alquiler_en_caja(instance, *, usuario):
     """
     Crea el movimiento de ingreso por garantía monetaria de un alquiler (nueva creación).
-    Solo actúa si garantia_tipo es monetario y garantia_monto > 0.
+    Solo actúa si garantia_tipo es monetario y garantia_monto > 0. `usuario`
+    es obligatorio — lo verifica `_crear_mov_auto` (choke point).
     """
     instance.refresh_from_db()
     if instance.garantia_tipo not in _GARANTIA_TIPOS_MONETARIOS:
@@ -296,18 +453,45 @@ def registrar_garantia_alquiler_en_caja(instance):
         monto=instance.garantia_monto,
         forma_pago=instance.garantia_tipo,
         descripcion=f"Garantía de alquiler {instance.codigo}",
+        usuario=usuario,
         referencia_alquiler=instance,
         cliente=getattr(instance, 'cliente', None),
     )
 
 
-def _ajustar_garantia_alquiler_en_caja(instance):
+def _sesion_propia_o_error(usuario, mensaje):
+    """Devuelve la sesión abierta si existe Y le pertenece a `usuario`; si
+    no, levanta el error de turno correspondiente (`CajaSinSesionError` con
+    `mensaje` si no hay caja abierta, `TurnoCajaError` si es de otro).
+    `usuario` es siempre un usuario real: el único llamador
+    (`_ajustar_garantia_alquiler_en_caja`) ya rechaza `None` antes."""
+    sesion = _sesion_activa()
+    if sesion is None:
+        raise CajaSinSesionError(mensaje)
+    if sesion.usuario_apertura_id != usuario.id:
+        raise TurnoCajaError(
+            f'La caja abierta es de {sesion.usuario_apertura.get_username()}. '
+            'Sólo quien abrió el turno puede ajustar sus movimientos.'
+        )
+    return sesion
+
+
+def _ajustar_garantia_alquiler_en_caja(instance, *, usuario):
     """
     Sincroniza el movimiento de garantía al editar un alquiler.
     - Si la garantía pasó a no-monetaria → reversa el movimiento existente.
     - Si cambió monto o tipo → reversa el anterior y crea uno nuevo.
     - Si no cambió → no hace nada.
+
+    `usuario` es OBLIGATORIO (sin default): igual regla de dueño que
+    `_ajustar_total_en_caja` — reversar/crear el movimiento de garantía es
+    tocar la caja, y sólo el dueño de la sesión abierta puede hacerlo.
     """
+    if usuario is None:
+        raise TurnoCajaError(
+            "No se puede ajustar la garantía sin identificar quién lo hace "
+            "(falta 'usuario')."
+        )
     from django.db import transaction as db_transaction
     existing = CajaMovimiento.objects.filter(
         referencia_alquiler=instance,
@@ -323,7 +507,10 @@ def _ajustar_garantia_alquiler_en_caja(instance):
 
     if not is_monetary:
         if existing and not existing.fue_reversado:
-            sesion = _sesion_activa()
+            sesion = _sesion_propia_o_error(
+                usuario,
+                f"No se puede quitar la garantía de {instance.codigo}: no hay ninguna caja abierta.",
+            )
             with db_transaction.atomic():
                 reverso = CajaMovimiento.objects.create(
                     sesion=sesion,
@@ -335,6 +522,7 @@ def _ajustar_garantia_alquiler_en_caja(instance):
                     cliente=existing.cliente,
                     referencia_alquiler=instance,
                     descripcion=f"Garantía eliminada — {instance.codigo}",
+                    usuario=usuario,
                 )
                 existing.movimiento_reverso = reverso
                 existing.save(update_fields=['movimiento_reverso'])
@@ -345,7 +533,10 @@ def _ajustar_garantia_alquiler_en_caja(instance):
         if existing.monto == instance.garantia_monto and existing.forma_pago == forma:
             return
         # Reverse old and create new
-        sesion = _sesion_activa()
+        sesion = _sesion_propia_o_error(
+            usuario,
+            f"No se puede ajustar la garantía de {instance.codigo}: no hay ninguna caja abierta.",
+        )
         with db_transaction.atomic():
             reverso = CajaMovimiento.objects.create(
                 sesion=sesion,
@@ -357,6 +548,7 @@ def _ajustar_garantia_alquiler_en_caja(instance):
                 cliente=existing.cliente,
                 referencia_alquiler=instance,
                 descripcion=f"Ajuste garantía — {instance.codigo}",
+                usuario=usuario,
             )
             existing.movimiento_reverso = reverso
             existing.save(update_fields=['movimiento_reverso'])
@@ -366,15 +558,25 @@ def _ajustar_garantia_alquiler_en_caja(instance):
         monto=instance.garantia_monto,
         forma_pago=instance.garantia_tipo,
         descripcion=f"Garantía de alquiler {instance.codigo}",
+        usuario=usuario,
         referencia_alquiler=instance,
         cliente=getattr(instance, 'cliente', None),
     )
 
 
-def registrar_devolucion_garantia_alquiler(instance, monto_devuelto, usuario=None):
+def registrar_devolucion_garantia_alquiler(instance, monto_devuelto, usuario):
     """
     Registra la devolución de garantía al cliente como egreso.
     monto_devuelto puede ser menor al original si hay recargos aplicados.
+
+    Este es un egreso NUEVO — no la reversión de un movimiento existente —
+    así que sigue la misma regla que cualquier otro cobro: sólo el dueño de
+    la sesión abierta puede generarlo, Administrador NO exento (CRITICAL 2
+    del reporte de verificación: antes sólo se chequeaba "hay sesión
+    abierta", así que un Vendedor —que nunca puede tener turno propio—
+    igual podía sacarle plata del cajón a otro cajero al devolver una
+    garantía). `usuario` es obligatorio — lo verifica `_crear_mov_auto`
+    (choke point).
     """
     if not monto_devuelto or Decimal(str(monto_devuelto)) <= 0:
         return
@@ -384,18 +586,14 @@ def registrar_devolucion_garantia_alquiler(instance, monto_devuelto, usuario=Non
         movimiento_reverso__isnull=True,
     ).exists():
         return
-    sesion = _sesion_activa()
-    CajaMovimiento.objects.create(
-        sesion=sesion,
-        tipo='egreso',
+    _crear_mov_auto(
         concepto='garantia_devolucion',
-        origen='automatico',
+        monto=monto_devuelto,
         forma_pago=instance.garantia_tipo or 'efectivo',
-        monto=Decimal(str(monto_devuelto)),
         descripcion=f"Devolución de garantía — {instance.codigo}",
+        usuario=usuario,
         referencia_alquiler=instance,
         cliente=getattr(instance, 'cliente', None),
-        usuario=usuario,
     )
 
 
@@ -419,12 +617,13 @@ def _calcular_pagado_venta(venta):
     return ingresos - egresos
 
 
-def registrar_venta_en_caja(instance, adelanto=None):
+def registrar_venta_en_caja(instance, adelanto=None, *, usuario):
     """
     Registra el movimiento de caja al crear una Venta.
     - Si adelanto is None o adelanto >= total → cobro completo (venta_cobro), estado efectuada
     - Si 0 < adelanto < total → adelanto (venta_adelanto), estado en_proceso
     - Si adelanto == 0 → no crea movimiento, estado en_proceso
+    `usuario` es obligatorio — lo verifica `_crear_mov_auto` (choke point).
     """
     instance.refresh_from_db()
     if not instance.total or instance.total <= 0:
@@ -445,6 +644,7 @@ def registrar_venta_en_caja(instance, adelanto=None):
             monto=instance.total,
             forma_pago=getattr(instance, 'forma_pago', 'efectivo') or 'efectivo',
             descripcion=f"Cobro de venta {instance.codigo}",
+            usuario=usuario,
             referencia_venta=instance,
             cliente=getattr(instance, 'cliente', None),
         )
@@ -455,6 +655,7 @@ def registrar_venta_en_caja(instance, adelanto=None):
             monto=adelanto,
             forma_pago=getattr(instance, 'forma_pago', 'efectivo') or 'efectivo',
             descripcion=f"Adelanto de venta {instance.codigo}",
+            usuario=usuario,
             referencia_venta=instance,
             cliente=getattr(instance, 'cliente', None),
         )
@@ -470,18 +671,16 @@ def registrar_pago_venta(venta, monto, forma_pago, descripcion, usuario, via_caj
     """
     saldo = venta.saldo_pendiente
     concepto = 'venta_saldo' if monto >= saldo else 'venta_pago'
-    mov = _crear_mov_auto(
+    _crear_mov_auto(
         concepto=concepto,
         monto=monto,
         forma_pago=forma_pago or 'efectivo',
         descripcion=descripcion or f"Pago de venta {venta.codigo}",
+        usuario=usuario,
         referencia_venta=venta,
         cliente=getattr(venta, 'cliente', None),
         via_caja=via_caja,
     )
-    if mov and usuario:
-        mov.usuario = usuario
-        mov.save(update_fields=['usuario'])
     venta.refresh_from_db()
     nuevo_saldo = venta.saldo_pendiente
     if nuevo_saldo <= Decimal('0') and venta.estado != 'efectuada':
@@ -492,16 +691,26 @@ def registrar_pago_venta(venta, monto, forma_pago, descripcion, usuario, via_caj
             if pi and pi.estado == 'reservado':
                 pi.estado = 'baja'
                 pi.save(update_fields=['estado'])
+        # Efectuada = entregada: las reservas dejan de estar apartadas.
+        _liberar_reservas_por_entrega('referencia_venta', venta, usuario)
     if via_caja and nuevo_saldo <= Decimal('0'):
-        _liberar_pagos_reservados('referencia_venta', venta)
+        _liberar_pagos_reservados('referencia_venta', venta, usuario)
 
 
 @receiver(post_save, sender=Venta)
 def venta_to_caja(sender, instance, created, **kwargs):
-    """Fallback signal — sólo aplica si total ya está fijado al momento de crear."""
+    """Fallback signal — sólo aplica si total ya está fijado al momento de
+    crear (en la práctica, `crear_venta` NO cobra el total automáticamente:
+    el cobro real viene de `_registrar_pagos_venta` -> `registrar_pago_venta`,
+    que ya threadea `usuario` explícitamente). Este camino sólo se dispara
+    hoy desde creaciones directas por ORM (factories de test, admin, shell) —
+    por eso el actor se lee de `_actor_caja` (mismo patrón que
+    `reparacion_to_caja`/`confeccion_to_caja`) y, si falta, `_crear_mov_auto`
+    corta con `TurnoCajaError` en vez de escribir sin dueño."""
     if not created:
         return
-    registrar_venta_en_caja(instance)
+    actor = getattr(instance, '_actor_caja', None)
+    registrar_venta_en_caja(instance, usuario=actor)
 
 
 # ============================================================
@@ -560,22 +769,20 @@ def registrar_pago_confeccion(confeccion, monto, forma_pago, descripcion, usuari
     """Registra un pago parcial de confección en caja.
     Sin guarda de idempotencia — múltiples pagos son intencionales.
     """
-    mov = _crear_mov_auto(
+    _crear_mov_auto(
         concepto='confeccion_pago',
         monto=monto,
         forma_pago=forma_pago or 'efectivo',
         descripcion=descripcion or f"Pago de confección {confeccion.codigo}",
+        usuario=usuario,
         referencia_confeccion=confeccion,
         cliente=getattr(confeccion, 'cliente', None),
         via_caja=via_caja,
     )
-    if mov and usuario:
-        mov.usuario = usuario
-        mov.save(update_fields=['usuario'])
     if via_caja:
         confeccion.refresh_from_db()
         if confeccion.saldo_pendiente <= Decimal('0'):
-            _liberar_pagos_reservados('referencia_confeccion', confeccion)
+            _liberar_pagos_reservados('referencia_confeccion', confeccion, usuario)
 
 
 @receiver(post_save, sender=Confeccion)
@@ -584,7 +791,18 @@ def confeccion_to_caja(sender, instance, created, **kwargs):
     CAUTO-03: Adelanto al crear (si adelanto > 0) o al incrementar adelanto.
     CAUTO-04: Saldo al transitar a estado='entregado'.
     CAUTO-06: Idempotency.
+
+    Ninguna de las dos ramas de acá abajo es alcanzable hoy desde
+    crear_confeccion/editar_confeccion (el adelanto real se registra por
+    `_registrar_pagos_confeccion` -> `registrar_pago_confeccion`, que no
+    toca el campo `adelanto`; ver comentario en `editar_confeccion`/
+    `entregar_confeccion` para la rama de saldo). Se mantienen por
+    compatibilidad con ORM directo (tests, admin, shell), así que el actor
+    se lee de `_actor_caja` igual que en `reparacion_to_caja`: si falta,
+    `_crear_mov_auto` corta con `TurnoCajaError` en vez de escribir sin
+    dueño.
     """
+    actor = getattr(instance, '_actor_caja', None)
     forma = getattr(instance, 'forma_pago', 'efectivo') or 'efectivo'
     cliente = getattr(instance, 'cliente', None)
 
@@ -603,6 +821,7 @@ def confeccion_to_caja(sender, instance, created, **kwargs):
                 monto=nuevo_adelanto,
                 forma_pago=forma,
                 descripcion=f"Adelanto automático confección #{instance.pk}",
+                usuario=actor,
                 referencia_confeccion=instance,
                 cliente=cliente,
             )
@@ -613,6 +832,7 @@ def confeccion_to_caja(sender, instance, created, **kwargs):
             monto=delta,
             forma_pago=forma,
             descripcion=f"Incremento de adelanto confección #{instance.pk} (+Bs {delta})",
+            usuario=actor,
             referencia_confeccion=instance,
             cliente=cliente,
         )
@@ -623,6 +843,7 @@ def confeccion_to_caja(sender, instance, created, **kwargs):
             monto=delta,
             forma_pago=forma,
             descripcion=f"Reducción de adelanto confección #{instance.pk} (-Bs {delta})",
+            usuario=actor,
             referencia_confeccion=instance,
             cliente=cliente,
         )
@@ -646,9 +867,12 @@ def confeccion_to_caja(sender, instance, created, **kwargs):
                     monto=saldo_pendiente,
                     forma_pago=forma,
                     descripcion=f"Saldo final confección #{instance.pk}",
+                    usuario=actor,
                     referencia_confeccion=instance,
                     cliente=cliente,
                 )
+        # Entrega = fin de la reserva: se asientan en la sesión de quien entrega.
+        _liberar_reservas_por_entrega('referencia_confeccion', instance, actor)
 
 
 # ============================================================
@@ -687,22 +911,20 @@ def _calcular_saldo_reparacion(reparacion):
 
 
 def registrar_pago_reparacion(reparacion, monto, forma_pago, descripcion, usuario, via_caja=True):
-    mov = _crear_mov_auto(
+    _crear_mov_auto(
         concepto='reparacion_pago',
         monto=monto,
         forma_pago=forma_pago or 'efectivo',
         descripcion=descripcion or f"Pago de reparación {reparacion.codigo}",
+        usuario=usuario,
         referencia_reparacion=reparacion,
         cliente=getattr(reparacion, 'cliente', None),
         via_caja=via_caja,
     )
-    if mov and usuario:
-        mov.usuario = usuario
-        mov.save(update_fields=['usuario'])
     if via_caja:
         reparacion.refresh_from_db()
         if reparacion.saldo_pendiente <= Decimal('0'):
-            _liberar_pagos_reservados('referencia_reparacion', reparacion)
+            _liberar_pagos_reservados('referencia_reparacion', reparacion, usuario)
 
 
 def registrar_pago_comision_empleado(empleado, monto, forma_pago, via_caja, descripcion, usuario, aplicaciones=None):
@@ -742,16 +964,21 @@ def registrar_pago_comision_empleado(empleado, monto, forma_pago, via_caja, desc
                 **{ap['fk_field']: ap['asignacion']},
             )
         if via_caja:
-            mov = _crear_mov_auto(
+            # CRITICAL 1 (tercera vuelta de sdd-verify): esta era la única
+            # llamada a `_crear_mov_auto` en todo el módulo que NO threadeaba
+            # `usuario` — un Administrador podía pagar una comisión con
+            # "Registrar en caja" tildado y el egreso se escribía en la caja
+            # de OTRO cajero (o, sin ninguna sesión abierta, la vista
+            # reventaba con un 500 porque `CajaSinSesionError` no estaba
+            # contemplada). Ahora el choke point lo exige y lo verifica.
+            _crear_mov_auto(
                 concepto='comision_empleado',
                 monto=monto,
                 forma_pago=forma_pago or 'efectivo',
                 descripcion=descripcion or f"Comisión {empleado} ({pago.codigo})",
+                usuario=usuario,
                 referencia_pago_comision=pago,
             )
-            if mov and usuario:
-                mov.usuario = usuario
-                mov.save(update_fields=['usuario'])
     return pago
 
 
@@ -766,9 +993,18 @@ def reparacion_to_caja(sender, instance, created, **kwargs):
         return
     old_estado = getattr(instance, '_old_estado', None)
 
-    # Regresión: 'entregado' → otro estado
+    # Regresión: 'entregado' → otro estado. `_actor_caja` lo estampa
+    # `editar_reparacion` en la instancia ANTES de guardar (mismo patrón que
+    # `_old_estado`) para que el reverso automático de acá respete la regla
+    # de turno (dueño o Administrador) igual que cualquier otra reversión —
+    # sin esto, cualquiera con permiso para cambiar el estado podía escribir
+    # el egreso `anulacion_cobro` en la caja de quien tuviera el turno
+    # abierto, sin importar si era la suya.
+    actor = getattr(instance, '_actor_caja', None)
     if old_estado == 'entregado' and instance.estado != 'entregado':
-        _reversar_movimientos_activos(referencia_field='referencia_reparacion', instance=instance)
+        _reversar_movimientos_activos(
+            referencia_field='referencia_reparacion', instance=instance, usuario=actor,
+        )
         return
 
     # Transición GENUINA: otro estado → 'entregado'.
@@ -778,6 +1014,13 @@ def reparacion_to_caja(sender, instance, created, **kwargs):
     # guard se generaban DOS movimientos (reparacion_saldo + reparacion_cobro).
     if instance.estado != 'entregado' or old_estado == 'entregado':
         return
+    _cobrar_saldo_al_entregar_reparacion(instance, actor)
+    # Entrega = fin de la reserva: se asientan en la sesión de quien entrega
+    # (exista o no saldo por cobrar).
+    _liberar_reservas_por_entrega('referencia_reparacion', instance, actor)
+
+
+def _cobrar_saldo_al_entregar_reparacion(instance, actor):
     # Idempotencia: ya existe cobro o saldo final
     if CajaMovimiento.objects.filter(
         referencia_reparacion=instance,
@@ -788,9 +1031,14 @@ def reparacion_to_caja(sender, instance, created, **kwargs):
     saldo = _calcular_saldo_reparacion(instance)
     if saldo <= 0:
         return
+    # Genuine 'entregado' con saldo>0: necesita el mismo actor que la
+    # regresión (`editar_reparacion`/`marcar_entregado` lo estampan en
+    # `_actor_caja` antes de guardar); si falta, `_crear_mov_auto` corta con
+    # TurnoCajaError en vez de escribir sin dueño.
     _crear_mov_auto(
         concepto='reparacion_saldo',
         monto=saldo,
+        usuario=actor,
         forma_pago=getattr(instance, 'forma_pago', 'efectivo') or 'efectivo',
         descripcion=f"Saldo final reparación {instance.codigo}",
         referencia_reparacion=instance,

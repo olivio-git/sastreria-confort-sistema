@@ -8,6 +8,18 @@ from misastreria.models import CajaMovimiento, Reparacion
 
 
 class Command(BaseCommand):
+    """Excepción DOCUMENTADA al choke point de caja
+    (architecture/caja-ownership-chokepoint): escribe `CajaMovimiento` con
+    `sesion=None` y `usuario=None` a propósito — son cobros HISTÓRICOS de
+    reparaciones que ya estaban entregadas ANTES de que existiera el módulo
+    de caja, así que no hay ninguna sesión real ni ningún usuario a quien
+    atribuírselos sin inventar un dato falso. No usa `_crear_mov_auto`
+    (que exige sesión+dueño) porque este backfill es exactamente el caso
+    "no hay dueño real, y está bien que no lo haya". Sólo lo puede correr
+    quien tenga acceso de shell al servidor — el mismo nivel de confianza
+    que Django admin/superusuario, ya cubierto como excepción en
+    `caja_signals._reversar_movimientos_activos_sistema`."""
+
     help = (
         'Backfill CajaMovimiento de cobro para reparaciones entregadas '
         'creadas antes del módulo de caja. Idempotente.'

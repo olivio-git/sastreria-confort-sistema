@@ -26,6 +26,16 @@
 
     <form method="post" id="alquilerForm">
       {% csrf_token %}
+      {% if not caja_turno_propio %}
+      <div class="alert alert-warning d-flex align-items-center gap-2 mb-3" role="alert">
+        <i data-lucide="lock" style="width:1rem;height:1rem;flex-shrink:0"></i>
+        <span>
+          <strong>No tenés un turno de caja propio abierto.</strong>
+          El adelanto o la garantía en efectivo/QR/transferencia se van a
+          rechazar hasta que abras tu turno.
+        </span>
+      </div>
+      {% endif %}
       <input type="hidden" name="items_disposition" id="items_disposition" value="disponible">
 
       <!-- Cabecera del alquiler -->

@@ -13,7 +13,6 @@ from decimal import Decimal
 
 from django.test import TestCase, Client
 from django.urls import reverse
-from django.contrib.auth.models import User
 
 from misastreria.models import (
     Empleado, Cliente, Reparacion, Confeccion, Alquiler,
@@ -22,15 +21,19 @@ from misastreria.models import (
 from .factories import (
     make_empleado, make_cliente, make_reparacion, make_confeccion,
     make_alquiler, make_prenda, make_prenda_item,
-    make_tipo_prenda, make_tipo_reparacion,
+    make_tipo_prenda, make_tipo_reparacion, make_user, make_sesion_caja,
+    desbloquear_caja_test,
 )
 
 
 class BaseViewTest(TestCase):
     def setUp(self):
-        self.user = User.objects.create_user('cruduser', password='pass123')
+        self.user = make_user(username='cruduser', password='pass123')
         self.client = Client()
         self.client.force_login(self.user)
+        # Vistas /caja/* exigen PIN (Fase 5); desbloqueado acá para que las
+        # demás pruebas CRUD de este archivo no tengan que saberlo.
+        desbloquear_caja_test(self.client, self.user)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -138,6 +141,10 @@ class ReparacionViewTests(BaseViewTest):
         self.assertEqual(rep.estado, 'en_proceso')
 
     def test_marcar_entregado_post(self):
+        # Saldo pendiente > 0: entregar cobra el saldo, así que hace falta
+        # el propio turno de caja abierto (regla: quien entrega con saldo
+        # pendiente necesita poder cobrarlo).
+        make_sesion_caja(usuario=self.user)
         rep = make_reparacion()
         resp = self.client.post(reverse('marcar_entregado', kwargs={'id': rep.pk}))
         self.assertIn(resp.status_code, (302, 200))
@@ -148,6 +155,7 @@ class ReparacionViewTests(BaseViewTest):
         """El cobro del saldo al entregar debe usar la forma de pago elegida (QR),
         no el default efectivo. Regresión del bug 'aparece en efectivo'."""
         from misastreria.models import CajaMovimiento
+        make_sesion_caja(usuario=self.user)
         rep = make_reparacion(total=Decimal('40.00'))
         self.client.post(
             reverse('marcar_entregado', kwargs={'id': rep.pk}),
@@ -186,6 +194,8 @@ class ConfeccionViewTests(BaseViewTest):
         self.assertEqual(c.estado, 'en_proceso')
 
     def test_entregar_confeccion_post(self):
+        # Saldo pendiente > 0: entregar cobra el saldo, hace falta turno propio.
+        make_sesion_caja(usuario=self.user)
         c = make_confeccion()
         resp = self.client.post(reverse('entregar_confeccion', kwargs={'id': c.pk}))
         self.assertIn(resp.status_code, (302, 200))

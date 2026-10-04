@@ -4,11 +4,13 @@ test_views_auth.py
 Verifica que todas las vistas protegidas redirigen a /login/ cuando
 el usuario no está autenticado.
 
-Las vistas públicas (buscar_clientes, buscar_empleados) se verifican
-por separado (deben responder 200 sin login).
+`buscar_clientes` ya NO es pública (spec roles-permisos: requiere login +
+al menos un permiso operativo) — se verifica en `BuscarClientesTests`.
 """
 from django.test import TestCase, Client
 from django.urls import reverse
+
+from .factories import make_user, desbloquear_caja_test
 
 
 # URLs que requieren login — (url_name, kwargs o None)
@@ -47,6 +49,7 @@ PROTECTED_URLS = [
     ('reporte_confecciones', None),
     ('reporte_alquileres',  None),
     ('resumen_caja',        None),
+    ('buscar_clientes',     None),
 ]
 
 
@@ -87,22 +90,25 @@ class ProtectedViewsRequireLoginTests(TestCase):
             )
 
 
-class PublicEndpointsTests(TestCase):
+class BuscarClientesTests(TestCase):
     """
-    Algunos endpoints AJAX no requieren login (diseño intencional
-    para permitir autocomplete desde formularios).
+    buscar_clientes requiere login + al menos un permiso operativo
+    (spec: "buscar_clientes no longer public").
     """
 
     def setUp(self):
         self.client = Client()
 
-    def test_buscar_clientes_sin_login_responde(self):
-        """buscar_clientes no tiene @login_required — debe responder 200."""
+    def test_sin_login_redirige(self):
         resp = self.client.get(reverse('buscar_clientes') + '?q=test')
-        self.assertEqual(resp.status_code, 200)
+        self.assertIn(resp.status_code, (301, 302))
+        self.assertIn('login', resp.get('Location', ''))
 
-    def test_buscar_clientes_devuelve_json(self):
+    def test_con_login_y_permiso_devuelve_json(self):
+        from .factories import make_user
+        self.client.force_login(make_user())
         resp = self.client.get(reverse('buscar_clientes') + '?q=')
+        self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp['Content-Type'], 'application/json')
 
 
@@ -110,10 +116,10 @@ class AuthenticatedListViewsTests(TestCase):
     """Vistas de lista devuelven 200 cuando el usuario está autenticado."""
 
     def setUp(self):
-        from django.contrib.auth.models import User
-        self.user = User.objects.create_user('testviews', password='pass123')
+        self.user = make_user(username='testviews', password='pass123')
         self.client = Client()
         self.client.force_login(self.user)
+        desbloquear_caja_test(self.client, self.user)
 
     def _assert_200(self, url_name, kwargs=None):
         url = reverse(url_name, kwargs=kwargs or {})

@@ -1,5 +1,5 @@
 from django.urls import path
-from . import views, views_etiquetas
+from . import views, views_etiquetas, views_usuarios
 from django.contrib.auth.views import LoginView, LogoutView
 from django.views.generic import RedirectView
 
@@ -179,6 +179,10 @@ urlpatterns = [
     path('caja/sesiones/<int:pk>/', views.detalle_sesion_caja, name='detalle_sesion_caja'),
     path('caja/sesiones/<int:pk>/excel/', views.export_detalle_sesion_excel, name='export_detalle_sesion_excel'),
     path('caja/sesiones/<int:pk>/cerrar/', views.cerrar_sesion_caja, name='cerrar_sesion_caja'),
+    # Caja — PIN de desbloqueo (exentas del propio gate, ver middleware.py)
+    path('caja/pin/configurar/', views.configurar_pin_caja, name='configurar_pin_caja'),
+    path('caja/pin/desbloquear/', views.desbloquear_caja, name='desbloquear_caja'),
+    path('caja/pin/bloquear/', views.bloquear_caja, name='bloquear_caja'),
     # Caja — resumen y exports
     path('caja/resumen/', views.resumen_caja, name='resumen_caja'),
     path('caja/resumen/pdf/', views.export_resumen_caja_pdf, name='export_resumen_caja_pdf'),
@@ -206,4 +210,11 @@ urlpatterns = [
     path('analitica/comparativas/', views.analitica_comparativas, name='analitica_comparativas'),
     path('analitica/estacionalidad/', views.estacionalidad, name='analitica_estacionalidad'),
     path('analitica/prendas-temporada/', views.prendas_temporada, name='analitica_prendas_temporada'),
+    # Usuarios (Administrador)
+    path('usuarios/', views_usuarios.lista_usuarios, name='lista_usuarios'),
+    path('usuarios/crear/', views_usuarios.crear_usuario, name='crear_usuario'),
+    path('usuarios/<int:pk>/editar/', views_usuarios.editar_usuario, name='editar_usuario'),
+    path('usuarios/<int:pk>/permisos/', views_usuarios.permisos_usuario, name='permisos_usuario'),
+    path('usuarios/<int:pk>/resetear-pin/', views_usuarios.resetear_pin_usuario, name='resetear_pin_usuario'),
+    path('usuarios/<int:pk>/toggle-activo/', views_usuarios.toggle_activo_usuario, name='toggle_activo_usuario'),
 ]

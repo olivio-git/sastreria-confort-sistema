@@ -8,6 +8,11 @@ from misastreria.models import CajaMovimiento, Confeccion
 
 
 class Command(BaseCommand):
+    """Excepción DOCUMENTADA al choke point de caja — ver el docstring
+    equivalente en `backfill_reparacion_cobros`: `sesion=None`/`usuario=None`
+    a propósito (adelantos históricos anteriores al módulo de pagos de
+    confección, sólo ejecutable con acceso de shell al servidor)."""
+
     help = (
         'Backfill CajaMovimiento de adelanto para confecciones creadas antes de pagos-confeccion. '
         'Idempotente: salta confecciones que ya tienen movimiento confeccion_adelanto.'

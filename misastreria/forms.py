@@ -10,8 +10,12 @@ from .models import (
     TipoGasto, CajaSesion, CajaMovimiento, FORMA_PAGO_CHOICES,
     Conjunto, ConjuntoSlot,
 )
+from .models import es_ultimo_administrador_activo
 from django.forms import DateInput, inlineformset_factory
 from django.core.exceptions import ValidationError
+from django.db.models import Q
+from django.contrib.auth.models import User
+from . import roles as _roles
 
 
 COUNTRY_CODE_CHOICES = [
@@ -118,15 +122,71 @@ class EmpleadoForm(forms.ModelForm):
             'fecha_baja': 'Completar solo si el empleado ya no trabaja aquí. Deja en blanco si sigue activo.',
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, actor=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['tipo_contrato'].required = False
+        self.actor = actor
+        self._baja_original = self.instance.fecha_baja if self.instance.pk else None
+        # La baja de un Empleado con usuario vinculado desactiva a ese usuario:
+        # es gestión de usuarios. Sin `gestionar_usuarios` el campo se muestra
+        # deshabilitado (Django ignora lo que llegue por POST y conserva el
+        # valor actual). Sin `actor` se falla cerrado.
+        self._user_original_id = self.instance.user_id if self.instance.pk else None
+        puede_gestionar = actor is not None and actor.has_perm('misastreria.gestionar_usuarios')
+        self.baja_bloqueada = bool(
+            self.instance.pk and self.instance.user_id and not puede_gestionar
+        )
+        if self.baja_bloqueada:
+            self.fields['fecha_baja'].disabled = True
+            self.fields['fecha_baja'].help_text = (
+                'Este empleado tiene usuario del sistema: sólo quien gestiona '
+                'usuarios puede darlo de baja o reactivarlo.'
+            )
+        # Vincular o desvincular el usuario también es gestión de usuarios:
+        # vincular a un Empleado ya dado de baja desactiva a ese usuario.
+        # (La app no expone `user` en este form; el admin de Django sí.)
+        if 'user' in self.fields and not puede_gestionar:
+            self.fields['user'].disabled = True
 
     def clean_celular(self):
         celular = self.cleaned_data.get('celular', '').strip()
         if celular and not celular.startswith('+'):
             celular = '+591' + celular
         return celular
+
+    def clean(self):
+        cleaned = super().clean()
+        # Se valida con el usuario NUEVO (`cleaned_data['user']`) y la baja
+        # NUEVA: `self.instance` todavía tiene los valores viejos, porque el
+        # ModelForm recién los vuelca en `_post_clean`, después de `clean()`
+        # (verify ronda 7, W1: vincular al último Administrador y dar la baja
+        # en el mismo guardado reventaba con un 500).
+        if 'fecha_baja' not in cleaned:
+            return cleaned
+        if 'user' in self.fields:
+            if 'user' not in cleaned:
+                return cleaned
+            nuevo_user = cleaned['user']
+        else:
+            nuevo_user = self.instance.user if self.instance.user_id else None
+        if nuevo_user is None:
+            return cleaned
+        nueva = cleaned.get('fecha_baja')
+        baja_cambio = nueva != self._baja_original
+        user_cambio = nuevo_user.pk != self._user_original_id
+        if not (baja_cambio or user_cambio):
+            return cleaned
+        campo = 'user' if user_cambio and 'user' in self.fields else 'fecha_baja'
+        if self.actor is not None and nuevo_user.pk == self.actor.pk and (
+            baja_cambio or (user_cambio and nueva)
+        ):
+            self.add_error(campo, "No podés dar de baja ni reactivar tu propio usuario.")
+        elif nueva and es_ultimo_administrador_activo(nuevo_user):
+            self.add_error(
+                campo,
+                "No se puede dar de baja: su usuario es el último Administrador activo.",
+            )
+        return cleaned
 
 class PermisoForm(forms.ModelForm):
     class Meta:
@@ -1102,3 +1162,119 @@ class ConjuntoSlotInlineForm(forms.ModelForm):
 ConjuntoSlotFormSet = inlineformset_factory(
     Conjunto, ConjuntoSlot, form=ConjuntoSlotInlineForm, extra=0, can_delete=True,
 )
+
+
+# ============================================================
+# Caja — PIN de desbloqueo (PC compartida del mostrador)
+# ============================================================
+
+_PIN_WIDGET = forms.TextInput(attrs={
+    'class': 'form-control', 'inputmode': 'numeric', 'pattern': r'\d{4,6}',
+    'maxlength': '6', 'autocomplete': 'off',
+})
+
+
+class ConfigurarPinForm(forms.Form):
+    """Exige la contraseña de la cuenta además del PIN nuevo (dos veces): en
+    una PC compartida, cualquiera que la encuentre desbloqueada podría fijar
+    un PIN a nombre de otro usuario si sólo pidiéramos el PIN."""
+    password = forms.CharField(
+        label='Tu contraseña',
+        widget=forms.PasswordInput(attrs={'class': 'form-control', 'autocomplete': 'current-password'}),
+    )
+    pin = forms.RegexField(
+        regex=r'^\d{4,6}$',
+        label='PIN nuevo (4 a 6 dígitos)',
+        widget=_PIN_WIDGET,
+        error_messages={'invalid': 'El PIN debe tener entre 4 y 6 dígitos.'},
+    )
+    pin2 = forms.RegexField(
+        regex=r'^\d{4,6}$',
+        label='Repetí el PIN',
+        widget=_PIN_WIDGET,
+        error_messages={'invalid': 'El PIN debe tener entre 4 y 6 dígitos.'},
+    )
+
+    def __init__(self, *args, user=None, **kwargs):
+        self.user = user
+        super().__init__(*args, **kwargs)
+
+    def clean_password(self):
+        password = self.cleaned_data['password']
+        if not self.user or not self.user.check_password(password):
+            raise ValidationError('Contraseña incorrecta.')
+        return password
+
+    def clean(self):
+        cleaned = super().clean()
+        pin, pin2 = cleaned.get('pin'), cleaned.get('pin2')
+        if pin and pin2 and pin != pin2:
+            self.add_error('pin2', 'Los dos PIN no coinciden.')
+        return cleaned
+
+
+class DesbloquearPinForm(forms.Form):
+    pin = forms.CharField(
+        label='PIN',
+        widget=_PIN_WIDGET,
+    )
+
+
+# ============================================================
+# Gestión de usuarios (pantalla de Administrador)
+# ============================================================
+
+ROL_CHOICES = [(nombre, nombre) for nombre in _roles.ROLES]
+
+
+class CrearUsuarioForm(forms.Form):
+    username = forms.CharField(
+        label='Usuario', max_length=150,
+        widget=forms.TextInput(attrs={'class': 'form-control', 'autocomplete': 'off'}),
+    )
+    password = forms.CharField(
+        label='Contraseña inicial',
+        widget=forms.PasswordInput(attrs={'class': 'form-control', 'autocomplete': 'new-password'}),
+        min_length=8,
+    )
+    # MultipleChoiceField (no ChoiceField): el personal de mostrador suele
+    # necesitar más de un rol a la vez (ej. Cajero + Vendedor para poder
+    # cobrar Y vender) — un select de uno solo no alcanza para expresar eso
+    # (WARNING 5 del reporte de verificación).
+    roles = forms.MultipleChoiceField(
+        label='Roles', choices=ROL_CHOICES,
+        widget=forms.CheckboxSelectMultiple(attrs={'class': 'form-check-input'}),
+    )
+    empleado = forms.ModelChoiceField(
+        label='Empleado vinculado', queryset=Empleado.objects.filter(user__isnull=True),
+        required=False, empty_label='(Sin vincular)',
+        widget=forms.Select(attrs={'class': 'form-select'}),
+    )
+
+    def clean_username(self):
+        username = self.cleaned_data['username'].strip()
+        if User.objects.filter(username=username).exists():
+            raise ValidationError('Ya existe un usuario con ese nombre.')
+        return username
+
+
+class EditarUsuarioForm(forms.Form):
+    roles = forms.MultipleChoiceField(
+        label='Roles', choices=ROL_CHOICES,
+        widget=forms.CheckboxSelectMultiple(attrs={'class': 'form-check-input'}),
+    )
+    empleado = forms.ModelChoiceField(
+        label='Empleado vinculado', queryset=Empleado.objects.none(),
+        required=False, empty_label='(Sin vincular)',
+        widget=forms.Select(attrs={'class': 'form-select'}),
+    )
+
+    def __init__(self, *args, user_obj=None, **kwargs):
+        self.user_obj = user_obj
+        super().__init__(*args, **kwargs)
+        # El empleado ya vinculado a ESTE usuario debe seguir apareciendo en
+        # el select (si no, el ModelChoiceField lo rechazaría al re-guardar
+        # sin cambios), además de los que están libres.
+        self.fields['empleado'].queryset = Empleado.objects.filter(
+            Q(user__isnull=True) | Q(user=user_obj)
+        ) if user_obj else Empleado.objects.filter(user__isnull=True)

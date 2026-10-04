@@ -18,7 +18,7 @@ Módulos probados:
 from decimal import Decimal
 from datetime import date, timedelta
 
-from django.test import TestCase
+from django.test import TestCase, skipUnlessDBFeature
 from django.db import IntegrityError
 
 from misastreria.caja_signals import (
@@ -36,13 +36,16 @@ from misastreria.caja_signals import (
     _calcular_pagado_venta,
     _ajustar_total_en_caja,
     _reversar_movimientos_activos,
+    _reversar_movimientos_activos_sistema,
 )
+from misastreria.caja_turno import CajaSinSesionError, TurnoCajaError
 from misastreria.models import CajaMovimiento, Alquiler, Reparacion, Confeccion, Venta
 from .factories import (
     make_user, make_alquiler, make_alquiler_item, make_prenda_item,
     make_reparacion, make_reparacion_item,
     make_confeccion, make_venta, make_prenda,
     make_sesion_caja, make_cliente, make_empleado,
+    make_cajero, make_vendedor, make_administrador,
 )
 
 
@@ -74,16 +77,17 @@ class RegistrarAlquilerEnCajaTests(TestCase):
 
     def setUp(self):
         self.sesion = make_sesion_caja()
+        self.user = self.sesion.usuario_apertura
         self.alquiler = make_alquiler(total=Decimal('300.00'))
 
     def test_adelanto_cero_no_crea_movimiento(self):
-        registrar_alquiler_en_caja(self.alquiler, adelanto=Decimal('0'))
+        registrar_alquiler_en_caja(self.alquiler, adelanto=Decimal('0'), usuario=self.user)
         self.assertEqual(
             _movs_activos(alquiler=self.alquiler, concepto='alquiler_cobro').count(), 0
         )
 
     def test_adelanto_positivo_crea_movimiento(self):
-        registrar_alquiler_en_caja(self.alquiler, adelanto=Decimal('150.00'))
+        registrar_alquiler_en_caja(self.alquiler, adelanto=Decimal('150.00'), usuario=self.user)
         movs = _movs_activos(alquiler=self.alquiler, concepto='alquiler_cobro')
         self.assertEqual(movs.count(), 1)
         self.assertEqual(movs.first().monto, Decimal('150.00'))
@@ -91,26 +95,28 @@ class RegistrarAlquilerEnCajaTests(TestCase):
 
     def test_idempotente_no_crea_duplicado(self):
         """Llamar dos veces con mismo alquiler no duplica el movimiento."""
-        registrar_alquiler_en_caja(self.alquiler, adelanto=Decimal('100.00'))
-        registrar_alquiler_en_caja(self.alquiler, adelanto=Decimal('100.00'))
+        registrar_alquiler_en_caja(self.alquiler, adelanto=Decimal('100.00'), usuario=self.user)
+        registrar_alquiler_en_caja(self.alquiler, adelanto=Decimal('100.00'), usuario=self.user)
         self.assertEqual(
             _movs_activos(alquiler=self.alquiler, concepto='alquiler_cobro').count(), 1
         )
 
     def test_adelanto_negativo_no_crea_movimiento(self):
-        registrar_alquiler_en_caja(self.alquiler, adelanto=Decimal('-50.00'))
+        registrar_alquiler_en_caja(self.alquiler, adelanto=Decimal('-50.00'), usuario=self.user)
         self.assertEqual(
             _movs_activos(alquiler=self.alquiler, concepto='alquiler_cobro').count(), 0
         )
 
-    def test_sin_sesion_abierta_crea_movimiento_sin_sesion(self):
-        """Sin sesión activa, el movimiento se crea con sesion=None."""
+    def test_sin_sesion_abierta_rechaza_el_cobro(self):
+        """Sin sesión activa, NO se crea un movimiento huérfano (sesion=None)
+        — se corta con CajaSinSesionError (fix del bug de movimientos
+        huérfanos; antes esto silenciosamente creaba el movimiento igual)."""
         self.sesion.estado = 'cerrada'
         self.sesion.save()
-        registrar_alquiler_en_caja(self.alquiler, adelanto=Decimal('50.00'))
+        with self.assertRaises(CajaSinSesionError):
+            registrar_alquiler_en_caja(self.alquiler, adelanto=Decimal('50.00'), usuario=self.user)
         mov = _movs_activos(alquiler=self.alquiler, concepto='alquiler_cobro').first()
-        self.assertIsNotNone(mov)
-        self.assertIsNone(mov.sesion)
+        self.assertIsNone(mov)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -121,13 +127,14 @@ class RegistrarGarantiaAlquilerTests(TestCase):
 
     def setUp(self):
         self.sesion = make_sesion_caja()
+        self.user = self.sesion.usuario_apertura
 
     def test_garantia_efectivo_crea_movimiento(self):
         alquiler = make_alquiler(
             garantia_tipo='efectivo',
             garantia_monto=Decimal('500.00'),
         )
-        registrar_garantia_alquiler_en_caja(alquiler)
+        registrar_garantia_alquiler_en_caja(alquiler, usuario=self.user)
         movs = _movs_activos(alquiler=alquiler, concepto='garantia_alquiler')
         self.assertEqual(movs.count(), 1)
         self.assertEqual(movs.first().monto, Decimal('500.00'))
@@ -140,14 +147,14 @@ class RegistrarGarantiaAlquilerTests(TestCase):
             garantia_monto=Decimal('500.00'),
             garantia='Presenta DNI',
         )
-        registrar_garantia_alquiler_en_caja(alquiler)
+        registrar_garantia_alquiler_en_caja(alquiler, usuario=self.user)
         self.assertEqual(
             _movs_activos(alquiler=alquiler, concepto='garantia_alquiler').count(), 0
         )
 
     def test_garantia_tipo_vacio_no_crea_movimiento(self):
         alquiler = make_alquiler(garantia_tipo='', garantia_monto=None)
-        registrar_garantia_alquiler_en_caja(alquiler)
+        registrar_garantia_alquiler_en_caja(alquiler, usuario=self.user)
         self.assertEqual(
             _movs_activos(alquiler=alquiler, concepto='garantia_alquiler').count(), 0
         )
@@ -157,7 +164,7 @@ class RegistrarGarantiaAlquilerTests(TestCase):
             garantia_tipo='efectivo',
             garantia_monto=Decimal('0'),
         )
-        registrar_garantia_alquiler_en_caja(alquiler)
+        registrar_garantia_alquiler_en_caja(alquiler, usuario=self.user)
         self.assertEqual(
             _movs_activos(alquiler=alquiler, concepto='garantia_alquiler').count(), 0
         )
@@ -167,8 +174,8 @@ class RegistrarGarantiaAlquilerTests(TestCase):
             garantia_tipo='qr',
             garantia_monto=Decimal('200.00'),
         )
-        registrar_garantia_alquiler_en_caja(alquiler)
-        registrar_garantia_alquiler_en_caja(alquiler)  # segunda llamada
+        registrar_garantia_alquiler_en_caja(alquiler, usuario=self.user)
+        registrar_garantia_alquiler_en_caja(alquiler, usuario=self.user)  # segunda llamada
         self.assertEqual(
             _movs_activos(alquiler=alquiler, concepto='garantia_alquiler').count(), 1
         )
@@ -203,7 +210,7 @@ class PagosAlquilerTests(TestCase):
         self.assertEqual(movs.count(), 3)
 
     def test_calcular_pagado_alquiler_suma_correcta(self):
-        registrar_alquiler_en_caja(self.alquiler, adelanto=Decimal('200.00'))
+        registrar_alquiler_en_caja(self.alquiler, adelanto=Decimal('200.00'), usuario=self.user)
         registrar_pago_alquiler(self.alquiler, Decimal('100'), 'efectivo', 'P2', self.user)
         total_pagado = _calcular_pagado_alquiler(self.alquiler)
         self.assertEqual(total_pagado, Decimal('300.00'))
@@ -214,7 +221,8 @@ class PagosAlquilerTests(TestCase):
             make_alquiler(
                 garantia_tipo='efectivo',
                 garantia_monto=Decimal('500.00'),
-            )
+            ),
+            usuario=self.user,
         )
         # El alquiler de test no tiene garantía
         registrar_pago_alquiler(self.alquiler, Decimal('200'), 'efectivo', 'Pago', self.user)
@@ -241,22 +249,28 @@ class PagosAlquilerTests(TestCase):
 class PagosReparacionTests(TestCase):
 
     def setUp(self):
-        self.sesion = make_sesion_caja()
+        # WARNING 1 (reporte de verificación): `_liberar_pagos_reservados`
+        # ahora exige que `usuario` sea el dueño de la sesión abierta (antes
+        # no chequeaba dueño). La sesión de este setUp tiene que ser de
+        # `self.user`, no de un tercero, para que los tests que completan el
+        # saldo (y disparan la liberación) sigan pasando.
         self.user = make_user(username='cajero_rep')
+        self.sesion = make_sesion_caja(usuario=self.user)
         self.rep = make_reparacion(total=Decimal('150.00'))
 
     def test_reparacion_no_entregada_no_registra(self):
         self.rep.estado = 'pendiente'
         self.rep.save()
-        registrar_reparacion_en_caja(self.rep)
+        registrar_reparacion_en_caja(self.rep, usuario=self.user)
         self.assertEqual(
             _movs_activos(reparacion=self.rep, concepto='reparacion_cobro').count(), 0
         )
 
     def test_reparacion_entregada_registra_cobro(self):
         self.rep.estado = 'entregado'
+        self.rep._actor_caja = self.user
         self.rep.save()
-        registrar_reparacion_en_caja(self.rep)
+        registrar_reparacion_en_caja(self.rep, usuario=self.user)
         movs = _movs_activos(reparacion=self.rep, concepto='reparacion_cobro')
         self.assertEqual(movs.count(), 1)
         self.assertEqual(movs.first().monto, Decimal('150.00'))
@@ -264,16 +278,17 @@ class PagosReparacionTests(TestCase):
     def test_reparacion_entregada_total_cero_no_registra(self):
         rep = make_reparacion(total=Decimal('0'), estado='entregado')
         rep.save()
-        registrar_reparacion_en_caja(rep)
+        registrar_reparacion_en_caja(rep, usuario=self.user)
         self.assertEqual(
             _movs_activos(reparacion=rep, concepto='reparacion_cobro').count(), 0
         )
 
     def test_idempotente_reparacion_cobro(self):
         self.rep.estado = 'entregado'
+        self.rep._actor_caja = self.user
         self.rep.save()
-        registrar_reparacion_en_caja(self.rep)
-        registrar_reparacion_en_caja(self.rep)
+        registrar_reparacion_en_caja(self.rep, usuario=self.user)
+        registrar_reparacion_en_caja(self.rep, usuario=self.user)
         self.assertEqual(
             _movs_activos(reparacion=self.rep, concepto='reparacion_cobro').count(), 1
         )
@@ -300,7 +315,7 @@ class PagosReparacionTests(TestCase):
         from misastreria.models import Reparacion as _Rep
         _Rep.objects.filter(pk=self.rep.pk).update(estado='entregado')
         self.rep.refresh_from_db()
-        registrar_reparacion_en_caja(self.rep)   # creates reparacion_cobro=150
+        registrar_reparacion_en_caja(self.rep, usuario=self.user)   # creates reparacion_cobro=150
         registrar_pago_reparacion(self.rep, Decimal('50'), 'efectivo', 'P2', self.user)
         # cobro=150 + pago=50 = 200
         total = _calcular_pagado_reparacion(self.rep)
@@ -308,8 +323,9 @@ class PagosReparacionTests(TestCase):
 
     def test_saldo_pendiente_reparacion_con_cobro(self):
         self.rep.estado = 'entregado'
+        self.rep._actor_caja = self.user
         self.rep.save()
-        registrar_reparacion_en_caja(self.rep)
+        registrar_reparacion_en_caja(self.rep, usuario=self.user)
         # total=150, pagado=150 → saldo=0
         self.assertEqual(self.rep.saldo_pendiente, Decimal('0'))
 
@@ -325,7 +341,7 @@ class PagosReparacionTests(TestCase):
         rep = make_reparacion(total=Decimal('0'), estado='entregado')  # create → signal early-return
         make_reparacion_item(rep, costo=Decimal('150.00'))             # ítem real (como en la view)
         rep.recalcular_total()                 # update entregado→entregado, total→150 (como en la view)
-        registrar_reparacion_en_caja(rep)      # cobro explícito de la view
+        registrar_reparacion_en_caja(rep, usuario=self.user)      # cobro explícito de la view
         self.assertEqual(
             _movs_activos(reparacion=rep, concepto='reparacion_saldo').count(), 0,
             "No debe crearse reparacion_saldo al crear una reparación ya entregada")
@@ -342,8 +358,12 @@ class PagosReparacionTests(TestCase):
 class PagosConfeccionTests(TestCase):
 
     def setUp(self):
-        self.sesion = make_sesion_caja()
+        # WARNING 1: misma razón que en PagosReparacionTests.setUp — la
+        # sesión tiene que pertenecer a `self.user` para que
+        # `_liberar_pagos_reservados` (disparada al completar el saldo) no
+        # rechace por dueño ajeno.
         self.user = make_user(username='cajero_conf')
+        self.sesion = make_sesion_caja(usuario=self.user)
         self.conf = make_confeccion(precio=Decimal('600.00'), adelanto=Decimal('0'))
 
     def test_pago_confeccion_crea_movimiento(self):
@@ -382,6 +402,7 @@ class RegistrarVentaEnCajaTests(TestCase):
 
     def setUp(self):
         self.sesion = make_sesion_caja()
+        self.user = self.sesion.usuario_apertura
         self.venta = make_venta()
         # Agregar item para que tenga total > 0
         from misastreria.models import VentaItem
@@ -394,27 +415,26 @@ class RegistrarVentaEnCajaTests(TestCase):
         )
         self.venta.recalcular_totales()
 
-    def test_venta_sin_sesion_crea_mov_con_sesion_none(self):
-        """Sin sesión abierta, registrar_venta_en_caja crea movimiento con sesion=None.
-        El sistema no bloquea cobros fuera de sesión — permite registrarlos y asignarlos
-        manualmente a una sesión posterior.
-        """
+    def test_venta_sin_sesion_rechaza_el_cobro(self):
+        """Sin sesión abierta, registrar_venta_en_caja NO crea un movimiento
+        huérfano — levanta CajaSinSesionError (fix del bug de movimientos
+        huérfanos con sesion=None)."""
         self.sesion.estado = 'cerrada'
         self.sesion.save()
-        registrar_venta_en_caja(self.venta)
+        with self.assertRaises(CajaSinSesionError):
+            registrar_venta_en_caja(self.venta, usuario=self.user)
         mov = _movs_activos(venta=self.venta, concepto='venta_cobro').first()
-        self.assertIsNotNone(mov)
-        self.assertIsNone(mov.sesion)
+        self.assertIsNone(mov)
 
     def test_venta_con_sesion_crea_mov(self):
-        registrar_venta_en_caja(self.venta)
+        registrar_venta_en_caja(self.venta, usuario=self.user)
         movs = _movs_activos(venta=self.venta, concepto='venta_cobro')
         self.assertEqual(movs.count(), 1)
         self.assertEqual(movs.first().monto, Decimal('200.00'))
 
     def test_idempotente_venta(self):
-        registrar_venta_en_caja(self.venta)
-        registrar_venta_en_caja(self.venta)
+        registrar_venta_en_caja(self.venta, usuario=self.user)
+        registrar_venta_en_caja(self.venta, usuario=self.user)
         self.assertEqual(
             _movs_activos(venta=self.venta, concepto='venta_cobro').count(), 1
         )
@@ -428,11 +448,12 @@ class ReversarMovimientosTests(TestCase):
 
     def setUp(self):
         self.sesion = make_sesion_caja()
-        self.user = make_user(username='supervisor')
+        self.dueno = self.sesion.usuario_apertura
+        self.user = make_user(username='supervisor')  # Administrador: puede revertir vía supervisión
 
     def test_reversar_alquiler_crea_movimiento_reverso(self):
         alquiler = make_alquiler(total=Decimal('200.00'))
-        registrar_alquiler_en_caja(alquiler, adelanto=Decimal('200.00'))
+        registrar_alquiler_en_caja(alquiler, adelanto=Decimal('200.00'), usuario=self.dueno)
         mov = _movs_activos(alquiler=alquiler, concepto='alquiler_cobro').first()
         self.assertIsNotNone(mov)
 
@@ -447,7 +468,7 @@ class ReversarMovimientosTests(TestCase):
 
     def test_reversar_alquiler_crea_egreso(self):
         alquiler = make_alquiler(total=Decimal('300.00'))
-        registrar_alquiler_en_caja(alquiler, adelanto=Decimal('300.00'))
+        registrar_alquiler_en_caja(alquiler, adelanto=Decimal('300.00'), usuario=self.dueno)
         _reversar_movimientos_activos(
             referencia_field='referencia_alquiler',
             instance=alquiler,
@@ -462,18 +483,72 @@ class ReversarMovimientosTests(TestCase):
         self.assertEqual(reversados.first().tipo, 'egreso')
 
     def test_reversar_dos_veces_no_duplica(self):
+        """No importa el actor acá — usa el camino "sistema" (sin dueño),
+        el mismo que la red de seguridad `pre_delete`, porque lo único que
+        se está probando es la idempotencia del reverso."""
         alquiler = make_alquiler(total=Decimal('200.00'))
-        registrar_alquiler_en_caja(alquiler, adelanto=Decimal('200.00'))
-        _reversar_movimientos_activos(
+        registrar_alquiler_en_caja(alquiler, adelanto=Decimal('200.00'), usuario=self.dueno)
+        _reversar_movimientos_activos_sistema(
             referencia_field='referencia_alquiler', instance=alquiler
         )
-        _reversar_movimientos_activos(
+        _reversar_movimientos_activos_sistema(
             referencia_field='referencia_alquiler', instance=alquiler
         )
         reversados = CajaMovimiento.objects.filter(
             referencia_alquiler=alquiler, concepto='anulacion_cobro'
         )
         self.assertEqual(reversados.count(), 1)
+
+
+class ReversarMovimientosOwnershipTests(TestCase):
+    """WARNING 1 del reporte de verificación (regla confirmada por el dueño
+    del producto): revertir un movimiento existente exige ser el dueño de la
+    sesión abierta O un Administrador — no cualquiera que simplemente tenga
+    un `usuario` a mano. `usuario=None` (compatibilidad / red de seguridad
+    `pre_delete`) sigue sin chequear dueño, ver `ServicioPreDeleteReversaTests`
+    más abajo."""
+
+    def test_no_dueno_no_admin_no_puede_revertir(self):
+        cajero_a = make_cajero(username='cajero_a_rev')
+        make_sesion_caja(usuario=cajero_a)
+        alquiler = make_alquiler(total=Decimal('200.00'))
+        registrar_alquiler_en_caja(alquiler, adelanto=Decimal('200.00'), usuario=cajero_a)
+        vendedor = make_vendedor()
+
+        with self.assertRaises(TurnoCajaError):
+            _reversar_movimientos_activos(
+                referencia_field='referencia_alquiler', instance=alquiler, usuario=vendedor,
+            )
+        self.assertEqual(
+            CajaMovimiento.objects.filter(referencia_alquiler=alquiler, concepto='anulacion_cobro').count(), 0,
+        )
+
+    def test_dueno_si_puede_revertir(self):
+        cajero_a = make_cajero(username='cajero_a_rev2')
+        make_sesion_caja(usuario=cajero_a)
+        alquiler = make_alquiler(total=Decimal('200.00'))
+        registrar_alquiler_en_caja(alquiler, adelanto=Decimal('200.00'), usuario=cajero_a)
+
+        _reversar_movimientos_activos(
+            referencia_field='referencia_alquiler', instance=alquiler, usuario=cajero_a,
+        )
+        self.assertEqual(
+            CajaMovimiento.objects.filter(referencia_alquiler=alquiler, concepto='anulacion_cobro').count(), 1,
+        )
+
+    def test_admin_no_dueno_si_puede_revertir(self):
+        cajero_a = make_cajero(username='cajero_a_rev3')
+        make_sesion_caja(usuario=cajero_a)
+        alquiler = make_alquiler(total=Decimal('200.00'))
+        registrar_alquiler_en_caja(alquiler, adelanto=Decimal('200.00'), usuario=cajero_a)
+        admin = make_administrador(username='admin_rev3')
+
+        _reversar_movimientos_activos(
+            referencia_field='referencia_alquiler', instance=alquiler, usuario=admin,
+        )
+        self.assertEqual(
+            CajaMovimiento.objects.filter(referencia_alquiler=alquiler, concepto='anulacion_cobro').count(), 1,
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -485,6 +560,7 @@ class UniqueConstraintsCajaTests(TestCase):
     def setUp(self):
         self.sesion = make_sesion_caja()
 
+    @skipUnlessDBFeature('supports_partial_indexes')
     def test_no_puede_haber_dos_venta_cobro_activos(self):
         """Un venta_cobro activo por venta — el segundo debe fallar con UniqueConstraint."""
         venta = make_venta()
@@ -510,12 +586,13 @@ class UniqueConstraintsCajaTests(TestCase):
                 referencia_venta=venta,
             )
 
+    @skipUnlessDBFeature('supports_partial_indexes')
     def test_garantia_alquiler_duplicada_falla(self):
         """No puede haber dos garantia_alquiler activos para el mismo alquiler."""
         alquiler = make_alquiler(
             garantia_tipo='efectivo', garantia_monto=Decimal('300.00')
         )
-        registrar_garantia_alquiler_en_caja(alquiler)
+        registrar_garantia_alquiler_en_caja(alquiler, usuario=self.sesion.usuario_apertura)
         with self.assertRaises(Exception):
             CajaMovimiento.objects.create(
                 sesion=self.sesion,
@@ -538,6 +615,7 @@ class AjustarTotalEnCajaTests(TestCase):
 
     def setUp(self):
         self.sesion = make_sesion_caja()
+        self.user = self.sesion.usuario_apertura
 
     def _venta_en_proceso(self, total):
         """Venta sin cobro automático: se crea con total 0 (el signal no cobra)
@@ -556,6 +634,7 @@ class AjustarTotalEnCajaTests(TestCase):
             old_total=venta.total,
             forma_pago='efectivo',
             cliente=getattr(venta, 'cliente', None),
+            usuario=self.user,
         )
 
     def test_bajar_total_sin_pagos_no_crea_egreso(self):
@@ -576,7 +655,7 @@ class AjustarTotalEnCajaTests(TestCase):
         """Pago parcial 100, total 230→180: sigue habiendo saldo (80), no se
         devuelve nada."""
         venta = self._venta_en_proceso('230.00')
-        registrar_pago_venta(venta, Decimal('100.00'), 'efectivo', None, None)
+        registrar_pago_venta(venta, Decimal('100.00'), 'efectivo', None, self.user)
         self._ajustar(venta, Decimal('180.00'))
         self.assertEqual(
             _movs_activos(venta=venta, concepto='anulacion_cobro').count(), 0
@@ -586,7 +665,7 @@ class AjustarTotalEnCajaTests(TestCase):
     def test_bajar_total_por_debajo_de_lo_pagado_devuelve_exceso(self):
         """Pago parcial 100, total 230→80: el cliente sobrepagó 20, se devuelve."""
         venta = self._venta_en_proceso('230.00')
-        registrar_pago_venta(venta, Decimal('100.00'), 'efectivo', None, None)
+        registrar_pago_venta(venta, Decimal('100.00'), 'efectivo', None, self.user)
         self._ajustar(venta, Decimal('80.00'))
         anul = _movs_activos(venta=venta, concepto='anulacion_cobro')
         self.assertEqual(anul.count(), 1)
@@ -597,7 +676,7 @@ class AjustarTotalEnCajaTests(TestCase):
     def test_ajustar_dos_veces_es_idempotente(self):
         """Reejecutar el ajuste con el mismo total no acumula devoluciones."""
         venta = self._venta_en_proceso('230.00')
-        registrar_pago_venta(venta, Decimal('100.00'), 'efectivo', None, None)
+        registrar_pago_venta(venta, Decimal('100.00'), 'efectivo', None, self.user)
         self._ajustar(venta, Decimal('80.00'))
         self._ajustar(venta, Decimal('80.00'))
         self.assertEqual(
@@ -611,6 +690,7 @@ class AjustarTotalEnCajaTests(TestCase):
             referencia_field='referencia_reparacion', instance=rep,
             concepto_cobro='reparacion_ajuste', nuevo_total=Decimal('220.00'),
             old_total=Decimal('230.00'), forma_pago='efectivo',
+            usuario=self.user,
         )
         self.assertEqual(_movs_activos(reparacion=rep).count(), 0)
 
@@ -621,6 +701,7 @@ class AjustarTotalEnCajaTests(TestCase):
             referencia_field='referencia_alquiler', instance=alq,
             concepto_cobro='alquiler_ajuste', nuevo_total=Decimal('150.00'),
             old_total=Decimal('200.00'), forma_pago='efectivo',
+            usuario=self.user,
         )
         self.assertEqual(_movs_activos(alquiler=alq).count(), 0)
 
@@ -632,11 +713,12 @@ class AjustarTotalEnCajaTests(TestCase):
             total=Decimal('200.00'),
             garantia_tipo='efectivo', garantia_monto=Decimal('300.00'),
         )
-        registrar_garantia_alquiler_en_caja(alq)  # ingreso garantia 300
+        registrar_garantia_alquiler_en_caja(alq, usuario=self.user)  # ingreso garantia 300
         _ajustar_total_en_caja(
             referencia_field='referencia_alquiler', instance=alq,
             concepto_cobro='alquiler_ajuste', nuevo_total=Decimal('150.00'),
             old_total=Decimal('200.00'), forma_pago='efectivo',
+            usuario=self.user,
         )
         # No se devuelve nada: el alquiler no se pagó; la garantía es aparte.
         self.assertEqual(
@@ -646,6 +728,65 @@ class AjustarTotalEnCajaTests(TestCase):
         self.assertEqual(
             _movs_activos(alquiler=alq, concepto='garantia_alquiler').count(), 1
         )
+
+
+class AjustarTotalEnCajaOwnershipTests(TestCase):
+    """WARNING 2 (reporte de verificación): el egreso de devolución por
+    sobrepago (`anulacion_cobro`) tiene que respetar la regla de turno —
+    sólo el dueño de la sesión abierta puede generar movimientos en ella,
+    Administrador incluido — igual que cualquier otro cobro. Antes de este
+    fix, `_ajustar_total_en_caja` sólo chequeaba "hay sesión" (vía
+    `_crear_mov_auto`), no "es la mía": editar una venta de otro cajero
+    podía sacar plata del cajón de esa persona."""
+
+    def _venta_con_sobrepago(self, propietario):
+        from .factories import make_sesion_caja
+        make_sesion_caja(usuario=propietario)
+        venta = make_venta(total=Decimal('0'))
+        venta.total = Decimal('230.00')
+        venta.save(update_fields=['total'])
+        registrar_pago_venta(venta, Decimal('100.00'), 'efectivo', None, propietario)
+        return venta
+
+    def test_sin_usuario_no_exige_turno_es_rechazado_choke_point(self):
+        """Choke point de caja (tercera vuelta de sdd-verify): la
+        compatibilidad `usuario=None` que existía antes queda ELIMINADA a
+        propósito — `_ajustar_total_en_caja` ahora exige `usuario` siempre,
+        y `None` explícito se rechaza igual que "no es el dueño" (ver
+        `_crear_mov_auto`). Este test reemplaza al viejo
+        `test_sin_usuario_no_exige_turno_compatibilidad`, que asumía lo
+        contrario."""
+        propietario = make_user(username='dueno_compat', role='Cajero')
+        venta = self._venta_con_sobrepago(propietario)
+        with self.assertRaises(TurnoCajaError):
+            _ajustar_total_en_caja(
+                referencia_field='referencia_venta', instance=venta,
+                concepto_cobro='venta_ajuste', nuevo_total=Decimal('80.00'),
+                old_total=venta.total, forma_pago='efectivo', usuario=None,
+            )
+        self.assertEqual(_movs_activos(venta=venta, concepto='anulacion_cobro').count(), 0)
+
+    def test_usuario_ajeno_a_la_sesion_no_puede_generar_el_egreso(self):
+        dueno = make_user(username='dueno_ajuste', role='Cajero')
+        otro = make_user(username='otro_ajuste', role='Administrador')
+        venta = self._venta_con_sobrepago(dueno)
+        with self.assertRaises(TurnoCajaError):
+            _ajustar_total_en_caja(
+                referencia_field='referencia_venta', instance=venta,
+                concepto_cobro='venta_ajuste', nuevo_total=Decimal('80.00'),
+                old_total=venta.total, forma_pago='efectivo', usuario=otro,
+            )
+        self.assertEqual(_movs_activos(venta=venta, concepto='anulacion_cobro').count(), 0)
+
+    def test_dueno_de_la_sesion_si_puede(self):
+        dueno = make_user(username='dueno_ajuste2', role='Cajero')
+        venta = self._venta_con_sobrepago(dueno)
+        _ajustar_total_en_caja(
+            referencia_field='referencia_venta', instance=venta,
+            concepto_cobro='venta_ajuste', nuevo_total=Decimal('80.00'),
+            old_total=venta.total, forma_pago='efectivo', usuario=dueno,
+        )
+        self.assertEqual(_movs_activos(venta=venta, concepto='anulacion_cobro').count(), 1)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -677,7 +818,7 @@ class ServicioPreDeleteReversaTests(TestCase):
 
     def test_delete_directo_alquiler_reversa_pago(self):
         alq = make_alquiler(total=Decimal('200.00'))
-        registrar_pago_alquiler(alq, Decimal('100.00'), 'efectivo', 'cuota', None)
+        registrar_pago_alquiler(alq, Decimal('100.00'), 'efectivo', 'cuota', self.sesion.usuario_apertura)
         self.assertEqual(
             CajaMovimiento.objects.filter(
                 concepto='alquiler_pago', movimiento_reverso__isnull=True).count(), 1)

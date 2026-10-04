@@ -74,9 +74,11 @@
               <label for="id_fecha_baja" class="form-label">Fecha de Despido / Baja{% if not form.fecha_baja.field.required %} <span class="text-muted small">(Opcional)</span>{% endif %}</label>
               <div class="input-group">
                 {{ form.fecha_baja }}
+{% if not form.baja_bloqueada %}
                 <button type="button" class="btn btn-outline-secondary" data-clear-target="id_fecha_baja" title="Limpiar fecha (reactivar empleado)">
                   <i data-lucide="x"></i>
                 </button>
+                {% endif %}
               </div>
               <div class="form-text">Sin fecha = empleado activo.</div>
               {% if form.fecha_baja.errors %}<div class="invalid-feedback d-block">{{ form.fecha_baja.errors }}</div>{% endif %}

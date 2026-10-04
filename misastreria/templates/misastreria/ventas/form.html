@@ -129,6 +129,16 @@
   </div>
 
   {% if not venta %}
+  {% if not caja_turno_propio %}
+  <div class="alert alert-warning d-flex align-items-center gap-2 mb-3" role="alert">
+    <i data-lucide="lock" style="width:1rem;height:1rem;flex-shrink:0"></i>
+    <span>
+      <strong>No tenés un turno de caja propio abierto.</strong>
+      Podés crear la venta, pero el cobro se va a rechazar hasta que abras tu
+      turno (o registrés el pago con «Registrar en caja» desactivado).
+    </span>
+  </div>
+  {% endif %}
   <!-- Pago: una o varias formas de pago (pagos divididos) -->
   <div class="card mb-3">
     <div class="card-header d-flex align-items-center">

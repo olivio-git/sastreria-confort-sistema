@@ -169,9 +169,11 @@ class PagoComisionEmpleadoTests(TestCase):
 
     def test_segundo_pago_codigo_0002(self):
         emp = make_empleado()
-        PagoComisionEmpleado.objects.create(empleado=emp, monto=Decimal('100'), via_caja=False)
+        pago1 = PagoComisionEmpleado.objects.create(empleado=emp, monto=Decimal('100'), via_caja=False)
         pago2 = PagoComisionEmpleado.objects.create(empleado=emp, monto=Decimal('50'), via_caja=False)
-        self.assertEqual(pago2.codigo, 'COM-0002')
+        # Relativo al id del primero: el AUTO_INCREMENT de MySQL/MariaDB no se
+        # reinicia entre tests.
+        self.assertEqual(pago2.codigo, f'COM-{pago1.pk + 1:04d}')
 
     def test_str_pago_comision(self):
         emp = make_empleado(nombres='Carlos', apellido_paterno='Quispe')
@@ -181,3 +183,26 @@ class PagoComisionEmpleadoTests(TestCase):
         s = str(pago)
         self.assertIn('COM-0001', s)
         self.assertIn('200', s)
+
+
+class EmpleadoUserLinkTests(TestCase):
+    """La baja de un Empleado desactiva al User vinculado (si existe)."""
+
+    def test_baja_desactiva_usuario_vinculado_activo(self):
+        # Cajero: dar de baja al último Administrador activo está vedado (guard de dominio).
+        user = make_user(username='vinculado', role='Cajero')
+        emp = make_empleado(user=user)
+        self.assertTrue(user.is_active)
+
+        emp.fecha_baja = date(2024, 6, 1)
+        emp.save()
+
+        user.refresh_from_db()
+        self.assertFalse(user.is_active)
+
+    def test_baja_sin_usuario_vinculado_no_falla(self):
+        emp = make_empleado(user=None)
+        emp.fecha_baja = date(2024, 6, 1)
+        emp.save()  # no debe lanzar excepción
+        emp.refresh_from_db()
+        self.assertFalse(emp.activo)

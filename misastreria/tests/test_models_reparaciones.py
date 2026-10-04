@@ -17,7 +17,7 @@ from misastreria.models import Reparacion, ReparacionItem
 from .factories import (
     make_reparacion, make_reparacion_item,
     make_tipo_prenda, make_tipo_reparacion,
-    make_cliente, make_empleado,
+    make_cliente, make_empleado, make_sesion_caja,
 )
 
 
@@ -142,8 +142,13 @@ class ReparacionEstadoTests(TestCase):
         self.assertEqual(rep.estado, 'en_proceso')
 
     def test_cambio_a_entregado(self):
+        # total > 0 sin pagos: pasar a 'entregado' dispara reparacion_saldo
+        # (reparacion_to_caja) — necesita una caja abierta Y un actor (choke
+        # point de caja: `_crear_mov_auto` exige `usuario`).
+        sesion = make_sesion_caja()
         rep = make_reparacion()
         rep.estado = 'entregado'
+        rep._actor_caja = sesion.usuario_apertura
         rep.save()
         rep.refresh_from_db()
         self.assertEqual(rep.estado, 'entregado')

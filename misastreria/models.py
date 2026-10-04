@@ -7,6 +7,8 @@ from django.core.validators import EmailValidator, RegexValidator, MinValueValid
 from django.utils import timezone
 from django.core.exceptions import ValidationError
 
+from .roles import CUSTOM_PERMISSIONS
+
 
 MENSAJE_SIGLA_NUMERO = (
     '«%s» parece un número de corte. El número lo asigna el sistema solo; '
@@ -46,6 +48,42 @@ class TipoContrato(models.Model):
         return self.nombre
 
 
+class BajaNoPermitida(Exception):
+    """La baja del Empleado desactivaría al último Administrador activo."""
+
+
+def es_ultimo_administrador_activo(user_obj, bloquear=False):
+    """True si `user_obj` es Administrador activo y no hay ningún OTRO
+    Administrador activo en el sistema — el sistema quedaría sin nadie que
+    pueda gestionar usuarios si se lo desactiva o degrada.
+
+    `bloquear=True` (dentro de un `atomic`) toma SELECT ... FOR UPDATE sobre
+    las filas de los Administradores activos, en orden de pk, y decide con el
+    estado real de la base (no el del objeto en memoria): dos bajas
+    simultáneas se serializan y la segunda ya ve al otro inactivo. Sin el
+    lock ambas podían pasar el chequeo y dejar al sistema sin Administradores.
+    """
+    if not bloquear:
+        if not (user_obj.is_active and user_obj.groups.filter(name='Administrador').exists()):
+            return False
+        return not User.objects.filter(
+            groups__name='Administrador', is_active=True
+        ).exclude(pk=user_obj.pk).exists()
+    ids = list(User.objects.filter(
+        groups__name='Administrador', is_active=True,
+    ).values_list('pk', flat=True))
+    # El lock relee, en lectura "actual" (no la del snapshot de la transacción),
+    # AMBAS cosas: que siga activo y que siga en el grupo Administrador. Sin
+    # el join con el grupo, una degradación concurrente (quitarle el rol a
+    # otro Administrador) pasaba inadvertida: verify ronda 7, W2. MariaDB no
+    # soporta `FOR UPDATE OF`, así que el lock alcanza también a las filas de
+    # la tabla intermedia (justo lo que borra una degradación).
+    activos = set(User.objects.select_for_update().filter(
+        pk__in=ids, is_active=True, groups__name='Administrador',
+    ).order_by('pk').values_list('pk', flat=True))
+    return user_obj.pk in activos and not (activos - {user_obj.pk})
+
+
 class Empleado(models.Model):
     codigo = models.CharField(max_length=10, unique=True, blank=True, verbose_name="Código")
     ci = models.CharField(max_length=20, unique=True, null=True, blank=True, verbose_name="CI")
@@ -59,6 +97,10 @@ class Empleado(models.Model):
     fecha_baja = models.DateField(null=True, blank=True, verbose_name="Fecha de Baja")
     activo = models.BooleanField(default=True, verbose_name="Activo")
     creado = models.DateTimeField(auto_now_add=True, verbose_name="Fecha de Creación")
+    user = models.OneToOneField(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='empleado', verbose_name="Usuario del sistema",
+    )
 
     def save(self, *args, **kwargs):
         if not self.codigo:
@@ -71,7 +113,19 @@ class Empleado(models.Model):
             self.apellido_paterno = self.apellido_paterno.capitalize()
         if self.apellido_materno:
             self.apellido_materno = self.apellido_materno.capitalize()
-        super().save(*args, **kwargs)
+        # Guard de dominio: la baja desactiva al usuario vinculado, y ninguna
+        # ruta (vista, admin, shell) puede dejar al sistema sin Administrador.
+        # Chequeo, guardado y desactivación van en UNA transacción con el lock
+        # de los Administradores (ver `es_ultimo_administrador_activo`).
+        with transaction.atomic():
+            if self.fecha_baja and self.user_id and es_ultimo_administrador_activo(self.user, bloquear=True):
+                raise BajaNoPermitida(
+                    "No se puede dar de baja al empleado: su usuario es el último Administrador activo."
+                )
+            super().save(*args, **kwargs)
+            if self.fecha_baja and self.user_id and self.user.is_active:
+                self.user.is_active = False
+                self.user.save(update_fields=['is_active'])
 
     class Meta:
         verbose_name = "Empleado"
@@ -2370,3 +2424,31 @@ class ConfiguracionImpresora(models.Model):
         # Fija el pk para que no se pueda crear una segunda fila por descuido.
         self.pk = 1
         super().save(*args, **kwargs)
+
+
+class PerfilUsuario(models.Model):
+    """Datos de autorización del User que no pertenecen a `auth.User`.
+
+    Hoy sólo guarda el PIN de desbloqueo de caja (ver `misastreria/caja_turno.py`
+    y `misastreria/middleware.py::CajaPinMiddleware`). También es el ancla de
+    `Meta.permissions` para los permisos personalizados de `roles.py`: no todo
+    permiso mapea 1:1 a un modelo de negocio (ej. `registrar_cobro`,
+    `supervisar_caja`), así que viven acá en vez de forzarlos en un modelo que
+    no tiene nada que ver.
+    """
+    user = models.OneToOneField(
+        User, on_delete=models.CASCADE, related_name='perfil',
+        verbose_name="Usuario",
+    )
+    pin_hash = models.CharField(max_length=128, blank=True, default='', verbose_name="Hash del PIN")
+    pin_intentos_fallidos = models.PositiveSmallIntegerField(default=0, verbose_name="Intentos fallidos de PIN")
+    pin_bloqueado = models.BooleanField(default=False, verbose_name="PIN bloqueado")
+    pin_actualizado = models.DateTimeField(null=True, blank=True, verbose_name="PIN actualizado")
+
+    class Meta:
+        verbose_name = "Perfil de Usuario"
+        verbose_name_plural = "Perfiles de Usuario"
+        permissions = CUSTOM_PERMISSIONS
+
+    def __str__(self):
+        return f"Perfil de {self.user.username}"

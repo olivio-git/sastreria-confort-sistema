@@ -17,7 +17,7 @@ from django.test import TestCase, Client
 from django.urls import reverse
 
 from misastreria.views import _fmt_dt
-from .factories import make_user, make_sesion_caja, make_movimiento_caja
+from .factories import make_user, make_sesion_caja, make_movimiento_caja, desbloquear_caja_test
 
 
 # 2026-07-24 23:30 UTC == 2026-07-24 19:30 en La Paz (UTC-4).
@@ -46,6 +46,7 @@ class ExcelSesionCajaHoraLocalTests(TestCase):
         self.user   = make_user()
         self.client = Client()
         self.client.force_login(self.user)
+        desbloquear_caja_test(self.client, self.user)
         self.sesion = make_sesion_caja(
             usuario=self.user,
             monto_apertura=Decimal('100.00'),

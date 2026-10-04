@@ -1,0 +1,54 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Desbloquear Caja{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title">
+        <i data-lucide="lock" class="me-2 text-muted"></i>Desbloquear Caja
+      </h2>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+<div class="card" style="max-width:400px">
+  <div class="card-header">
+    <h3 class="card-title">Ingresá tu PIN</h3>
+  </div>
+  <div class="card-body">
+    {% if pin_bloqueado %}
+    <div class="alert alert-danger d-flex align-items-center">
+      <i data-lucide="triangle-alert" class="me-2"></i>
+      <div>PIN bloqueado por intentos fallidos. Pedile a un Administrador que lo resetee.</div>
+    </div>
+    {% else %}
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ next }}">
+      {% if form.non_field_errors %}
+      <div class="alert alert-danger">
+        {% for error in form.non_field_errors %}
+          <div>{{ error }}</div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <div class="mb-3">
+        <label class="form-label fw-semibold" for="{{ form.pin.id_for_label }}">PIN</label>
+        {{ form.pin }}
+        {% if form.pin.errors %}
+          <div class="text-danger small mt-1">{{ form.pin.errors.0 }}</div>
+        {% endif %}
+      </div>
+
+      <button type="submit" class="btn btn-success">
+        <i data-lucide="lock-open" class="me-1"></i>Desbloquear
+      </button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

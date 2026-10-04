@@ -12,7 +12,7 @@ from django.test import TestCase, Client
 from django.urls import reverse
 
 from misastreria.models import CajaSesion
-from .factories import make_user, make_sesion_caja
+from .factories import make_user, make_sesion_caja, desbloquear_caja_test
 
 
 class CerrarSesionCajaTests(TestCase):
@@ -21,6 +21,7 @@ class CerrarSesionCajaTests(TestCase):
         self.user = make_user()
         self.client = Client()
         self.client.force_login(self.user)
+        desbloquear_caja_test(self.client, self.user)
         self.sesion = make_sesion_caja(usuario=self.user, monto_apertura=Decimal('100.00'))
 
     def test_cierre_sin_monto_declarado_no_es_500(self):

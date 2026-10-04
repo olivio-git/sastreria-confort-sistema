@@ -8,9 +8,11 @@
       <h2 class="page-title"><i data-lucide="layers" class="me-2 text-muted"></i>Conjuntos</h2>
     </div>
     <div class="col-auto ms-auto">
+      {% if perms.misastreria.add_conjunto %}
       <a href="{% url 'crear_conjunto' %}" class="btn btn-success">
         <i data-lucide="plus"></i>Nuevo Conjunto
       </a>
+      {% endif %}
     </div>
   </div>
 </div>
@@ -71,10 +73,12 @@
         </td>
         <td>
           <div class="btn-actions">
+            {% if perms.misastreria.change_conjunto %}
             <a href="{% url 'editar_conjunto' conjunto.pk %}" class="btn btn-sm btn-icon btn-ghost-primary" title="Editar">
               <i data-lucide="pencil"></i>
             </a>
-            {% if conjunto.activo %}
+            {% endif %}
+            {% if conjunto.activo and perms.misastreria.delete_conjunto %}
             <a href="{% url 'eliminar_conjunto' conjunto.pk %}" class="btn btn-sm btn-icon btn-ghost-danger" title="Desactivar">
               <i data-lucide="x-circle"></i>
             </a>

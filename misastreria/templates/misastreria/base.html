@@ -30,7 +30,16 @@
     </div>
     <div class="page-body">
       <div class="container-xl">
-        {% if not caja_sesion_activa %}
+        {% if caja_abiertas_multiples %}
+        <div class="alert alert-danger d-flex align-items-center gap-2 mb-3" role="alert">
+          <i data-lucide="alert-triangle" style="width:1rem;height:1rem;flex-shrink:0"></i>
+          <span>
+            <strong>Hay más de una caja abierta.</strong>
+            No se pueden registrar cobros hasta que un Administrador cierre las que sobran.
+            <a href="{% url 'lista_sesiones_caja' %}" class="alert-link ms-1">Ver sesiones →</a>
+          </span>
+        </div>
+        {% elif not caja_sesion_activa %}
         <div class="alert alert-warning d-flex align-items-center gap-2 mb-3" role="alert">
           <i data-lucide="lock" style="width:1rem;height:1rem;flex-shrink:0"></i>
           <span>

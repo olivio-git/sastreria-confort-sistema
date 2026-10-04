@@ -14,7 +14,7 @@ from decimal import Decimal
 from django.test import TestCase
 
 from misastreria.models import Confeccion, ConfeccionItem
-from .factories import make_confeccion, make_cliente
+from .factories import make_confeccion, make_cliente, make_sesion_caja
 
 
 class ConfeccionAutoCodigoTests(TestCase):
@@ -45,22 +45,31 @@ class ConfeccionSaldoTests(TestCase):
         self.assertEqual(c.saldo, Decimal('500.00'))
 
     def test_saldo_con_adelanto_parcial(self):
+        # Un adelanto > 0 dispara confeccion_to_caja (crea confeccion_adelanto):
+        # necesita una caja abierta o el guard anti-huérfanos lo rechaza.
+        make_sesion_caja()
         c = make_confeccion(precio=Decimal('500.00'), adelanto=Decimal('200.00'))
         self.assertEqual(c.saldo, Decimal('300.00'))
 
     def test_saldo_pago_completo(self):
+        make_sesion_caja()
         c = make_confeccion(precio=Decimal('500.00'), adelanto=Decimal('500.00'))
         self.assertEqual(c.saldo, Decimal('0.00'))
 
     def test_saldo_se_actualiza_al_editar(self):
+        sesion = make_sesion_caja()
         c = make_confeccion(precio=Decimal('500.00'), adelanto=Decimal('0'))
         c.adelanto = Decimal('300.00')
+        # Incrementar el adelanto dispara confeccion_to_caja (choke point de
+        # caja: `_crear_mov_auto` exige un actor explícito).
+        c._actor_caja = sesion.usuario_apertura
         c.save()
         c.refresh_from_db()
         self.assertEqual(c.saldo, Decimal('200.00'))
 
     def test_saldo_puede_ser_negativo_si_adelanto_mayor(self):
         """El sistema no bloquea adelanto > precio (saldo negativo posible)."""
+        make_sesion_caja()
         c = make_confeccion(precio=Decimal('100.00'), adelanto=Decimal('150.00'))
         self.assertEqual(c.saldo, Decimal('-50.00'))
 
@@ -118,8 +127,13 @@ class ConfeccionEstadoTests(TestCase):
         self.assertEqual(c.estado, 'en_proceso')
 
     def test_cambio_estado_entregado(self):
+        # Con saldo pendiente > 0, pasar a 'entregado' dispara confeccion_saldo
+        # (confeccion_to_caja): necesita una caja abierta Y un actor (choke
+        # point de caja).
+        sesion = make_sesion_caja()
         c = make_confeccion()
         c.estado = 'entregado'
+        c._actor_caja = sesion.usuario_apertura
         c.save()
         self.assertEqual(c.estado, 'entregado')
 
@@ -148,6 +162,7 @@ class ConfeccionRecalcularPrecioTests(TestCase):
         self.assertEqual(c.precio, Decimal('370.00'))
 
     def test_saldo_se_recalcula_con_adelanto(self):
+        make_sesion_caja()
         c = make_confeccion(precio=Decimal('0'), adelanto=Decimal('100.00'), saldo=Decimal('0'))
         ConfeccionItem.objects.create(confeccion=c, costo=Decimal('370.00'))
         c.recalcular_precio()

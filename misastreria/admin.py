@@ -1,5 +1,8 @@
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.http import HttpResponseRedirect
+from .forms import EmpleadoForm
 from .models import (
+    BajaNoPermitida,
     Cliente, PrendaInventario, PrendaItem, Corte, Insumo,
     Venta, VentaItem, Alquiler, AlquilerItem, Transaccion,
     Reparacion, Empleado, Permiso, Falta, Confeccion,
@@ -12,11 +15,64 @@ from .kardex_events import (
     delete_eventos_alquiler, delete_eventos_venta,
 )
 
-admin.site.register(Reparacion)
-admin.site.register(Empleado)
+# `estado` (y `adelanto` de Confección) son de sólo lectura en el admin: un
+# cambio de estado a 'entregado' o de adelanto dispara escrituras de caja que
+# exigen un actor dueño del turno, y el admin no tiene ninguno — guardar ahí
+# terminaba en TurnoCajaError (500). Los estados se cambian desde las vistas
+# de la app, que sí identifican a quien actúa (ver caja_signals).
+
+@admin.register(Reparacion)
+class ReparacionAdmin(admin.ModelAdmin):
+    readonly_fields = ['estado']
+
+
+@admin.register(Confeccion)
+class ConfeccionAdmin(admin.ModelAdmin):
+    readonly_fields = ['estado', 'adelanto']
+
+
+class EmpleadoAdminForm(EmpleadoForm):
+    """Mismas reglas de baja que la app (`EmpleadoForm(actor=)`): no se da de
+    baja al último Administrador activo ni al propio usuario. Sin esto la baja
+    del último Administrador reventaba con un 500 (BajaNoPermitida) y un
+    superusuario podía darse de baja a sí mismo."""
+
+    class Meta(EmpleadoForm.Meta):
+        fields = '__all__'
+        widgets = {}
+        labels = {}
+        help_texts = {}
+
+
+@admin.register(Empleado)
+class EmpleadoAdmin(admin.ModelAdmin):
+    form = EmpleadoAdminForm
+
+    def get_form(self, request, obj=None, **kwargs):
+        Form = super().get_form(request, obj, **kwargs)
+        actor = request.user
+
+        class ActorForm(Form):
+            def __init__(self, *args, **kw):
+                kw['actor'] = actor
+                super().__init__(*args, **kw)
+
+        return ActorForm
+
+    def changeform_view(self, request, object_id=None, form_url='', extra_context=None):
+        # Último recurso: si el guard de dominio (`Empleado.save`) igual
+        # rechaza la baja —p. ej. una carrera entre dos Administradores—, se
+        # muestra un mensaje en vez de un 500. Se atrapa acá (fuera del atomic
+        # del admin) para que no quede un "se guardó correctamente" falso.
+        try:
+            return super().changeform_view(request, object_id, form_url, extra_context)
+        except BajaNoPermitida as exc:
+            messages.error(request, str(exc))
+            return HttpResponseRedirect(request.path)
+
+
 admin.site.register(Permiso)
 admin.site.register(Falta)
-admin.site.register(Confeccion)
 
 @admin.register(PrendaInventario)
 class PrendaInventarioAdmin(admin.ModelAdmin):
@@ -77,7 +133,7 @@ class VentaAdmin(admin.ModelAdmin):
     list_display  = ['codigo', 'fecha_venta', 'cliente', 'empleado', 'total']
     list_filter   = ['fecha_venta']
     search_fields = ['codigo', 'cliente__nombres', 'cliente__apellido_paterno']
-    readonly_fields = ['subtotal', 'total']
+    readonly_fields = ['subtotal', 'total', 'estado']
     list_per_page = 20
     inlines = [VentaItemInline]
 
@@ -101,7 +157,7 @@ class AlquilerAdmin(admin.ModelAdmin):
     search_fields = ['codigo', 'cliente__nombres']
     list_per_page = 20
     inlines       = [AlquilerItemInline]
-    readonly_fields = ['subtotal', 'total']
+    readonly_fields = ['subtotal', 'total', 'estado']
 
     def save_related(self, request, form, formsets, change):
         alquiler = form.instance
@@ -154,17 +210,37 @@ class CajaSesionAdmin(admin.ModelAdmin):
     list_display = ['id', 'fecha_apertura', 'estado', 'monto_apertura', 'diferencia', 'usuario_apertura']
     list_filter = ['estado']
     search_fields = ['id']
-    readonly_fields = ['creado', 'monto_cierre_sistema', 'diferencia']
+    readonly_fields = ['creado', 'monto_cierre_sistema', 'diferencia', 'estado']
     list_per_page = 20
+
+    def has_add_permission(self, request):
+        # Abrir una caja pasa por `abrir_sesion_caja` (lock + re-chequeo de
+        # "una sola abierta"); crearla desde el admin esquivaría ese control.
+        return False
 
 
 @admin.register(CajaMovimiento)
 class CajaMovimientoAdmin(admin.ModelAdmin):
+    """Sólo lectura: todo movimiento de caja se escribe a través de
+    `caja_signals._crear_mov_auto` / `_reversar_movimientos_activos*`, que
+    exigen y verifican un dueño (choke point,
+    architecture/caja-ownership-chokepoint). Permitir altas/ediciones/bajas
+    acá sería un bypass total de esa regla — un superusuario podría escribir
+    cualquier movimiento en cualquier sesión sin que nada lo chequee."""
     list_display = ['codigo', 'fecha', 'tipo', 'concepto', 'origen', 'forma_pago', 'monto', 'sesion']
     list_filter = ['tipo', 'concepto', 'origen', 'forma_pago']
     search_fields = ['codigo', 'descripcion']
     readonly_fields = ['codigo', 'creado', 'tipo']
     list_per_page = 20
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(PlantillaEtiqueta)

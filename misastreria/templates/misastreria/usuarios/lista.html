@@ -1,0 +1,171 @@
+{% extends 'misastreria/base.html' %}
+{% block titulo %}Usuarios{% endblock %}
+
+{% block page_header %}
+<div class="container-xl">
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <h2 class="page-title"><i data-lucide="user-cog" class="me-2 text-muted"></i>Usuarios</h2>
+    </div>
+    <div class="col-auto ms-auto">
+      <a href="{% url 'crear_usuario' %}" class="btn btn-success">
+        <i data-lucide="plus"></i>Nuevo Usuario
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenido %}
+<!-- Filtros -->
+<div class="card mb-3">
+  <div class="card-body">
+    <form method="get" class="row g-2 align-items-end">
+      <div class="col-12 col-md-4">
+        <label class="small mb-1 fw-semibold text-muted">Buscar</label>
+        <input type="text" name="q" class="form-control" placeholder="Usuario o empleado…"
+               value="{{ q }}" data-debounce="400">
+      </div>
+      <div class="col-12 col-sm-6 col-lg-3">
+        <label class="small mb-1 fw-semibold text-muted">Rol</label>
+        <select name="rol" class="form-select" data-debounce="0">
+          <option value="">Todos</option>
+          {% for r in roles_choices %}
+            <option value="{{ r }}" {% if rol == r %}selected{% endif %}>{{ r }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-sm-6 col-lg-2">
+        <label class="small mb-1 fw-semibold text-muted">Estado</label>
+        <select name="estado" class="form-select" data-debounce="0">
+          <option value="">Todos</option>
+          <option value="1" {% if estado == "1" %}selected{% endif %}>Activos</option>
+          <option value="0" {% if estado == "0" %}selected{% endif %}>Inactivos</option>
+        </select>
+      </div>
+      <div class="col-auto">
+        <a href="{% url 'lista_usuarios' %}" class="btn btn-outline-secondary">Limpiar</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Tabla -->
+<div class="card">
+  <div class="card-header">
+    <span class="text-muted small">{{ total }} usuario{{ total|pluralize }}</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table">
+      <thead>
+        <tr>
+          <th>Usuario</th>
+          <th>Empleado vinculado</th>
+          <th>Rol</th>
+          <th>Permisos adicionales</th>
+          <th>Estado</th>
+          <th>PIN de caja</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for usr in page_obj %}
+        <tr>
+          <td class="fw-semibold">{{ usr.username }}</td>
+          <td>{{ usr.empleado|default:"—" }}</td>
+          <td>
+            {% for g in usr.groups.all %}{{ g.name }}{% if not forloop.last %}, {% endif %}{% empty %}<span class="text-muted">Sin rol</span>{% endfor %}
+          </td>
+          <td>
+            {% if usr.extras_etiquetas %}
+              <a href="{% url 'permisos_usuario' usr.pk %}" class="text-reset"
+                 title="{{ usr.extras_etiquetas|join:', ' }}">
+                +{{ usr.extras_etiquetas|length }} adicional{{ usr.extras_etiquetas|length|pluralize:"es" }}
+              </a>
+              <div class="small text-muted">{{ usr.extras_etiquetas|join:", "|truncatechars:70 }}</div>
+            {% else %}<span class="text-muted">—</span>{% endif %}
+          </td>
+          <td>
+            {% if usr.is_active %}
+              <span class="badge-estado badge-activo">Activo</span>
+            {% else %}
+              <span class="badge-estado badge-inactivo">Inactivo</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if not usr.perfil or not usr.perfil.pin_hash %}
+              <span class="badge-estado badge-pendiente">Sin PIN</span>
+            {% elif usr.perfil.pin_bloqueado %}
+              <span class="badge-estado badge-inactivo">PIN bloqueado</span>
+            {% else %}
+              <span class="badge-estado badge-activo">Configurado</span>
+            {% endif %}
+          </td>
+          <td style="white-space:nowrap">
+            <div class="btn-actions">
+              <a href="{% url 'editar_usuario' usr.pk %}" class="btn btn-sm btn-icon btn-ghost-primary" title="Editar">
+                <i data-lucide="pencil"></i>
+              </a>
+              {% if usr.puede_recibir_extras %}
+              <a href="{% url 'permisos_usuario' usr.pk %}" class="btn btn-sm btn-icon btn-ghost-secondary" title="Permisos adicionales">
+                <i data-lucide="shield-check"></i>
+              </a>
+              {% endif %}
+              <form method="post" action="{% url 'resetear_pin_usuario' usr.pk %}" class="d-inline">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm btn-icon btn-ghost-secondary" title="Resetear PIN">
+                  <i data-lucide="key-round"></i>
+                </button>
+              </form>
+              <form method="post" action="{% url 'toggle_activo_usuario' usr.pk %}" class="d-inline">
+                {% csrf_token %}
+                {% if usr.is_active %}
+                <button type="submit" class="btn btn-sm btn-icon btn-ghost-danger" title="Desactivar">
+                  <i data-lucide="user-x"></i>
+                </button>
+                {% else %}
+                <button type="submit" class="btn btn-sm btn-icon btn-ghost-success" title="Activar">
+                  <i data-lucide="user-check"></i>
+                </button>
+                {% endif %}
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="7">
+            <div class="empty-state">
+              <i data-lucide="user-cog" style="width:2.5rem;height:2.5rem;opacity:.3;display:block;margin:0 auto .75rem"></i>
+              No hay usuarios que coincidan con el filtro.
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer d-flex align-items-center">
+    <p class="m-0 text-muted small">
+      {% if page_obj.paginator.num_pages > 1 %}
+        Mostrando <strong>{{ page_obj.start_index }}–{{ page_obj.end_index }}</strong> de <strong>{{ total }}</strong>
+      {% else %}
+        <strong>{{ total }}</strong> usuario{{ total|pluralize }}
+      {% endif %}
+    </p>
+    <nav class="ms-auto">
+      <ul class="pagination pagination-sm m-0">
+        {% if page_obj.has_previous %}
+          <li class="page-item"><a class="page-link" href="?page=1&q={{ q }}&rol={{ rol }}&estado={{ estado }}">«</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ q }}&rol={{ rol }}&estado={{ estado }}">‹</a></li>
+        {% endif %}
+        <li class="page-item active"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
+        {% if page_obj.has_next %}
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ q }}&rol={{ rol }}&estado={{ estado }}">›</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&q={{ q }}&rol={{ rol }}&estado={{ estado }}">»</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+  </div>
+</div>
+{% endblock %}
