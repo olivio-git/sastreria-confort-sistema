@@ -100,7 +100,9 @@ DATABASES = {
         'PORT': '3306',
         'OPTIONS': {
             'charset': 'utf8mb4',
-            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+            # El servidor del hosting crea las tablas MyISAM por defecto, que
+            # ignora transacciones y rollback: toda tabla nueva nace InnoDB.
+            'init_command': "SET sql_mode='STRICT_TRANS_TABLES', default_storage_engine=INNODB",
         },
     }
 }
